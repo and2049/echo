@@ -184,7 +184,9 @@ impl SpotifyWorker {
         })
     }
 
-    pub fn playback_item_from_playable(item: &rspotify::model::PlayableItem) -> Option<PlaybackItem> {
+    pub fn playback_item_from_playable(
+        item: &rspotify::model::PlayableItem,
+    ) -> Option<PlaybackItem> {
         match item {
             rspotify::model::PlayableItem::Track(track) => {
                 let id = track.id.as_ref()?.id().to_string();
@@ -208,31 +210,72 @@ impl SpotifyWorker {
                 duration_ms: episode.duration.num_milliseconds() as u32,
                 image_url: episode.images.first().map(|img| img.url.clone()),
             }),
-            rspotify::model::PlayableItem::Unknown(value) => Self::playback_item_from_unknown(value),
+            rspotify::model::PlayableItem::Unknown(value) => {
+                Self::playback_item_from_unknown(value)
+            }
         }
     }
 
     pub async fn playback_snapshot_from_client(
         client: &AuthCodeSpotify,
-    ) -> Result<Option<(bool, bool, u32, Option<PlaybackItem>)>> {
+    ) -> Result<
+        Option<(
+            bool,
+            bool,
+            String,
+            Option<u32>,
+            String,
+            u32,
+            Option<PlaybackItem>,
+        )>,
+    > {
         if let Some(playback) = client.current_playback(None, Some(PLAYBACK_TYPES)).await? {
             let is_playing = playback.is_playing;
             let is_shuffled = playback.shuffle_state;
+            let repeat_mode = Self::repeat_mode_label(playback.repeat_state);
+            let device_name = playback.device.name.clone();
+            let volume = playback.device.volume_percent;
             let progress_ms = playback.progress.unwrap_or_default().num_milliseconds() as u32;
             let item = playback
                 .item
                 .as_ref()
                 .and_then(Self::playback_item_from_playable);
 
-            return Ok(Some((is_playing, is_shuffled, progress_ms, item)));
+            return Ok(Some((
+                is_playing,
+                is_shuffled,
+                repeat_mode,
+                volume,
+                device_name,
+                progress_ms,
+                item,
+            )));
         }
 
         Ok(None)
     }
 
+    fn repeat_mode_label(repeat_state: rspotify::model::RepeatState) -> String {
+        match repeat_state {
+            rspotify::model::RepeatState::Track => "Track".to_string(),
+            rspotify::model::RepeatState::Context => "Context".to_string(),
+            rspotify::model::RepeatState::Off => "Off".to_string(),
+        }
+    }
+
     pub async fn sync_playback_state(
         &mut self,
-    ) -> Result<Option<(bool, bool, u32, Option<PlaybackItem>)>> {
+    ) -> Result<
+        Option<(
+            bool,
+            bool,
+            String,
+            Option<u32>,
+            String,
+            u32,
+            Option<PlaybackItem>,
+        )>,
+    > {
         if let Some(playback) = self
             .client
             .current_playback(None, Some(PLAYBACK_TYPES))
@@ -246,9 +289,14 @@ impl SpotifyWorker {
                 .as_ref()
                 .and_then(Self::playback_item_from_playable);
 
+            let repeat_mode = Self::repeat_mode_label(playback.repeat_state);
+
+            let device = &playback.device;
+            let volume = device.volume_percent;
+            let device_name = device.name.clone();
+
             // Auto-cache the device ID if we found an active playback
             if self.device_id.is_none() {
-                let device = &playback.device;
                 if device.name == "Echo TUI" {
                     self.device_id = device.id.clone();
                 }
@@ -257,6 +305,9 @@ impl SpotifyWorker {
             return Ok(Some((
                 is_playing,
                 is_shuffled,
+                repeat_mode,
+                volume,
+                device_name,
                 progress_ms,
                 item,
             )));
@@ -292,6 +343,18 @@ impl SpotifyWorker {
         Ok(())
     }
 
+    pub async fn set_repeat_mode(&mut self, state: rspotify::model::RepeatState) -> Result<()> {
+        let device = self.get_device_id().await;
+        self.client.repeat(state, device.as_deref()).await?;
+        Ok(())
+    }
+
+    pub async fn set_volume(&mut self, volume: u8) -> Result<()> {
+        let device = self.get_device_id().await;
+        self.client.volume(volume, device.as_deref()).await?;
+        Ok(())
+    }
+
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
         let page = self
             .client
@@ -299,7 +362,11 @@ impl SpotifyWorker {
             .await?;
         let mut out = Vec::new();
         for p in page.items {
-            let owner = p.owner.display_name.clone().unwrap_or_else(|| p.owner.id.id().to_string());
+            let owner = p
+                .owner
+                .display_name
+                .clone()
+                .unwrap_or_else(|| p.owner.id.id().to_string());
             out.push(Playlist {
                 id: p.id.id().to_string(),
                 name: p.name,
@@ -313,7 +380,7 @@ impl SpotifyWorker {
         use futures_util::StreamExt;
         let stream = self.client.current_user_saved_albums(None);
         let mut out = Vec::new();
-        
+
         let mut stream = Box::pin(stream);
         while let Some(item) = stream.next().await {
             if let Ok(saved_album) = item {
@@ -321,7 +388,12 @@ impl SpotifyWorker {
                 out.push(crate::models::Album {
                     id: album.id.id().to_string(),
                     name: album.name,
-                    artist: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    artist: album
+                        .artists
+                        .into_iter()
+                        .map(|a| a.name)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                 });
             }
             if out.len() >= 100 {
@@ -336,7 +408,7 @@ impl SpotifyWorker {
             use futures_util::StreamExt;
             let stream = self.client.current_user_saved_tracks(None);
             let mut out = Vec::new();
-            
+
             let mut stream = Box::pin(stream);
             while let Some(item) = stream.next().await {
                 if let Ok(saved_track) = item {
@@ -347,12 +419,17 @@ impl SpotifyWorker {
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         name: track.name,
-                        artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        artist: track
+                            .artists
+                            .into_iter()
+                            .map(|a| a.name)
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                     });
                 }
-                
+
                 if out.len() >= 100 {
                     break;
                 }
@@ -387,10 +464,7 @@ impl SpotifyWorker {
 
     pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
         let id = rspotify::model::AlbumId::from_id(album_id)?;
-        let page = self
-            .client
-            .album_track_manual(id, None, None, None)
-            .await?;
+        let page = self.client.album_track_manual(id, None, None, None).await?;
         let mut out = Vec::new();
         for track in page.items {
             if track.is_local {
@@ -412,34 +486,33 @@ impl SpotifyWorker {
         Ok(out)
     }
 
-    pub async fn play_track(&mut self, context_id: &str, track_id: &str, is_album: bool) -> Result<()> {
+    pub async fn play_track(
+        &mut self,
+        context_id: &str,
+        track_id: &str,
+        is_album: bool,
+    ) -> Result<()> {
         let target_device = self.get_device_id().await;
 
         if context_id == "LIKED_SONGS" {
-            let track_uri = rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
+            let track_uri =
+                rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
             let res = self
                 .client
-                .start_uris_playback(
-                    [track_uri],
-                    target_device.as_deref(),
-                    None,
-                    None,
-                )
+                .start_uris_playback([track_uri], target_device.as_deref(), None, None)
                 .await;
             res?;
             return Ok(());
         }
 
         let context_uri = if is_album {
-            rspotify::model::PlayContextId::Album(
-                rspotify::model::AlbumId::from_id(context_id)?,
-            )
+            rspotify::model::PlayContextId::Album(rspotify::model::AlbumId::from_id(context_id)?)
         } else {
-            rspotify::model::PlayContextId::Playlist(
-                rspotify::model::PlaylistId::from_id(context_id)?,
-            )
+            rspotify::model::PlayContextId::Playlist(rspotify::model::PlaylistId::from_id(
+                context_id,
+            )?)
         };
-        
+
         let track_uri =
             rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
         let offset = rspotify::model::Offset::Uri(track_uri.uri());

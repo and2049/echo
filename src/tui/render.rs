@@ -1,59 +1,48 @@
 use crate::app::{ActiveView, AppMode, AppState};
 use ratatui::{
-    backend::Backend,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph},
     Frame,
+    buffer::Buffer,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::Modifier,
+    text::{Line, Span},
+    widgets::{
+        Block, Borders, Cell, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    },
 };
+use unicode_width::UnicodeWidthStr;
 
 pub fn render_app(frame: &mut Frame, state: &AppState) {
+    fill_background(frame, state);
+
     if state.mode == AppMode::Setup {
         render_setup(frame, state);
         return;
     }
 
     if state.mode == AppMode::Authenticating {
-        render_authenticating(frame);
+        render_authenticating(frame, state);
         return;
     }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Header
-            Constraint::Min(0),    // Main content
-            Constraint::Length(7), // Track Info
-            Constraint::Length(1), // Progress bar
-            Constraint::Length(1), // Command bar
+            Constraint::Min(0),     // Main content
+            Constraint::Length(10), // Playback Bar (7 info + 1 pb + 2 border)
+            Constraint::Length(1),  // Command bar
         ])
         .split(frame.area());
 
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
-        .split(chunks[1]);
-
-    // Render Header
-    let mode_str = match state.mode {
-        AppMode::Setup => "SETUP",
-        AppMode::Authenticating => "AUTH",
-        AppMode::Normal => "NORMAL",
-        AppMode::Visual => "VISUAL",
-        AppMode::Command => "COMMAND",
-    };
-    let shuffle_str = if state.playback.is_shuffled {
-        " | SHUFFLE: ON "
-    } else {
-        ""
-    };
-    let header_text = Paragraph::new(Line::from(vec![Span::styled(
-        format!(" ECHO [{}] {} ", mode_str, shuffle_str),
-        Style::default().bg(Color::Blue).fg(Color::White),
-    )]))
-    .alignment(Alignment::Left);
-    frame.render_widget(header_text, chunks[0]);
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Length(1),
+            Constraint::Percentage(70),
+        ])
+        .split(chunks[0]);
+    let library_area = main_chunks[0];
+    let tracks_area = main_chunks[2];
 
     // Render Main Content
     let library_items: Vec<ListItem> = state
@@ -62,16 +51,21 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         .enumerate()
         .map(|(i, node)| {
             let style = if i == state.selected_playlist_index {
-                Style::default().bg(Color::White).fg(Color::Black)
+                state.active_theme.selected_style()
             } else {
-                Style::default()
+                state.active_theme.base_style()
             };
-            
+
             match node {
                 crate::models::LibraryNode::Folder(f) => {
                     let prefix = if f.is_open { "▼" } else { "▶" };
                     let text = format!("{} {}", prefix, f.name);
-                    ListItem::new(text).style(style.fg(Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD))
+                    let folder_style = if i == state.selected_playlist_index {
+                        style
+                    } else {
+                        state.active_theme.primary_style()
+                    };
+                    ListItem::new(text).style(folder_style.add_modifier(Modifier::BOLD))
                 }
                 crate::models::LibraryNode::Playlist { playlist, indent } => {
                     let mut prefix = String::new();
@@ -81,37 +75,46 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                     if state.library_config.pinned.contains(&playlist.id) {
                         prefix.push_str("📌 ");
                     }
-                    
+
                     let text = format!("{}{}", prefix, playlist.name);
-                    
+
                     // Mark as ghosted if it is in the cut register
                     let list_style = if state.operation_register.contains(&playlist.id) {
-                        style.fg(Color::DarkGray)
+                        style.fg(state.active_theme.text_muted)
                     } else {
                         style
                     };
-                    
+
                     ListItem::new(text).style(list_style)
                 }
             }
         })
         .collect();
     let is_focused = state.active_view == ActiveView::Library;
-    let title_color = if is_focused {
-        Color::Cyan
-    } else {
-        Color::White
-    };
-
     let title_text = match state.active_library_tab {
         crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
         crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
     };
 
+    let library_border_style = if is_focused {
+        state.active_theme.secondary_style()
+    } else {
+        state.active_theme.primary_style()
+    };
+
     let library_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(title_color))
+        .style(state.active_theme.base_style())
+        .border_style(library_border_style)
         .title(title_text);
+    let library_inner_area = library_block.inner(library_area);
+    let library_list_area = Rect::new(
+        library_inner_area.x,
+        library_inner_area.y,
+        library_inner_area.width.saturating_sub(1),
+        library_inner_area.height,
+    );
+    frame.render_widget(library_block, library_area);
 
     if state.active_library_tab == crate::app::LibraryTab::Albums {
         let items: Vec<ListItem> = state
@@ -120,59 +123,138 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             .enumerate()
             .map(|(i, album)| {
                 let style = if is_focused && i == state.selected_playlist_index {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    state.active_theme.selected_style()
                 } else {
-                    Style::default().fg(Color::White)
+                    state.active_theme.base_style()
                 };
-                ListItem::new(format!("{} - {}", album.name, album.artist)).style(style)
+                ListItem::new(album.name.clone()).style(style)
             })
             .collect();
-            
-        let list = List::new(items)
-            .block(library_block)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-            
+
+        let list = List::new(items).highlight_style(
+            state
+                .active_theme
+                .selected_style()
+                .add_modifier(Modifier::BOLD),
+        );
+
         let mut list_state = ListState::default();
         list_state.select(Some(state.selected_playlist_index));
-        frame.render_stateful_widget(list, main_chunks[0], &mut list_state);
+        frame.render_stateful_widget(list, library_list_area, &mut list_state);
+        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else {
-        let playlist_list = List::new(library_items).block(library_block);
+        let playlist_list = List::new(library_items);
         let mut playlist_state = ListState::default();
         playlist_state.select(Some(state.selected_playlist_index));
-        frame.render_stateful_widget(playlist_list, main_chunks[0], &mut playlist_state);
+        frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
+        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     }
 
-    let track_items: Vec<ListItem> = state
+    let format_time = |s: u32| format!("{}:{:02}", s / 60, s % 60);
+
+    let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
+
+    let track_rows: Vec<Row> = state
         .tracks
         .iter()
         .enumerate()
         .map(|(i, t)| {
             let style = if i == state.selected_track_index {
-                Style::default().bg(Color::White).fg(Color::Black)
+                state.active_theme.selected_style()
             } else {
-                Style::default()
+                state.active_theme.base_style()
             };
             let prefix = if Some(t.id.clone()) == state.playback.playing_track_id {
                 "▶ "
             } else {
                 ""
             };
-            ListItem::new(format!("{}{} - {}", prefix, t.name, t.artist)).style(style)
+
+            let track_cell = Cell::from(format!("{}{}", prefix, t.name));
+            let duration_cell = Cell::from(format_time(t.duration_ms / 1000));
+
+            let row = if is_albums_tab {
+                Row::new(vec![track_cell, duration_cell])
+            } else {
+                let artist_cell = Cell::from(t.artist.clone());
+                Row::new(vec![track_cell, artist_cell, duration_cell])
+            };
+
+            row.style(style)
         })
         .collect();
-    let track_style = if state.active_view == ActiveView::TrackList {
-        Style::default().fg(Color::Green)
+
+    let is_track_focused = state.active_view == ActiveView::TrackList;
+    let track_border_style = if is_track_focused {
+        state.active_theme.secondary_style()
     } else {
-        Style::default()
+        state.active_theme.primary_style()
     };
+
     let track_block = Block::default()
         .title(" Tracks ")
         .borders(Borders::ALL)
-        .border_style(track_style);
-    let track_list_widget = List::new(track_items).block(track_block);
-    let mut track_state = ratatui::widgets::ListState::default();
+        .style(state.active_theme.base_style())
+        .border_style(track_border_style);
+
+    let header_style = state.active_theme.table_header_style();
+
+    let table = if is_albums_tab {
+        let header = Row::new(vec!["Track", "Duration"])
+            .style(header_style)
+            .height(1);
+        Table::new(track_rows, [Constraint::Min(20), Constraint::Length(8)])
+            .column_spacing(1)
+            .header(header)
+            .block(track_block)
+    } else {
+        let header = Row::new(vec!["Track", "Artist", "Duration"])
+            .style(header_style)
+            .height(1);
+        Table::new(
+            track_rows,
+            [
+                Constraint::Percentage(45),
+                Constraint::Min(20),
+                Constraint::Length(8),
+            ],
+        )
+        .column_spacing(1)
+        .header(header)
+        .block(track_block)
+    };
+
+    let mut track_state = TableState::default();
     track_state.select(Some(state.selected_track_index));
-    frame.render_stateful_widget(track_list_widget, main_chunks[1], &mut track_state);
+    frame.render_stateful_widget(table, tracks_area, &mut track_state);
+
+    // Render Playback Bar Border
+    let shuffle_str = if state.playback.is_shuffled {
+        "On"
+    } else {
+        "Off"
+    };
+    let border_title = format!(
+        " Playing (Shuffle: {:<7} | Repeat: {:<7} | Volume: {:>3}%) ",
+        shuffle_str, state.playback.repeat_mode, state.playback.volume
+    );
+
+    let playback_block = Block::default()
+        .borders(Borders::ALL)
+        .style(state.active_theme.base_style())
+        .border_style(state.active_theme.primary_style())
+        .title(border_title);
+
+    let playback_inner = playback_block.inner(chunks[1]);
+    frame.render_widget(playback_block, chunks[1]);
+
+    let playback_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7), // Track Info
+            Constraint::Length(1), // Progress bar
+        ])
+        .split(playback_inner);
 
     // Render Progress Bar
     let pb = &state.playback;
@@ -185,8 +267,6 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let progress_sec = pb.progress_ms / 1000;
     let duration_sec = pb.duration_ms / 1000;
 
-    let format_time = |s: u32| format!("{}:{:02}", s / 60, s % 60);
-
     let progress_str = format_time(progress_sec);
     let duration_str = format_time(duration_sec);
 
@@ -197,17 +277,17 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             Constraint::Min(0),    // gauge
             Constraint::Length(6), // duration
         ])
-        .split(chunks[3]);
+        .split(playback_chunks[1]);
 
     let current_time_p = Paragraph::new(progress_str)
         .alignment(Alignment::Right)
-        .style(Style::default().fg(Color::White));
+        .style(state.active_theme.base_style());
     let total_time_p = Paragraph::new(duration_str)
         .alignment(Alignment::Left)
-        .style(Style::default().fg(Color::White));
+        .style(state.active_theme.base_style());
 
     let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(Color::White).bg(Color::DarkGray))
+        .gauge_style(state.active_theme.gauge_style())
         .ratio(ratio)
         .label(""); // hide inner text
 
@@ -231,7 +311,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             Constraint::Length(2),  // Middle gap to text
             Constraint::Min(0),     // Text width
         ])
-        .split(chunks[2]);
+        .split(playback_chunks[0]);
 
     if let Some(ref protocol) = state.playback.playing_track_image {
         let image = ratatui_image::Image::new(protocol);
@@ -246,7 +326,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
 
     // Create Title & Artist Text
     let track_title = if state.playback.playing_track_title.is_empty() {
-        "Not Playing".to_string()
+        String::new()
     } else {
         state.playback.playing_track_title.clone()
     };
@@ -256,46 +336,56 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let text_lines = vec![
         Line::from(Span::styled(
             track_title,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(ratatui::style::Modifier::BOLD),
+            state.active_theme.base_style().add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(
-            track_artist,
-            Style::default().fg(Color::DarkGray),
-        )),
+        Line::from(Span::styled(track_artist, state.active_theme.muted_style())),
     ];
     let track_text_p = Paragraph::new(text_lines)
         .alignment(Alignment::Left)
+        .style(state.active_theme.base_style())
         // Add top padding to vertically align with the center of the image
         .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
     frame.render_widget(track_text_p, track_info_chunks[3]);
 
     // Render Command Bar
-    let cmd_text = match state.mode {
-        AppMode::Command => format!(":{}", state.command_buffer),
-        _ => String::new(),
+    let (cmd_text, cmd_style) = match state.mode {
+        AppMode::Command => (
+            format!(":{}", state.command_buffer),
+            state.active_theme.base_style(),
+        ),
+        _ => (
+            state.status_message.clone().unwrap_or_default(),
+            state.active_theme.muted_style(),
+        ),
     };
-    let cmd_bar = Paragraph::new(cmd_text).style(Style::default());
-    frame.render_widget(cmd_bar, chunks[4]);
+    let cmd_bar = Paragraph::new(cmd_text).style(cmd_style);
+    frame.render_widget(cmd_bar, chunks[2]);
 
     if let Some(folder_name) = &state.folder_delete_prompt {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![
             Line::from(Span::styled(
-                format!("Are you sure you want to delete the folder '{}'?", folder_name),
-                Style::default().fg(Color::Red),
+                format!(
+                    "Are you sure you want to delete the folder '{}'?",
+                    folder_name
+                ),
+                state.active_theme.error_style(),
             )),
             Line::from(""),
             Line::from("Any playlists inside will be safely returned to the main library."),
             Line::from(""),
-            Line::from(Span::styled("Press 'y' to confirm or any other key to cancel.", Style::default().add_modifier(ratatui::style::Modifier::BOLD))),
+            Line::from(Span::styled(
+                "Press 'y' to confirm or any other key to cancel.",
+                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+            )),
         ])
+        .style(state.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Delete Folder ")
-                .style(Style::default().bg(Color::Black)),
+                .style(state.active_theme.base_style())
+                .border_style(state.active_theme.error_style()),
         )
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(ratatui::widgets::Wrap { trim: true });
@@ -309,7 +399,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         let popup_area = centered_rect(60, 30, frame.area());
         let popup = Paragraph::new(vec![
             Line::from("Spotify Connect Onboarding Required")
-                .style(Style::default().fg(Color::Yellow)),
+                .style(state.active_theme.secondary_style()),
             Line::from(""),
             Line::from("1. Open the official Spotify app on your phone or desktop."),
             Line::from("2. Tap the 'Devices' icon."),
@@ -317,17 +407,50 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             Line::from(""),
             Line::from("Once connected, Echo will automatically transition to normal operation!"),
         ])
+        .style(state.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Setup ")
-                .style(Style::default().bg(Color::Black)),
+                .style(state.active_theme.base_style())
+                .border_style(state.active_theme.secondary_style()),
         )
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(ratatui::widgets::Wrap { trim: true });
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
+    }
+}
+
+fn fill_background(frame: &mut Frame, state: &AppState) {
+    let area = frame.area();
+    let style = state.active_theme.base_style();
+    let buffer = frame.buffer_mut();
+    buffer.set_style(area, style);
+
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            buffer[(x, y)].set_symbol(" ");
+        }
+    }
+}
+
+fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
+    let area = buffer.area().intersection(area);
+
+    for y in area.top()..area.bottom() {
+        let mut x = area.left();
+        while x < area.right() {
+            let width = buffer[(x, y)].symbol().width() as u16;
+            if width > 1 {
+                let style = buffer[(x, y)].style();
+                for hidden_x in (x + 1)..x.saturating_add(width).min(area.right()) {
+                    buffer[(hidden_x, y)].set_style(style);
+                }
+            }
+            x = x.saturating_add(width.max(1));
+        }
     }
 }
 
@@ -356,10 +479,12 @@ fn centered_rect(
         .split(popup_layout[1])[1]
 }
 
-fn render_authenticating(frame: &mut Frame) {
+fn render_authenticating(frame: &mut Frame, state: &AppState) {
     let block = Block::default()
         .title(" Authenticating ")
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .style(state.active_theme.base_style())
+        .border_style(state.active_theme.primary_style());
     let text = vec![
         Line::from("Waiting for Spotify authentication..."),
         Line::from(
@@ -367,6 +492,7 @@ fn render_authenticating(frame: &mut Frame) {
         ),
     ];
     let paragraph = Paragraph::new(text)
+        .style(state.active_theme.base_style())
         .block(block)
         .alignment(Alignment::Center);
     frame.render_widget(paragraph, frame.area());
@@ -396,18 +522,20 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
 
     let block = Block::default()
         .title(" BYOK Setup (Bring Your Own Key) ")
-        .borders(Borders::ALL);
+        .borders(Borders::ALL)
+        .style(state.active_theme.base_style())
+        .border_style(state.active_theme.primary_style());
 
     let id_style = if !state.setup_focus_secret {
-        Style::default().fg(Color::Yellow)
+        state.active_theme.secondary_style()
     } else {
-        Style::default()
+        state.active_theme.base_style()
     };
 
     let secret_style = if state.setup_focus_secret {
-        Style::default().fg(Color::Yellow)
+        state.active_theme.secondary_style()
     } else {
-        Style::default()
+        state.active_theme.base_style()
     };
 
     let text = vec![
@@ -426,5 +554,91 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
     ];
 
     let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Left);
+    let paragraph = paragraph.style(state.active_theme.base_style());
     frame.render_widget(paragraph, setup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::repair_wide_grapheme_trailing_styles;
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Style},
+    };
+
+    fn render_row_text(text: &str, style: Style) -> Buffer {
+        let area = Rect::new(0, 0, 24, 1);
+        let mut buffer = Buffer::empty(area);
+        buffer.set_style(area, style);
+        buffer.set_string(0, 0, text, style);
+        buffer
+    }
+
+    #[test]
+    fn repairs_liked_songs_hidden_cell_style() {
+        let style = Style::default().fg(Color::White).bg(Color::Rgb(12, 34, 56));
+        let mut buffer = render_row_text("♥️ Liked Songs", style);
+
+        assert_eq!(buffer[(1, 0)].bg, Color::Reset);
+
+        repair_wide_grapheme_trailing_styles(&mut buffer, Rect::new(0, 0, 24, 1));
+
+        assert_eq!(buffer[(1, 0)].symbol(), " ");
+        assert_eq!(buffer[(1, 0)].fg, Color::White);
+        assert_eq!(buffer[(1, 0)].bg, Color::Rgb(12, 34, 56));
+    }
+
+    #[test]
+    fn repairs_pinned_playlist_hidden_cell_style() {
+        let style = Style::default().fg(Color::Cyan).bg(Color::Rgb(8, 9, 10));
+        let mut buffer = render_row_text("📌 Playlist", style);
+
+        assert_eq!(buffer[(1, 0)].bg, Color::Reset);
+
+        repair_wide_grapheme_trailing_styles(&mut buffer, Rect::new(0, 0, 24, 1));
+
+        assert_eq!(buffer[(1, 0)].symbol(), " ");
+        assert_eq!(buffer[(1, 0)].fg, Color::Cyan);
+        assert_eq!(buffer[(1, 0)].bg, Color::Rgb(8, 9, 10));
+    }
+
+    #[test]
+    fn leaves_ascii_playlist_names_unchanged() {
+        let style = Style::default().fg(Color::White).bg(Color::Rgb(1, 2, 3));
+        let mut buffer = render_row_text("Plain Playlist", style);
+        let original = buffer.clone();
+
+        repair_wide_grapheme_trailing_styles(&mut buffer, Rect::new(0, 0, 24, 1));
+
+        assert_eq!(buffer, original);
+    }
+
+    #[test]
+    fn preserves_selected_style_on_hidden_cells() {
+        let style = Style::default().fg(Color::Black).bg(Color::White);
+        let mut buffer = render_row_text("📌 Selected Playlist", style);
+
+        assert_eq!(buffer[(1, 0)].bg, Color::Reset);
+
+        repair_wide_grapheme_trailing_styles(&mut buffer, Rect::new(0, 0, 24, 1));
+
+        assert_eq!(buffer[(1, 0)].fg, Color::Black);
+        assert_eq!(buffer[(1, 0)].bg, Color::White);
+    }
+
+    #[test]
+    fn repair_does_not_cross_area_boundary() {
+        let selected = Style::default().fg(Color::Black).bg(Color::White);
+        let border = Style::default().fg(Color::Magenta).bg(Color::Rgb(1, 2, 3));
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 6, 1));
+        buffer[(3, 0)].set_symbol("📌").set_style(selected);
+        buffer[(4, 0)].set_symbol("│").set_style(border);
+
+        repair_wide_grapheme_trailing_styles(&mut buffer, Rect::new(1, 0, 3, 1));
+
+        assert_eq!(buffer[(4, 0)].symbol(), "│");
+        assert_eq!(buffer[(4, 0)].fg, Color::Magenta);
+        assert_eq!(buffer[(4, 0)].bg, Color::Rgb(1, 2, 3));
+    }
 }

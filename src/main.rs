@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
     });
 
     let config = config::AppConfig::load();
-    let mut state = AppState::default();
+    let mut state = AppState::new();
     state.library_config = config.library.clone();
 
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
@@ -91,6 +91,7 @@ async fn main() -> Result<()> {
     tui.enter()?;
 
     while state.is_running {
+        tui.apply_background(state.active_theme.background)?;
         tui.terminal.draw(|f| {
             tui::render::render_app(f, &state);
         })?;
@@ -171,11 +172,19 @@ async fn main() -> Result<()> {
                 WorkerEvent::SyncPlaybackState {
                     is_playing,
                     is_shuffled,
+                    repeat_mode,
+                    volume,
+                    device_name,
                     progress_ms,
                     item,
                 } => {
                     state.playback.is_playing = is_playing;
                     state.playback.is_shuffled = is_shuffled;
+                    state.playback.repeat_mode = repeat_mode;
+                    if let Some(volume) = volume {
+                        state.playback.volume = volume;
+                    }
+                    state.playback.device_name = device_name;
                     state.playback.progress_ms = progress_ms;
 
                     if let Some(item) = item {

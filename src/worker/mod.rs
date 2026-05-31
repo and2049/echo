@@ -34,7 +34,15 @@ impl Worker {
                 let result = SpotifyWorker::playback_snapshot_from_client(&client).await;
 
                 match result {
-                    Ok(Some((is_playing, is_shuffled, progress_ms, item))) => {
+                    Ok(Some((
+                        is_playing,
+                        is_shuffled,
+                        repeat_mode,
+                        volume,
+                        device_name,
+                        progress_ms,
+                        item,
+                    ))) => {
                         let item_id = item.as_ref().map(|item| item.id.clone());
                         if let Some(item) = item.as_ref() {
                             log.push_str(&format!(
@@ -61,6 +69,9 @@ impl Worker {
                                 .send(WorkerEvent::SyncPlaybackState {
                                     is_playing,
                                     is_shuffled,
+                                    repeat_mode,
+                                    volume,
+                                    device_name,
                                     progress_ms,
                                     item,
                                 })
@@ -96,12 +107,12 @@ impl Worker {
             tokio::select! {
                 _ = sync_interval.tick() => {
                     if let Some(ref mut sp) = spotify_opt {
-                        if let Ok(Some((playing, shuffled, progress_ms, item))) = sp.sync_playback_state().await {
+                        if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
                             is_playing = playing;
                             if let Some(item) = item.as_ref() {
                                 current_track_id = Some(item.id.clone());
                             }
-                            let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, progress_ms, item }).await;
+                            let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                         }
                     }
                 }
@@ -132,11 +143,11 @@ impl Worker {
                                                 let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                             }
                                             // Initial State Sync (Seamless Handoff)
-                                            if let Ok(Some((is_playing, is_shuffled, progress_ms, item))) = sp.sync_playback_state().await {
+                                            if let Ok(Some((is_playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
                                                 if let Some(item) = item.as_ref() {
                                                     current_track_id = Some(item.id.clone());
                                                 }
-                                                let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, progress_ms, item }).await;
+                                                let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                                             }
                                         }
                                     }
@@ -180,9 +191,24 @@ impl Worker {
                                     let _ = sp.toggle_playback(playing).await;
                                 }
                             }
-                            AppEvent::ToggleShuffle(shuffled) => {
+                            AppEvent::ToggleShuffle(is_shuffled) => {
                                 if let Some(ref mut sp) = spotify_opt {
-                                    let _ = sp.toggle_shuffle(shuffled).await;
+                                    let _ = sp.toggle_shuffle(is_shuffled).await;
+                                }
+                            }
+                            AppEvent::SetRepeatMode(mode) => {
+                                if let Some(ref mut sp) = spotify_opt {
+                                    let state = match mode.as_str() {
+                                        "Track" => rspotify::model::RepeatState::Track,
+                                        "Context" => rspotify::model::RepeatState::Context,
+                                        _ => rspotify::model::RepeatState::Off,
+                                    };
+                                    let _ = sp.set_repeat_mode(state).await;
+                                }
+                            }
+                            AppEvent::SetVolume(vol) => {
+                                if let Some(ref mut sp) = spotify_opt {
+                                    let _ = sp.set_volume(vol).await;
                                 }
                             }
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {

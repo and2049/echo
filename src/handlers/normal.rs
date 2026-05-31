@@ -5,10 +5,13 @@ use crossterm::event::{KeyCode, KeyEvent};
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     if let Some(folder_name) = state.folder_delete_prompt.clone() {
         if key.code == KeyCode::Char('y') {
-            state.library_config.folders.retain(|fd| fd.name != folder_name);
+            state
+                .library_config
+                .folders
+                .retain(|fd| fd.name != folder_name);
             state.save_library_config();
             state.compute_library_view();
-            
+
             // Adjust selection index if it goes out of bounds
             if state.selected_playlist_index >= state.library_view.len() {
                 state.selected_playlist_index = state.library_view.len().saturating_sub(1);
@@ -63,10 +66,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 } else {
                     if state.selected_playlist_index < state.library_view.len() {
                         match &state.library_view[state.selected_playlist_index] {
-                            crate::models::LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
+                            crate::models::LibraryNode::Playlist { playlist, .. } => {
+                                playlist.id.clone()
+                            }
                             crate::models::LibraryNode::Folder(f) => {
                                 let folder_name = f.name.clone();
-                                if let Some(folder) = state.library_config.folders.iter_mut().find(|fd| fd.name == folder_name) {
+                                if let Some(folder) = state
+                                    .library_config
+                                    .folders
+                                    .iter_mut()
+                                    .find(|fd| fd.name == folder_name)
+                                {
                                     folder.is_open = !folder.is_open;
                                 }
                                 state.save_library_config();
@@ -78,7 +88,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         String::new()
                     }
                 };
-                
+
                 if !context_id.is_empty() {
                     let is_album = state.active_library_tab == crate::app::LibraryTab::Albums;
                     state.active_view = ActiveView::TrackList;
@@ -98,14 +108,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     } else {
                         if state.selected_playlist_index < state.library_view.len() {
                             match &state.library_view[state.selected_playlist_index] {
-                                crate::models::LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
+                                crate::models::LibraryNode::Playlist { playlist, .. } => {
+                                    playlist.id.clone()
+                                }
                                 _ => String::new(),
                             }
                         } else {
                             String::new()
                         }
                     };
-                    
+
                     if !context_id.is_empty() {
                         return Some(AppEvent::PlayTrack {
                             context_id,
@@ -123,6 +135,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char(':') => {
             state.mode = crate::app::AppMode::Command;
             state.command_buffer.clear();
+            state.status_message = None;
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
             if state.active_view == ActiveView::Library {
@@ -138,7 +151,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
 
                             // Put in cut register
                             state.operation_register = vec![playlist.id.clone()];
-                            
+
                             // Remove from any folders
                             for f in &mut state.library_config.folders {
                                 f.playlists.retain(|id| id != &playlist.id);
@@ -167,7 +180,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     match node {
                         crate::models::LibraryNode::Folder(f) => {
                             let folder_name = f.name.clone();
-                            if let Some(folder) = state.library_config.folders.iter_mut().find(|fd| fd.name == folder_name) {
+                            if let Some(folder) = state
+                                .library_config
+                                .folders
+                                .iter_mut()
+                                .find(|fd| fd.name == folder_name)
+                            {
                                 for id in &state.operation_register {
                                     if !folder.playlists.contains(id) {
                                         folder.playlists.push(id.clone());
@@ -196,7 +214,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     return None;
                 }
                 if state.selected_playlist_index < state.library_view.len() {
-                    if let crate::models::LibraryNode::Playlist { playlist, .. } = &state.library_view[state.selected_playlist_index] {
+                    if let crate::models::LibraryNode::Playlist { playlist, .. } =
+                        &state.library_view[state.selected_playlist_index]
+                    {
                         let id = &playlist.id;
                         if id == "LIKED_SONGS" {
                             return None;
@@ -238,6 +258,35 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(AppEvent::PreviousTrack {
                 current_track_id: state.playback.playing_track_id.clone(),
             });
+        }
+        KeyCode::Char('r') => {
+            let next_mode = match state.playback.repeat_mode.as_str() {
+                "Off" => "Track",
+                "Track" => "Context",
+                _ => "Off",
+            };
+            state.playback.repeat_mode = next_mode.to_string();
+            return Some(AppEvent::SetRepeatMode(next_mode.to_string()));
+        }
+        KeyCode::Char('=') => {
+            let next_vol = (state.playback.volume + 1).min(100);
+            state.playback.volume = next_vol;
+            return Some(AppEvent::SetVolume(next_vol as u8));
+        }
+        KeyCode::Char('-') => {
+            let next_vol = state.playback.volume.saturating_sub(1);
+            state.playback.volume = next_vol;
+            return Some(AppEvent::SetVolume(next_vol as u8));
+        }
+        KeyCode::Char('+') => {
+            let next_vol = (state.playback.volume + 5).min(100);
+            state.playback.volume = next_vol;
+            return Some(AppEvent::SetVolume(next_vol as u8));
+        }
+        KeyCode::Char('_') => {
+            let next_vol = state.playback.volume.saturating_sub(5);
+            state.playback.volume = next_vol;
+            return Some(AppEvent::SetVolume(next_vol as u8));
         }
         KeyCode::Tab => {
             if state.active_view == ActiveView::Library {

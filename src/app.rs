@@ -1,6 +1,6 @@
 use crate::models::{Playlist, Track};
+use ratatui::style::{Color, Modifier, Style};
 
-#[derive(Default)]
 pub struct PlaybackState {
     pub is_playing: bool,
     pub is_shuffled: bool,
@@ -10,6 +10,86 @@ pub struct PlaybackState {
     pub playing_track_title: String,
     pub playing_track_artist: String,
     pub playing_track_image: Option<ratatui_image::protocol::Protocol>,
+    pub device_name: String,
+    pub repeat_mode: String,
+    pub volume: u32,
+}
+
+pub struct ResolvedTheme {
+    pub primary: Color,
+    pub secondary: Color,
+    pub background: Color,
+    pub text: Color,
+    pub text_muted: Color,
+    pub highlight_bg: Color,
+    pub highlight_fg: Color,
+    pub error: Color,
+}
+
+impl ResolvedTheme {
+    pub fn from_theme(theme: &crate::config::Theme) -> Self {
+        use std::str::FromStr;
+        Self {
+            primary: Color::from_str(&theme.primary).unwrap_or(Color::Cyan),
+            secondary: Color::from_str(&theme.secondary).unwrap_or(Color::Yellow),
+            background: Color::from_str(&theme.background).unwrap_or(Color::Reset),
+            text: Color::from_str(&theme.text).unwrap_or(Color::White),
+            text_muted: Color::from_str(&theme.text_muted).unwrap_or(Color::DarkGray),
+            highlight_bg: Color::from_str(&theme.highlight_bg).unwrap_or(Color::White),
+            highlight_fg: Color::from_str(&theme.highlight_fg).unwrap_or(Color::Black),
+            error: Color::from_str(&theme.error).unwrap_or(Color::Red),
+        }
+    }
+
+    pub fn base_style(&self) -> Style {
+        Style::default().fg(self.text).bg(self.background)
+    }
+
+    pub fn muted_style(&self) -> Style {
+        self.base_style().fg(self.text_muted)
+    }
+
+    pub fn primary_style(&self) -> Style {
+        self.base_style().fg(self.primary)
+    }
+
+    pub fn secondary_style(&self) -> Style {
+        self.base_style().fg(self.secondary)
+    }
+
+    pub fn error_style(&self) -> Style {
+        self.base_style().fg(self.error)
+    }
+
+    pub fn selected_style(&self) -> Style {
+        Style::default().fg(self.highlight_fg).bg(self.highlight_bg)
+    }
+
+    pub fn table_header_style(&self) -> Style {
+        self.primary_style().add_modifier(Modifier::BOLD)
+    }
+
+    pub fn gauge_style(&self) -> Style {
+        Style::default().fg(self.text).bg(self.text_muted)
+    }
+}
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self {
+            is_playing: false,
+            is_shuffled: false,
+            progress_ms: 0,
+            duration_ms: 0,
+            playing_track_id: None,
+            playing_track_title: String::new(),
+            playing_track_artist: String::new(),
+            playing_track_image: None,
+            device_name: "Echo TUI".to_string(),
+            repeat_mode: "Off".to_string(),
+            volume: 100,
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -44,6 +124,7 @@ pub struct AppState {
     pub active_library_tab: LibraryTab,
     pub operation_register: Vec<String>,
     pub command_buffer: String,
+    pub status_message: Option<String>,
     pub pending_d_press: bool,
     pub folder_delete_prompt: Option<String>,
     pub selected_playlist_index: usize,
@@ -54,21 +135,44 @@ pub struct AppState {
     pub setup_focus_secret: bool,
     pub image_picker: Option<ratatui_image::picker::Picker>,
     pub playback: PlaybackState,
+    pub themes: std::collections::HashMap<String, crate::config::Theme>,
+    pub active_theme: ResolvedTheme,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
+impl AppState {
+    pub fn new() -> Self {
+        let config = crate::config::AppConfig::load();
+
+        let themes = crate::config::load_themes().unwrap_or_else(|_| {
+            let mut fallback = std::collections::HashMap::new();
+            fallback.insert("default".to_string(), crate::config::Theme::default());
+            fallback
+        });
+
+        let active_theme_name = config
+            .library
+            .active_theme
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        let active_theme_config = themes
+            .get(&active_theme_name)
+            .unwrap_or(&crate::config::Theme::default())
+            .clone();
+
+        let active_theme = ResolvedTheme::from_theme(&active_theme_config);
+
         Self {
             mode: AppMode::Setup,
             active_view: ActiveView::Library,
             is_running: true,
             playlists: vec![],
-            library_config: crate::config::LibraryConfig::default(),
+            library_config: config.library,
             library_view: vec![],
             saved_albums: vec![],
             active_library_tab: LibraryTab::Playlists,
             operation_register: vec![],
             command_buffer: String::new(),
+            status_message: None,
             pending_d_press: false,
             folder_delete_prompt: None,
             selected_playlist_index: 0,
@@ -79,14 +183,16 @@ impl Default for AppState {
             setup_focus_secret: false,
             image_picker: None,
             playback: PlaybackState::default(),
+            themes,
+            active_theme,
         }
     }
 }
 
 impl AppState {
     pub fn compute_library_view(&mut self) {
-        use crate::models::LibraryNode;
         use crate::config::SortMode;
+        use crate::models::LibraryNode;
         use std::collections::HashSet;
 
         let mut view = Vec::new();
@@ -107,7 +213,10 @@ impl AppState {
         // 1. Pinned Playlists
         for pid in &self.library_config.pinned {
             if let Some(p) = self.playlists.iter().find(|p| &p.id == pid) {
-                view.push(LibraryNode::Playlist { playlist: p.clone(), indent: 0 });
+                view.push(LibraryNode::Playlist {
+                    playlist: p.clone(),
+                    indent: 0,
+                });
             }
         }
 
@@ -120,26 +229,38 @@ impl AppState {
             if folder.is_open {
                 for pid in &folder.playlists {
                     if let Some(p) = self.playlists.iter().find(|p| &p.id == pid) {
-                        view.push(LibraryNode::Playlist { playlist: p.clone(), indent: 1 });
+                        view.push(LibraryNode::Playlist {
+                            playlist: p.clone(),
+                            indent: 1,
+                        });
                     }
                 }
             }
         }
 
         // 3. Loose playlists
-        let mut loose: Vec<_> = self.playlists.iter()
+        let mut loose: Vec<_> = self
+            .playlists
+            .iter()
             .filter(|p| !pinned_set.contains(&p.id) && !folder_playlists.contains(&p.id))
             .cloned()
             .collect();
 
         match self.library_config.sort_mode {
-            SortMode::Alphabetical => loose.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase())),
-            SortMode::Creator => loose.sort_by(|a, b| a.owner.to_lowercase().cmp(&b.owner.to_lowercase())),
+            SortMode::Alphabetical => {
+                loose.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            }
+            SortMode::Creator => {
+                loose.sort_by(|a, b| a.owner.to_lowercase().cmp(&b.owner.to_lowercase()))
+            }
             SortMode::Default => {}
         }
 
         for p in loose {
-            view.push(LibraryNode::Playlist { playlist: p, indent: 0 });
+            view.push(LibraryNode::Playlist {
+                playlist: p,
+                indent: 0,
+            });
         }
 
         self.library_view = view;

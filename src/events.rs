@@ -23,6 +23,8 @@ pub enum AppEvent {
         current_track_id: Option<String>,
     },
     ToggleShuffle(bool),
+    SetRepeatMode(String),
+    SetVolume(u8),
     LoadTrackMetadata(String),
 }
 
@@ -38,6 +40,9 @@ pub enum WorkerEvent {
     SyncPlaybackState {
         is_playing: bool,
         is_shuffled: bool,
+        repeat_mode: String,
+        volume: Option<u32>,
+        device_name: String,
         progress_ms: u32,
         item: Option<PlaybackItem>,
     },

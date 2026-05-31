@@ -40,9 +40,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "sort" => {
                         if let Some(mode) = args.next() {
                             match mode {
-                                "alpha" => state.library_config.sort_mode = crate::config::SortMode::Alphabetical,
-                                "creator" => state.library_config.sort_mode = crate::config::SortMode::Creator,
-                                _ => state.library_config.sort_mode = crate::config::SortMode::Default,
+                                "alpha" => {
+                                    state.library_config.sort_mode =
+                                        crate::config::SortMode::Alphabetical
+                                }
+                                "creator" => {
+                                    state.library_config.sort_mode =
+                                        crate::config::SortMode::Creator
+                                }
+                                _ => {
+                                    state.library_config.sort_mode =
+                                        crate::config::SortMode::Default
+                                }
                             }
                             state.save_library_config();
                             state.compute_library_view();
@@ -50,13 +59,51 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "delfolder" => {
                         // Deletes currently selected folder
-                        if state.active_view == crate::app::ActiveView::Library && state.selected_playlist_index < state.library_view.len() {
-                            if let crate::models::LibraryNode::Folder(f) = &state.library_view[state.selected_playlist_index] {
+                        if state.active_view == crate::app::ActiveView::Library
+                            && state.selected_playlist_index < state.library_view.len()
+                        {
+                            if let crate::models::LibraryNode::Folder(f) =
+                                &state.library_view[state.selected_playlist_index]
+                            {
                                 let name = f.name.clone();
                                 state.library_config.folders.retain(|fd| fd.name != name);
                                 state.save_library_config();
                                 state.compute_library_view();
                             }
+                        }
+                    }
+                    "theme" => {
+                        if let Some(theme_name) = args.next() {
+                            if let Some(theme_config) = state.themes.get(theme_name) {
+                                state.active_theme =
+                                    crate::app::ResolvedTheme::from_theme(theme_config);
+                                state.library_config.active_theme = Some(theme_name.to_string());
+                                state.save_library_config();
+                                state.status_message = Some(format!("Theme: {}", theme_name));
+                            } else {
+                                let mut theme_names: Vec<&String> = state.themes.keys().collect();
+                                theme_names.sort();
+                                state.status_message = Some(format!(
+                                    "Unknown theme '{}'. Available: {}",
+                                    theme_name,
+                                    theme_names
+                                        .into_iter()
+                                        .map(String::as_str)
+                                        .collect::<Vec<&str>>()
+                                        .join(", ")
+                                ));
+                            }
+                        } else {
+                            let mut theme_names: Vec<&String> = state.themes.keys().collect();
+                            theme_names.sort();
+                            state.status_message = Some(format!(
+                                "Themes: {}",
+                                theme_names
+                                    .into_iter()
+                                    .map(String::as_str)
+                                    .collect::<Vec<&str>>()
+                                    .join(", ")
+                            ));
                         }
                     }
                     _ => {}

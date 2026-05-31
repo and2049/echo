@@ -1,0 +1,8 @@
+primary = "Cyan"
+secondary = "Yellow"
+background = "Reset"
+text = "White"
+text_muted = "DarkGray"
+highlight_bg = "White"
+highlight_fg = "Black"
+error = "Red"
