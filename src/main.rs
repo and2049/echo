@@ -32,7 +32,7 @@ fn spawn_track_image_processing(
                     if let Ok(dyn_img) = image::load_from_memory(&bytes) {
                         if let Ok(protocol) = picker_clone.new_protocol(
                             dyn_img,
-                            ratatui::layout::Size::new(14, 5),
+                            ratatui::layout::Size::new(10, 5),
                             ratatui_image::Resize::Fit(None),
                         ) {
                             return Some(protocol);

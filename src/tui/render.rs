@@ -23,7 +23,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         .constraints([
             Constraint::Length(1), // Header
             Constraint::Min(0),    // Main content
-            Constraint::Length(5), // Track Info
+            Constraint::Length(7), // Track Info
             Constraint::Length(1), // Progress bar
             Constraint::Length(1), // Command bar
         ])
@@ -166,14 +166,22 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let track_info_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(14), // Image width
+            Constraint::Length(2),  // Left padding
+            Constraint::Length(10), // Image width
+            Constraint::Length(2),  // Middle gap to text
             Constraint::Min(0),     // Text width
         ])
         .split(chunks[2]);
 
     if let Some(ref protocol) = state.playback.playing_track_image {
         let image = ratatui_image::Image::new(protocol);
-        frame.render_widget(image, track_info_chunks[0]);
+        let mut image_area = track_info_chunks[1];
+        // Center vertically in the 7-row tall block (1 row top padding, 1 row bottom padding)
+        if image_area.height >= 7 {
+            image_area.y += 1;
+            image_area.height = 5;
+        }
+        frame.render_widget(image, image_area);
     }
 
     // Create Title & Artist Text
@@ -199,8 +207,9 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     ];
     let track_text_p = Paragraph::new(text_lines)
         .alignment(Alignment::Left)
-        .block(Block::default().padding(ratatui::widgets::Padding::new(1, 0, 1, 0)));
-    frame.render_widget(track_text_p, track_info_chunks[1]);
+        // Add top padding to vertically align with the center of the image
+        .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
+    frame.render_widget(track_text_p, track_info_chunks[3]);
 
     // Render Command Bar
     let cmd_text = match state.mode {
