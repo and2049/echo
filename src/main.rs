@@ -126,6 +126,9 @@ async fn main() -> Result<()> {
                     state.playlists = playlists;
                     state.compute_library_view();
                 }
+                WorkerEvent::AlbumsLoaded(albums) => {
+                    state.saved_albums = albums;
+                }
                 WorkerEvent::TracksLoaded(tracks) => {
                     state.tracks = tracks;
                     state.active_view = app::ActiveView::TrackList;

@@ -3,10 +3,11 @@ use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
     Key(KeyEvent),
-    LoadPlaylistTracks(String),
+    LoadContextTracks(String, bool),
     PlayTrack {
-        playlist_id: String,
+        context_id: String,
         track_id: String,
+        is_album: bool,
         title: String,
         artist: String,
         duration_ms: u32,
@@ -29,6 +30,7 @@ pub enum WorkerEvent {
     Tick,
     AuthenticationComplete,
     PlaylistsLoaded(Vec<Playlist>),
+    AlbumsLoaded(Vec<crate::models::Album>),
     TracksLoaded(Vec<Track>),
     PlaybackStarted {
         item: PlaybackItem,

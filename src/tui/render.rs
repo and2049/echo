@@ -1,10 +1,11 @@
 use crate::app::{ActiveView, AppMode, AppState};
 use ratatui::{
-    Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
-    style::{Color, Style},
+    backend::Backend,
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 pub fn render_app(frame: &mut Frame, state: &AppState) {
@@ -95,19 +96,51 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             }
         })
         .collect();
-    let library_style = if state.active_view == ActiveView::Library {
-        Style::default().fg(Color::Green)
+    let is_focused = state.active_view == ActiveView::Library;
+    let title_color = if is_focused {
+        Color::Cyan
     } else {
-        Style::default()
+        Color::White
     };
-    let playlist_block = Block::default()
-        .title(" Library (Playlists) ")
+
+    let title_text = match state.active_library_tab {
+        crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
+        crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
+    };
+
+    let library_block = Block::default()
         .borders(Borders::ALL)
-        .border_style(library_style);
-    let playlist_list = List::new(library_items).block(playlist_block);
-    let mut playlist_state = ratatui::widgets::ListState::default();
-    playlist_state.select(Some(state.selected_playlist_index));
-    frame.render_stateful_widget(playlist_list, main_chunks[0], &mut playlist_state);
+        .border_style(Style::default().fg(title_color))
+        .title(title_text);
+
+    if state.active_library_tab == crate::app::LibraryTab::Albums {
+        let items: Vec<ListItem> = state
+            .saved_albums
+            .iter()
+            .enumerate()
+            .map(|(i, album)| {
+                let style = if is_focused && i == state.selected_playlist_index {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(format!("{} - {}", album.name, album.artist)).style(style)
+            })
+            .collect();
+            
+        let list = List::new(items)
+            .block(library_block)
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+            
+        let mut list_state = ListState::default();
+        list_state.select(Some(state.selected_playlist_index));
+        frame.render_stateful_widget(list, main_chunks[0], &mut list_state);
+    } else {
+        let playlist_list = List::new(library_items).block(library_block);
+        let mut playlist_state = ListState::default();
+        playlist_state.select(Some(state.selected_playlist_index));
+        frame.render_stateful_widget(playlist_list, main_chunks[0], &mut playlist_state);
+    }
 
     let track_items: Vec<ListItem> = state
         .tracks

@@ -309,7 +309,57 @@ impl SpotifyWorker {
         Ok(out)
     }
 
+    pub async fn fetch_albums(&self) -> Result<Vec<crate::models::Album>> {
+        use futures_util::StreamExt;
+        let stream = self.client.current_user_saved_albums(None);
+        let mut out = Vec::new();
+        
+        let mut stream = Box::pin(stream);
+        while let Some(item) = stream.next().await {
+            if let Ok(saved_album) = item {
+                let album = saved_album.album;
+                out.push(crate::models::Album {
+                    id: album.id.id().to_string(),
+                    name: album.name,
+                    artist: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                });
+            }
+            if out.len() >= 100 {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     pub async fn fetch_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
+        if playlist_id == "LIKED_SONGS" {
+            use futures_util::StreamExt;
+            let stream = self.client.current_user_saved_tracks(None);
+            let mut out = Vec::new();
+            
+            let mut stream = Box::pin(stream);
+            while let Some(item) = stream.next().await {
+                if let Ok(saved_track) = item {
+                    let track = saved_track.track;
+                    if track.is_local {
+                        continue;
+                    }
+                    out.push(Track {
+                        id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                        name: track.name,
+                        artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        duration_ms: track.duration.num_milliseconds() as u32,
+                        image_url: track.album.images.first().map(|img| img.url.clone()),
+                    });
+                }
+                
+                if out.len() >= 100 {
+                    break;
+                }
+            }
+            return Ok(out);
+        }
+
         let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
         let page = self
             .client
@@ -335,12 +385,61 @@ impl SpotifyWorker {
         Ok(out)
     }
 
-    pub async fn play_track(&mut self, playlist_id: &str, track_id: &str) -> Result<()> {
+    pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
+        let id = rspotify::model::AlbumId::from_id(album_id)?;
+        let page = self
+            .client
+            .album_track_manual(id, None, None, None)
+            .await?;
+        let mut out = Vec::new();
+        for track in page.items {
+            if track.is_local {
+                continue;
+            }
+            out.push(Track {
+                id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                name: track.name,
+                artist: track
+                    .artists
+                    .into_iter()
+                    .map(|a| a.name)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                duration_ms: track.duration.num_milliseconds() as u32,
+                image_url: None, // Simplified tracks don't have images directly, normally it inherits from the album, we can omit it or pass it down later
+            });
+        }
+        Ok(out)
+    }
+
+    pub async fn play_track(&mut self, context_id: &str, track_id: &str, is_album: bool) -> Result<()> {
         let target_device = self.get_device_id().await;
 
-        let context_uri = rspotify::model::PlayContextId::Playlist(
-            rspotify::model::PlaylistId::from_id(playlist_id)?,
-        );
+        if context_id == "LIKED_SONGS" {
+            let track_uri = rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
+            let res = self
+                .client
+                .start_uris_playback(
+                    [track_uri],
+                    target_device.as_deref(),
+                    None,
+                    None,
+                )
+                .await;
+            res?;
+            return Ok(());
+        }
+
+        let context_uri = if is_album {
+            rspotify::model::PlayContextId::Album(
+                rspotify::model::AlbumId::from_id(context_id)?,
+            )
+        } else {
+            rspotify::model::PlayContextId::Playlist(
+                rspotify::model::PlaylistId::from_id(context_id)?,
+            )
+        };
+        
         let track_uri =
             rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
         let offset = rspotify::model::Offset::Uri(track_uri.uri());

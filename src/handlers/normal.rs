@@ -25,7 +25,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
         KeyCode::Char('j') => match state.active_view {
             ActiveView::Library => {
-                if state.selected_playlist_index < state.library_view.len().saturating_sub(1) {
+                let max_len = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                    state.saved_albums.len()
+                } else {
+                    state.library_view.len()
+                };
+                if max_len > 0 && state.selected_playlist_index < max_len.saturating_sub(1) {
                     state.selected_playlist_index += 1;
                 }
             }
@@ -49,37 +54,63 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         },
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('z') => {
             if state.active_view == ActiveView::Library {
-                if state.selected_playlist_index < state.library_view.len() {
-                    let node = &state.library_view[state.selected_playlist_index];
-                    match node {
-                        crate::models::LibraryNode::Playlist { playlist, .. } => {
-                            let playlist_id = playlist.id.clone();
-                            state.active_view = ActiveView::TrackList;
-                            state.tracks.clear();
-                            state.selected_track_index = 0;
-                            return Some(AppEvent::LoadPlaylistTracks(playlist_id));
-                        }
-                        crate::models::LibraryNode::Folder(f) => {
-                            let folder_name = f.name.clone();
-                            if let Some(folder) = state.library_config.folders.iter_mut().find(|fd| fd.name == folder_name) {
-                                folder.is_open = !folder.is_open;
-                            }
-                            state.save_library_config();
-                            state.compute_library_view();
-                        }
+                let context_id = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                    if state.selected_playlist_index < state.saved_albums.len() {
+                        state.saved_albums[state.selected_playlist_index].id.clone()
+                    } else {
+                        String::new()
                     }
+                } else {
+                    if state.selected_playlist_index < state.library_view.len() {
+                        match &state.library_view[state.selected_playlist_index] {
+                            crate::models::LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
+                            crate::models::LibraryNode::Folder(f) => {
+                                let folder_name = f.name.clone();
+                                if let Some(folder) = state.library_config.folders.iter_mut().find(|fd| fd.name == folder_name) {
+                                    folder.is_open = !folder.is_open;
+                                }
+                                state.save_library_config();
+                                state.compute_library_view();
+                                String::new()
+                            }
+                        }
+                    } else {
+                        String::new()
+                    }
+                };
+                
+                if !context_id.is_empty() {
+                    let is_album = state.active_library_tab == crate::app::LibraryTab::Albums;
+                    state.active_view = ActiveView::TrackList;
+                    state.tracks.clear();
+                    state.selected_track_index = 0;
+                    return Some(AppEvent::LoadContextTracks(context_id, is_album));
                 }
             } else if state.active_view == ActiveView::TrackList {
                 if state.selected_track_index < state.tracks.len() {
                     let track = &state.tracks[state.selected_track_index];
-                    let playlist_id = match &state.library_view[state.selected_playlist_index] {
-                        crate::models::LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
-                        _ => String::new(),
+                    let context_id = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                        if state.selected_playlist_index < state.saved_albums.len() {
+                            state.saved_albums[state.selected_playlist_index].id.clone()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        if state.selected_playlist_index < state.library_view.len() {
+                            match &state.library_view[state.selected_playlist_index] {
+                                crate::models::LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
+                                _ => String::new(),
+                            }
+                        } else {
+                            String::new()
+                        }
                     };
-                    if !playlist_id.is_empty() {
+                    
+                    if !context_id.is_empty() {
                         return Some(AppEvent::PlayTrack {
-                            playlist_id,
+                            context_id,
                             track_id: track.id.clone(),
+                            is_album: state.active_library_tab == crate::app::LibraryTab::Albums,
                             title: track.name.clone(),
                             artist: track.artist.clone(),
                             duration_ms: track.duration_ms,
@@ -95,9 +126,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
             if state.active_view == ActiveView::Library {
+                if state.active_library_tab == crate::app::LibraryTab::Albums {
+                    return None;
+                }
                 if state.selected_playlist_index < state.library_view.len() {
                     match &state.library_view[state.selected_playlist_index] {
                         crate::models::LibraryNode::Playlist { playlist, .. } => {
+                            if playlist.id == "LIKED_SONGS" {
+                                return None;
+                            }
+
                             // Put in cut register
                             state.operation_register = vec![playlist.id.clone()];
                             
@@ -154,9 +192,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('m') => {
             if state.active_view == ActiveView::Library {
+                if state.active_library_tab == crate::app::LibraryTab::Albums {
+                    return None;
+                }
                 if state.selected_playlist_index < state.library_view.len() {
                     if let crate::models::LibraryNode::Playlist { playlist, .. } = &state.library_view[state.selected_playlist_index] {
                         let id = &playlist.id;
+                        if id == "LIKED_SONGS" {
+                            return None;
+                        }
                         if state.library_config.pinned.contains(id) {
                             state.library_config.pinned.retain(|p| p != id);
                         } else {
@@ -194,6 +238,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(AppEvent::PreviousTrack {
                 current_track_id: state.playback.playing_track_id.clone(),
             });
+        }
+        KeyCode::Tab => {
+            if state.active_view == ActiveView::Library {
+                state.active_library_tab = match state.active_library_tab {
+                    crate::app::LibraryTab::Playlists => crate::app::LibraryTab::Albums,
+                    crate::app::LibraryTab::Albums => crate::app::LibraryTab::Playlists,
+                };
+                state.selected_playlist_index = 0;
+            }
         }
         _ => {}
     }

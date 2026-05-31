@@ -27,6 +27,12 @@ pub enum AppMode {
     Command,
 }
 
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum LibraryTab {
+    Playlists,
+    Albums,
+}
+
 pub struct AppState {
     pub mode: AppMode,
     pub active_view: ActiveView,
@@ -34,6 +40,8 @@ pub struct AppState {
     pub playlists: Vec<Playlist>,
     pub library_config: crate::config::LibraryConfig,
     pub library_view: Vec<crate::models::LibraryNode>,
+    pub saved_albums: Vec<crate::models::Album>,
+    pub active_library_tab: LibraryTab,
     pub operation_register: Vec<String>,
     pub command_buffer: String,
     pub pending_d_press: bool,
@@ -57,6 +65,8 @@ impl Default for AppState {
             playlists: vec![],
             library_config: crate::config::LibraryConfig::default(),
             library_view: vec![],
+            saved_albums: vec![],
+            active_library_tab: LibraryTab::Playlists,
             operation_register: vec![],
             command_buffer: String::new(),
             pending_d_press: false,
@@ -80,6 +90,16 @@ impl AppState {
         use std::collections::HashSet;
 
         let mut view = Vec::new();
+
+        // 0. Liked Songs (Always at the top)
+        view.push(LibraryNode::Playlist {
+            playlist: crate::models::Playlist {
+                id: "LIKED_SONGS".to_string(),
+                name: "♥️ Liked Songs".to_string(),
+                owner: "Spotify".to_string(),
+            },
+            indent: 0,
+        });
 
         let pinned_set: HashSet<String> = self.library_config.pinned.iter().cloned().collect();
         let mut folder_playlists: HashSet<String> = HashSet::new();

@@ -128,6 +128,9 @@ impl Worker {
                                             if let Ok(playlists) = sp.fetch_playlists().await {
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
+                                            if let Ok(albums) = sp.fetch_albums().await {
+                                                let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+                                            }
                                             // Initial State Sync (Seamless Handoff)
                                             if let Ok(Some((is_playing, is_shuffled, progress_ms, item))) = sp.sync_playback_state().await {
                                                 if let Some(item) = item.as_ref() {
@@ -139,21 +142,19 @@ impl Worker {
                                     }
                                 }
                             }
-                            AppEvent::LoadPlaylistTracks(id) => {
+                            AppEvent::LoadContextTracks(id, is_album) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    match sp.fetch_tracks(&id).await {
-                                        Ok(tracks) => {
-                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks)).await;
-                                        }
-                                        Err(e) => {
-                                            let _ = std::fs::write("debug.log", format!("Failed to fetch tracks for {}: {:?}", id, e));
-                                        }
-                                    }
+                                    let tracks = if is_album {
+                                        sp.fetch_album_tracks(&id).await.unwrap_or_default()
+                                    } else {
+                                        sp.fetch_tracks(&id).await.unwrap_or_default()
+                                    };
+                                    let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks)).await;
                                 }
                             }
-                            AppEvent::PlayTrack { playlist_id, track_id, title, artist, duration_ms, image_url } => {
+                            AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url } => {
                                 if let Some(ref mut sp) = spotify_opt {
-                                    match sp.play_track(&playlist_id, &track_id).await {
+                                    match sp.play_track(&context_id, &track_id, is_album).await {
                                         Ok(_) => {
                                             is_playing = true;
                                             current_track_id = Some(track_id.clone());
