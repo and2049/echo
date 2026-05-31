@@ -1,11 +1,11 @@
-pub mod spotify;
 pub mod audio;
+pub mod spotify;
 
-use rspotify::prelude::*;
-use tokio::sync::mpsc;
-use crate::events::{AppEvent, WorkerEvent};
 use crate::config::AppConfig;
+use crate::events::{AppEvent, WorkerEvent};
+use crate::models::PlaybackItem;
 use spotify::SpotifyWorker;
+use tokio::sync::mpsc;
 
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
@@ -20,6 +20,8 @@ impl Worker {
     fn spawn_playback_sync(
         client: rspotify::AuthCodeSpotify,
         tx: mpsc::Sender<WorkerEvent>,
+        previous_track_id: Option<String>,
+        allow_same_track_reset: bool,
     ) {
         tokio::spawn(async move {
             let mut log = String::from("=== spawn_playback_sync started ===\n");
@@ -29,56 +31,48 @@ impl Worker {
                 log.push_str(&format!("Attempt {}: waiting {}s...\n", attempt, wait_secs));
                 tokio::time::sleep(std::time::Duration::from_secs(wait_secs as u64)).await;
 
-                let result = client.current_playback(None, None::<Vec<_>>).await;
+                let result = SpotifyWorker::playback_snapshot_from_client(&client).await;
 
-                match &result {
-                    Ok(Some(playback)) => {
-                        let is_playing = playback.is_playing;
-                        let is_shuffled = playback.shuffle_state;
-                        let progress_ms = playback
-                            .progress
-                            .unwrap_or_default()
-                            .num_milliseconds() as u32;
-
-                        let mut duration_ms = 0u32;
-                        let mut track_id: Option<String> = None;
-
-                        match &playback.item {
-                            Some(rspotify::model::PlayableItem::Track(t)) => {
-                                duration_ms = t.duration.num_milliseconds() as u32;
-                                track_id = t.id.as_ref().map(|i| i.id().to_string());
-                                log.push_str(&format!(
-                                    "  → Track: '{}', duration_ms={}, progress_ms={}, is_playing={}\n",
-                                    t.name, duration_ms, progress_ms, is_playing
-                                ));
-                            }
-                            Some(rspotify::model::PlayableItem::Episode(e)) => {
-                                log.push_str(&format!("  → Item is an Episode: '{}' (not a track, skipping)\n", e.name));
-                            }
-                            None => {
-                                log.push_str("  → playback.item is None (Spotify API transitioning)\n");
-                            }
-                            _ => {
-                                log.push_str("  → playback.item is unknown variant\n");
-                            }
+                match result {
+                    Ok(Some((is_playing, is_shuffled, progress_ms, item))) => {
+                        let item_id = item.as_ref().map(|item| item.id.clone());
+                        if let Some(item) = item.as_ref() {
+                            log.push_str(&format!(
+                                "  → Item: '{}', duration_ms={}, progress_ms={}, is_playing={}\n",
+                                item.title, item.duration_ms, progress_ms, is_playing
+                            ));
+                        } else {
+                            log.push_str("  → playback.item is missing or unparseable\n");
                         }
 
-                        if duration_ms > 0 {
-                            log.push_str(&format!("  → Sending SyncPlaybackState (duration_ms={})\n", duration_ms));
+                        let track_changed = previous_track_id.as_ref() != item_id.as_ref();
+                        let same_track_reset =
+                            allow_same_track_reset && item_id.is_some() && progress_ms <= 3_000;
+
+                        if item.is_some()
+                            && (track_changed || same_track_reset || previous_track_id.is_none())
+                        {
+                            log.push_str(&format!(
+                                "  → Sending SyncPlaybackState (track_id={:?})\n",
+                                item_id
+                            ));
                             let _ = std::fs::write("echo-debug-sync.log", &log);
-                            let _ = tx.send(WorkerEvent::SyncPlaybackState {
-                                is_playing,
-                                is_shuffled,
-                                progress_ms,
-                                duration_ms,
-                                track_id,
-                            }).await;
+                            let _ = tx
+                                .send(WorkerEvent::SyncPlaybackState {
+                                    is_playing,
+                                    is_shuffled,
+                                    progress_ms,
+                                    item,
+                                })
+                                .await;
                             return;
                         }
-                        // duration_ms == 0 — item was None or episode, retry
+                        // Missing item or Spotify still reported the previous track - retry
                     }
                     Ok(None) => {
-                        log.push_str("  → current_playback returned Ok(None) — no active playback\n");
+                        log.push_str(
+                            "  → current_playback returned Ok(None) — no active playback\n",
+                        );
                     }
                     Err(e) => {
                         log.push_str(&format!("  → current_playback returned Err: {:?}\n", e));
@@ -91,20 +85,23 @@ impl Worker {
         });
     }
 
-
     pub async fn run(mut self) {
         let mut spotify_opt: Option<SpotifyWorker> = None;
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         let mut sync_interval = tokio::time::interval(std::time::Duration::from_secs(10));
         let mut is_playing = false;
+        let mut current_track_id: Option<String> = None;
 
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
                     if let Some(ref mut sp) = spotify_opt {
-                        if let Ok(Some((playing, shuffled, progress_ms, duration_ms, track_id))) = sp.sync_playback_state().await {
+                        if let Ok(Some((playing, shuffled, progress_ms, item))) = sp.sync_playback_state().await {
                             is_playing = playing;
-                            let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, progress_ms, duration_ms, track_id }).await;
+                            if let Some(item) = item.as_ref() {
+                                current_track_id = Some(item.id.clone());
+                            }
+                            let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, progress_ms, item }).await;
                         }
                     }
                 }
@@ -132,8 +129,11 @@ impl Worker {
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
                                             // Initial State Sync (Seamless Handoff)
-                                            if let Ok(Some((is_playing, is_shuffled, progress_ms, duration_ms, track_id))) = sp.sync_playback_state().await {
-                                                let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, progress_ms, duration_ms, track_id }).await;
+                                            if let Ok(Some((is_playing, is_shuffled, progress_ms, item))) = sp.sync_playback_state().await {
+                                                if let Some(item) = item.as_ref() {
+                                                    current_track_id = Some(item.id.clone());
+                                                }
+                                                let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, progress_ms, item }).await;
                                             }
                                         }
                                     }
@@ -151,12 +151,22 @@ impl Worker {
                                     }
                                 }
                             }
-                            AppEvent::PlayTrack { playlist_id, track_id, duration_ms } => {
+                            AppEvent::PlayTrack { playlist_id, track_id, title, artist, duration_ms, image_url } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     match sp.play_track(&playlist_id, &track_id).await {
                                         Ok(_) => {
                                             is_playing = true;
-                                            let _ = self.tx.send(WorkerEvent::PlaybackStarted(duration_ms)).await;
+                                            current_track_id = Some(track_id.clone());
+                                            let item = PlaybackItem {
+                                                id: track_id,
+                                                title,
+                                                artist,
+                                                duration_ms,
+                                                image_url,
+                                            };
+                                            let _ = self.tx.send(WorkerEvent::PlaybackStarted {
+                                                item,
+                                            }).await;
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write("echo-debug-worker.log", format!("Worker PlayTrack failed: {:?}", e));
@@ -174,24 +184,26 @@ impl Worker {
                                     let _ = sp.toggle_shuffle(shuffled).await;
                                 }
                             }
-                            AppEvent::NextTrack => {
+                            AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.next_track().await;
                                     is_playing = true;
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone());
+                                    let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, false);
                                 }
                             }
-                            AppEvent::PreviousTrack => {
+                            AppEvent::PreviousTrack { current_track_id: ui_current_track_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.previous_track().await;
                                     is_playing = true;
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone());
+                                    let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, true);
                                 }
                             }
                             AppEvent::LoadTrackMetadata(tid) => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     if let Ok((title, artist, image_url)) = sp.get_track_metadata(&tid).await {
-                                        let _ = self.tx.send(WorkerEvent::TrackMetadataLoaded { title, artist, image_url }).await;
+                                        let _ = self.tx.send(WorkerEvent::TrackMetadataLoaded { track_id: tid, title, artist, image_url }).await;
                                     }
                                 }
                             }

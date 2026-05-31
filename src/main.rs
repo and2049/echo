@@ -1,21 +1,57 @@
 mod app;
 mod config;
 mod events;
+mod handlers;
 mod models;
 mod tui;
-mod handlers;
 mod worker;
 
-use std::panic;
 use anyhow::Result;
-use tokio::sync::mpsc;
 use crossterm::event::{self, Event, KeyEventKind};
+use std::panic;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 use app::AppState;
 use events::{AppEvent, WorkerEvent};
 use tui::Tui;
 use worker::Worker;
+
+fn spawn_track_image_processing(
+    track_id: String,
+    url: String,
+    picker: &ratatui_image::picker::Picker,
+    tx: mpsc::Sender<WorkerEvent>,
+) {
+    let picker_clone = picker.clone();
+
+    tokio::spawn(async move {
+        if let Ok(resp) = reqwest::get(&url).await {
+            if let Ok(bytes) = resp.bytes().await {
+                if let Ok(image_handle) = tokio::task::spawn_blocking(move || {
+                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                        if let Ok(protocol) = picker_clone.new_protocol(
+                            dyn_img,
+                            ratatui::layout::Size::new(14, 5),
+                            ratatui_image::Resize::Fit(None),
+                        ) {
+                            return Some(protocol);
+                        }
+                    }
+                    None
+                })
+                .await
+                {
+                    if let Some(protocol) = image_handle {
+                        let _ = tx
+                            .send(WorkerEvent::TrackImageProcessed { track_id, protocol })
+                            .await;
+                    }
+                }
+            }
+        }
+    });
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -37,12 +73,12 @@ async fn main() -> Result<()> {
 
     let config = config::AppConfig::load();
     let mut state = AppState::default();
-    
+
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
-    if let Ok(mut picker) = ratatui_image::picker::Picker::from_query_stdio() {
+    if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
         state.image_picker = Some(picker);
     }
-    
+
     if config.spotify_credentials.is_some() {
         state.mode = app::AppMode::Authenticating;
         let _ = app_tx.send(AppEvent::StartAuth).await;
@@ -66,12 +102,12 @@ async fn main() -> Result<()> {
                     if let Some(cmd) = handlers::handle_event(&mut state, &event) {
                         outgoing_event = Some(cmd);
                     }
-                    
+
                     if !state.is_running {
                         let _ = app_tx.send(AppEvent::Quit).await;
                     } else {
                         let _ = app_tx.send(event).await;
-                        
+
                         if let Some(ev) = outgoing_event {
                             let _ = app_tx.send(ev).await;
                         }
@@ -79,7 +115,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        
+
         while let Ok(worker_event) = app_rx.try_recv() {
             match worker_event {
                 WorkerEvent::AuthenticationComplete => {
@@ -93,10 +129,27 @@ async fn main() -> Result<()> {
                     state.active_view = app::ActiveView::TrackList;
                     state.selected_track_index = 0;
                 }
-                WorkerEvent::PlaybackStarted(duration) => {
+                WorkerEvent::PlaybackStarted { item } => {
                     state.playback.is_playing = true;
-                    state.playback.duration_ms = duration;
+                    state.playback.playing_track_id = Some(item.id.clone());
+                    state.playback.playing_track_title = item.title.clone();
+                    state.playback.playing_track_artist = item.artist.clone();
+                    state.playback.playing_track_image = None;
+                    state.playback.duration_ms = item.duration_ms;
                     state.playback.progress_ms = 0;
+
+                    if let Some(url) = item.image_url {
+                        if let Some(ref picker) = state.image_picker {
+                            spawn_track_image_processing(
+                                item.id,
+                                url,
+                                picker,
+                                worker_tx_clone.clone(),
+                            );
+                        }
+                    } else {
+                        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
+                    }
                 }
                 WorkerEvent::Tick => {
                     if state.playback.is_playing {
@@ -110,61 +163,79 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, progress_ms, duration_ms, track_id } => {
+                WorkerEvent::SyncPlaybackState {
+                    is_playing,
+                    is_shuffled,
+                    progress_ms,
+                    item,
+                } => {
                     state.playback.is_playing = is_playing;
                     state.playback.is_shuffled = is_shuffled;
                     state.playback.progress_ms = progress_ms;
-                    if duration_ms > 0 {
-                        state.playback.duration_ms = duration_ms;
-                    }
-                    if state.playback.playing_track_id != track_id {
-                        state.playback.playing_track_id = track_id.clone();
-                        // Clear the old image immediately
-                        state.playback.playing_track_image = None;
-                        
-                        if let Some(tid) = track_id {
-                            let _ = app_tx.send(AppEvent::LoadTrackMetadata(tid)).await;
+
+                    if let Some(item) = item {
+                        let track_changed =
+                            state.playback.playing_track_id.as_deref() != Some(item.id.as_str());
+
+                        state.playback.playing_track_id = Some(item.id.clone());
+                        state.playback.playing_track_title = item.title.clone();
+                        state.playback.playing_track_artist = item.artist.clone();
+                        state.playback.duration_ms = item.duration_ms;
+
+                        if track_changed {
+                            state.playback.playing_track_image = None;
+                        }
+
+                        if let Some(url) = item.image_url {
+                            if let Some(ref picker) = state.image_picker {
+                                let should_process_image =
+                                    track_changed || state.playback.playing_track_image.is_none();
+                                if should_process_image {
+                                    spawn_track_image_processing(
+                                        item.id,
+                                        url,
+                                        picker,
+                                        worker_tx_clone.clone(),
+                                    );
+                                }
+                            }
+                        } else if track_changed || state.playback.playing_track_artist.is_empty() {
+                            let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
                         }
                     }
                 }
-                WorkerEvent::TrackMetadataLoaded { title, artist, image_url } => {
+                WorkerEvent::TrackMetadataLoaded {
+                    track_id,
+                    title,
+                    artist,
+                    image_url,
+                } => {
+                    if state.playback.playing_track_id.as_deref() != Some(track_id.as_str()) {
+                        continue;
+                    }
+
                     state.playback.playing_track_title = title;
                     state.playback.playing_track_artist = artist;
-                    
+
                     if let Some(url) = image_url {
-                        if let Some(ref mut picker) = state.image_picker {
-                            let mut picker_clone = picker.clone();
-                            let tx = worker_tx_clone.clone();
-                            
-                            tokio::spawn(async move {
-                                if let Ok(resp) = reqwest::get(&url).await {
-                                    if let Ok(bytes) = resp.bytes().await {
-                                        if let Ok(image_handle) = tokio::task::spawn_blocking(move || {
-                                            if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-                                                // Create a fixed size protocol
-                                                if let Ok(protocol) = picker_clone.new_protocol(dyn_img, ratatui::layout::Size::new(14, 5), ratatui_image::Resize::Fit(None)) {
-                                                    return Some(protocol);
-                                                }
-                                            }
-                                            None
-                                        }).await {
-                                            if let Some(protocol) = image_handle {
-                                                let _ = tx.send(WorkerEvent::TrackImageProcessed(protocol)).await;
-                                            }
-                                        }
-                                    }
-                                }
-                            });
+                        if let Some(ref picker) = state.image_picker {
+                            spawn_track_image_processing(
+                                track_id,
+                                url,
+                                picker,
+                                worker_tx_clone.clone(),
+                            );
                         }
                     }
                 }
-                WorkerEvent::TrackImageProcessed(protocol) => {
-                    state.playback.playing_track_image = Some(protocol);
+                WorkerEvent::TrackImageProcessed { track_id, protocol } => {
+                    if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
+                        state.playback.playing_track_image = Some(protocol);
+                    }
                 }
                 WorkerEvent::ForceRedraw => {
                     let _ = tui.terminal.clear();
                 }
-                _ => {}
             }
         }
     }

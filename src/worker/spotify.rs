@@ -1,8 +1,13 @@
-use rspotify::{prelude::*, AuthCodeSpotify, Credentials, OAuth};
-use std::collections::HashSet;
 use crate::config::AppConfig;
-use crate::models::{Playlist, Track};
+use crate::models::{PlaybackItem, Playlist, Track};
 use anyhow::Result;
+use rspotify::{AuthCodeSpotify, Credentials, OAuth, prelude::*};
+use std::collections::HashSet;
+
+const PLAYBACK_TYPES: [&rspotify::model::AdditionalType; 2] = [
+    &rspotify::model::AdditionalType::Track,
+    &rspotify::model::AdditionalType::Episode,
+];
 
 pub struct SpotifyWorker {
     pub client: AuthCodeSpotify,
@@ -13,7 +18,7 @@ impl SpotifyWorker {
     pub async fn new(config: &AppConfig) -> Result<Self> {
         let creds = config.spotify_credentials.as_ref().unwrap();
         let credentials = Credentials::new(&creds.client_id, &creds.client_secret);
-        
+
         let scopes: HashSet<String> = [
             "user-read-private",
             "playlist-read-private",
@@ -34,14 +39,14 @@ impl SpotifyWorker {
             ..Default::default()
         };
 
-        let mut spotify = AuthCodeSpotify::new(credentials, oauth);
-        
+        let spotify = AuthCodeSpotify::new(credentials, oauth);
+
         if let Some(tokens) = &config.auth_tokens {
             if let Some(access) = &tokens.access_token {
                 if let Some(refresh) = &tokens.refresh_token {
-                    use rspotify::model::Token;
                     use chrono::Utc;
-                    
+                    use rspotify::model::Token;
+
                     let token = Token {
                         access_token: access.clone(),
                         refresh_token: Some(refresh.clone()),
@@ -49,16 +54,19 @@ impl SpotifyWorker {
                         expires_at: Some(Utc::now()),
                         scopes: scopes.clone(),
                     };
-                    
+
                     *spotify.get_token().lock().await.unwrap() = Some(token);
-                    return Ok(Self { client: spotify, device_id: None });
+                    return Ok(Self {
+                        client: spotify,
+                        device_id: None,
+                    });
                 }
             }
         }
-        
+
         // AuthCodeSpotify standard challenge
         let auth_url = spotify.get_authorize_url(false)?;
-        
+
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:8888").await?;
 
@@ -73,21 +81,31 @@ impl SpotifyWorker {
                 let request = String::from_utf8_lossy(&buffer[..bytes_read]);
                 if let Some(code_start) = request.find("code=") {
                     let code_rest = &request[code_start + 5..];
-                    let code = code_rest.split_whitespace().next().unwrap_or("").split('&').next().unwrap_or("");
+                    let code = code_rest
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .split('&')
+                        .next()
+                        .unwrap_or("");
                     let code_str = code.to_string();
-                    
+
                     let body = "<!DOCTYPE html><html><head><title>Success</title></head><body style=\"background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; margin-top: 20%;\"><h1>Success, return to echo app</h1><p>You can safely close this tab.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>";
-                    let response = format!("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
-                    
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+
                     let _ = socket.write_all(response.as_bytes()).await;
                     let _ = socket.flush().await;
                     drop(socket); // explicitly close the socket so the browser finishes loading
-                    
+
                     spotify.request_token(&code_str).await?;
                 }
             }
         }
-        
+
         // Write the fetched tokens to our config.toml
         let token_mutex = spotify.get_token();
         let token_guard = token_mutex.lock().await;
@@ -99,15 +117,18 @@ impl SpotifyWorker {
             });
             let _ = app_config.save();
         }
-        
-        Ok(Self { client: spotify, device_id: None })
+
+        Ok(Self {
+            client: spotify,
+            device_id: None,
+        })
     }
 
     pub async fn get_device_id(&mut self) -> Option<String> {
         if self.device_id.is_some() {
             return self.device_id.clone();
         }
-        
+
         if let Ok(devices) = self.client.device().await {
             for d in devices {
                 if d.name == "Echo TUI" {
@@ -119,19 +140,112 @@ impl SpotifyWorker {
         None
     }
 
-    pub async fn sync_playback_state(&mut self) -> Result<Option<(bool, bool, u32, u32, Option<String>)>> {
-        if let Ok(Some(playback)) = self.client.current_playback(None, None::<Vec<_>>).await {
+    fn playback_item_from_unknown(value: &serde_json::Value) -> Option<PlaybackItem> {
+        let id = value.get("id")?.as_str()?.to_string();
+        let title = value.get("name")?.as_str()?.to_string();
+        let duration_ms = value.get("duration_ms")?.as_u64()? as u32;
+
+        let artist = value
+            .get("artists")
+            .and_then(|artists| artists.as_array())
+            .map(|artists| {
+                artists
+                    .iter()
+                    .filter_map(|artist| artist.get("name").and_then(|name| name.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .filter(|artist| !artist.is_empty())
+            .or_else(|| {
+                value
+                    .get("show")
+                    .and_then(|show| show.get("name"))
+                    .and_then(|name| name.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_default();
+
+        let image_url = value
+            .get("album")
+            .and_then(|album| album.get("images"))
+            .or_else(|| value.get("images"))
+            .and_then(|images| images.as_array())
+            .and_then(|images| images.first())
+            .and_then(|image| image.get("url"))
+            .and_then(|url| url.as_str())
+            .map(str::to_string);
+
+        Some(PlaybackItem {
+            id,
+            title,
+            artist,
+            duration_ms,
+            image_url,
+        })
+    }
+
+    pub fn playback_item_from_playable(item: &rspotify::model::PlayableItem) -> Option<PlaybackItem> {
+        match item {
+            rspotify::model::PlayableItem::Track(track) => {
+                let id = track.id.as_ref()?.id().to_string();
+                Some(PlaybackItem {
+                    id,
+                    title: track.name.clone(),
+                    artist: track
+                        .artists
+                        .iter()
+                        .map(|artist| artist.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    duration_ms: track.duration.num_milliseconds() as u32,
+                    image_url: track.album.images.first().map(|img| img.url.clone()),
+                })
+            }
+            rspotify::model::PlayableItem::Episode(episode) => Some(PlaybackItem {
+                id: episode.id.id().to_string(),
+                title: episode.name.clone(),
+                artist: episode.show.name.clone(),
+                duration_ms: episode.duration.num_milliseconds() as u32,
+                image_url: episode.images.first().map(|img| img.url.clone()),
+            }),
+            rspotify::model::PlayableItem::Unknown(value) => Self::playback_item_from_unknown(value),
+        }
+    }
+
+    pub async fn playback_snapshot_from_client(
+        client: &AuthCodeSpotify,
+    ) -> Result<Option<(bool, bool, u32, Option<PlaybackItem>)>> {
+        if let Some(playback) = client.current_playback(None, Some(PLAYBACK_TYPES)).await? {
             let is_playing = playback.is_playing;
             let is_shuffled = playback.shuffle_state;
             let progress_ms = playback.progress.unwrap_or_default().num_milliseconds() as u32;
-            
-            let mut duration_ms = 0;
-            let mut track_id = None;
-            if let Some(rspotify::model::PlayableItem::Track(t)) = playback.item {
-                duration_ms = t.duration.num_milliseconds() as u32;
-                track_id = t.id.map(|i| i.id().to_string());
-            }
-            
+            let item = playback
+                .item
+                .as_ref()
+                .and_then(Self::playback_item_from_playable);
+
+            return Ok(Some((is_playing, is_shuffled, progress_ms, item)));
+        }
+
+        Ok(None)
+    }
+
+    pub async fn sync_playback_state(
+        &mut self,
+    ) -> Result<Option<(bool, bool, u32, Option<PlaybackItem>)>> {
+        if let Some(playback) = self
+            .client
+            .current_playback(None, Some(PLAYBACK_TYPES))
+            .await?
+        {
+            let is_playing = playback.is_playing;
+            let is_shuffled = playback.shuffle_state;
+            let progress_ms = playback.progress.unwrap_or_default().num_milliseconds() as u32;
+            let item = playback
+                .item
+                .as_ref()
+                .and_then(Self::playback_item_from_playable);
+
             // Auto-cache the device ID if we found an active playback
             if self.device_id.is_none() {
                 let device = &playback.device;
@@ -139,8 +253,13 @@ impl SpotifyWorker {
                     self.device_id = device.id.clone();
                 }
             }
-            
-            return Ok(Some((is_playing, is_shuffled, progress_ms, duration_ms, track_id)));
+
+            return Ok(Some((
+                is_playing,
+                is_shuffled,
+                progress_ms,
+                item,
+            )));
         }
         Ok(None)
     }
@@ -174,7 +293,10 @@ impl SpotifyWorker {
     }
 
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
-        let page = self.client.current_user_playlists_manual(None, None).await?;
+        let page = self
+            .client
+            .current_user_playlists_manual(None, None)
+            .await?;
         let mut out = Vec::new();
         for p in page.items {
             out.push(Playlist {
@@ -187,15 +309,24 @@ impl SpotifyWorker {
 
     pub async fn fetch_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
         let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
-        let page = self.client.playlist_items_manual(id, None, None, None, None).await?;
+        let page = self
+            .client
+            .playlist_items_manual(id, None, None, None, None)
+            .await?;
         let mut out = Vec::new();
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     name: track.name,
-                    artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    artist: track
+                        .artists
+                        .into_iter()
+                        .map(|a| a.name)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     duration_ms: track.duration.num_milliseconds() as u32,
+                    image_url: track.album.images.first().map(|img| img.url.clone()),
                 });
             }
         }
@@ -204,35 +335,44 @@ impl SpotifyWorker {
 
     pub async fn play_track(&mut self, playlist_id: &str, track_id: &str) -> Result<()> {
         let target_device = self.get_device_id().await;
-        
-        let context_uri = rspotify::model::PlayContextId::Playlist(rspotify::model::PlaylistId::from_id(playlist_id)?);
-        let track_uri = rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
+
+        let context_uri = rspotify::model::PlayContextId::Playlist(
+            rspotify::model::PlaylistId::from_id(playlist_id)?,
+        );
+        let track_uri =
+            rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
         let offset = rspotify::model::Offset::Uri(track_uri.uri());
-        
-        let res = self.client.start_context_playback(
-            context_uri,
-            target_device.as_deref(),
-            Some(offset),
-            None
-        ).await;
+
+        let res = self
+            .client
+            .start_context_playback(context_uri, target_device.as_deref(), Some(offset), None)
+            .await;
 
         if let Err(e) = &res {
             let _ = std::fs::write("echo-debug.log", format!("Playback error: {:?}\n", e));
         }
-        
+
         res?;
         Ok(())
     }
 
-    pub async fn get_track_metadata(&self, track_id: &str) -> anyhow::Result<(String, String, Option<String>)> {
+    pub async fn get_track_metadata(
+        &self,
+        track_id: &str,
+    ) -> anyhow::Result<(String, String, Option<String>)> {
         use rspotify::model::TrackId;
         let id = TrackId::from_id(track_id)?;
         let track = self.client.track(id, None).await?;
-        
+
         let title = track.name;
-        let artist = track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+        let artist = track
+            .artists
+            .into_iter()
+            .map(|a| a.name)
+            .collect::<Vec<_>>()
+            .join(", ");
         let image_url = track.album.images.first().map(|img| img.url.clone());
-        
+
         Ok((title, artist, image_url))
     }
 }
