@@ -10,7 +10,12 @@ use ratatui::{
         Table, TableState,
     },
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+
+const ROW_TEXT_LEFT_GUTTER: u16 = 1;
+const ROW_TEXT_RIGHT_GUTTER: u16 = 1;
+const DURATION_COLUMN_WIDTH: u16 = 9;
 
 pub fn render_app(frame: &mut Frame, state: &AppState) {
     fill_background(frame, state);
@@ -46,6 +51,27 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let tracks_area = main_chunks[2];
 
     // Render Main Content
+    let is_focused = state.active_view == ActiveView::Library;
+    let title_text = match state.active_library_tab {
+        crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
+        crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
+    };
+
+    let library_border_style = if is_focused {
+        state.active_theme.secondary_style()
+    } else {
+        state.active_theme.primary_style()
+    };
+
+    let library_block = Block::default()
+        .borders(Borders::ALL)
+        .style(state.active_theme.base_style())
+        .border_style(library_border_style)
+        .title(title_text);
+    let library_list_area = library_block.inner(library_area);
+    let library_text_width = row_text_width(library_list_area);
+    frame.render_widget(library_block, library_area);
+
     let library_items: Vec<ListItem> = state
         .library_view
         .iter()
@@ -60,7 +86,10 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             match node {
                 crate::models::LibraryNode::Folder(f) => {
                     let prefix = if f.is_open { "▼" } else { "▶" };
-                    let text = format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name));
+                    let text = truncate_to_width_with_ellipsis(
+                        &format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name)),
+                        library_text_width,
+                    );
                     let folder_style = if i == state.selected_playlist_index {
                         style
                     } else {
@@ -82,6 +111,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                         prefix,
                         stabilize_terminal_emoji_width(&playlist.name)
                     );
+                    let text = truncate_to_width_with_ellipsis(&text, library_text_width);
 
                     // Mark as ghosted if it is in the cut register
                     let list_style = if state.operation_register.contains(&playlist.id) {
@@ -95,25 +125,6 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             }
         })
         .collect();
-    let is_focused = state.active_view == ActiveView::Library;
-    let title_text = match state.active_library_tab {
-        crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
-        crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
-    };
-
-    let library_border_style = if is_focused {
-        state.active_theme.secondary_style()
-    } else {
-        state.active_theme.primary_style()
-    };
-
-    let library_block = Block::default()
-        .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(library_border_style)
-        .title(title_text);
-    let library_list_area = library_block.inner(library_area);
-    frame.render_widget(library_block, library_area);
 
     if state.active_library_tab == crate::app::LibraryTab::Albums {
         let items: Vec<ListItem> = state
@@ -126,7 +137,11 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                 } else {
                     state.active_theme.base_style()
                 };
-                ListItem::new(stabilize_terminal_emoji_width(&album.name)).style(style)
+                ListItem::new(truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&album.name),
+                    library_text_width,
+                ))
+                .style(style)
             })
             .collect();
 
@@ -169,12 +184,21 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                 ""
             };
 
-            let track_cell = Cell::from(format!(
-                "{}{}",
-                prefix,
-                stabilize_terminal_emoji_width(&t.name)
-            ));
-            let duration_cell = Cell::from(format_time(t.duration_ms / 1000));
+            let track_cell = if state.library_config.track_index_base < 0 {
+                Cell::from(format!(
+                    "{}{}",
+                    prefix,
+                    stabilize_terminal_emoji_width(&t.name)
+                ))
+            } else {
+                Cell::from(format!(
+                    "{:>3} {}{}",
+                    (i as isize) + state.library_config.track_index_base,
+                    prefix,
+                    stabilize_terminal_emoji_width(&t.name)
+                ))
+            };
+            let duration_cell = Cell::from(format_duration_text(format_time(t.duration_ms / 1000)));
 
             let row = if is_albums_tab {
                 Row::new(vec![track_cell, duration_cell])
@@ -204,18 +228,26 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let header_style = track_border_style.add_modifier(Modifier::BOLD);
 
     let table = if is_albums_tab {
-        let header = Row::new(vec!["Track", "Duration"])
+        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
+        let header = Row::new(vec![header_str, "Duration "])
             .style(header_style)
             .height(1);
-        Table::new(track_rows, [Constraint::Min(20), Constraint::Length(8)])
-            .column_spacing(1)
-            .header(header)
-            .block(track_block)
-            .row_highlight_style(state.active_theme.selected_style())
-            .highlight_symbol(" ")
-            .highlight_spacing(HighlightSpacing::Always)
+        Table::new(
+            track_rows,
+            [
+                Constraint::Min(20),
+                Constraint::Length(DURATION_COLUMN_WIDTH),
+            ],
+        )
+        .column_spacing(1)
+        .header(header)
+        .block(track_block)
+        .row_highlight_style(state.active_theme.selected_style())
+        .highlight_symbol(" ")
+        .highlight_spacing(HighlightSpacing::Always)
     } else {
-        let header = Row::new(vec!["Track", "Artist", "Duration"])
+        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
+        let header = Row::new(vec![header_str, "Artist", "Duration "])
             .style(header_style)
             .height(1);
         Table::new(
@@ -223,7 +255,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             [
                 Constraint::Percentage(45),
                 Constraint::Min(20),
-                Constraint::Length(8),
+                Constraint::Length(DURATION_COLUMN_WIDTH),
             ],
         )
         .column_spacing(1)
@@ -471,6 +503,49 @@ fn padded_library_list(items: Vec<ListItem>) -> List {
         .highlight_spacing(HighlightSpacing::Always)
 }
 
+fn row_text_width(area: Rect) -> u16 {
+    area.width
+        .saturating_sub(ROW_TEXT_LEFT_GUTTER + ROW_TEXT_RIGHT_GUTTER)
+}
+
+fn format_duration_text(time: String) -> String {
+    format!("{:>8} ", time)
+}
+
+fn truncate_to_width_with_ellipsis(text: &str, max_width: u16) -> String {
+    let max_width = max_width as usize;
+
+    if text.width() <= max_width {
+        return text.to_string();
+    }
+
+    let ellipsis = "...";
+    let ellipsis_width = ellipsis.width();
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width <= ellipsis_width {
+        return ".".repeat(max_width);
+    }
+
+    let content_width = max_width - ellipsis_width;
+    let mut truncated = String::new();
+    let mut width = 0;
+
+    for grapheme in UnicodeSegmentation::graphemes(text, true) {
+        let grapheme_width = grapheme.width();
+        if width + grapheme_width > content_width {
+            break;
+        }
+
+        truncated.push_str(grapheme);
+        width += grapheme_width;
+    }
+
+    truncated.push_str(ellipsis);
+    truncated
+}
+
 fn stabilize_terminal_emoji_width(text: &str) -> String {
     let mut stabilized = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -598,7 +673,10 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{repair_wide_grapheme_trailing_styles, stabilize_terminal_emoji_width};
+    use super::{
+        DURATION_COLUMN_WIDTH, format_duration_text, repair_wide_grapheme_trailing_styles,
+        row_text_width, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
+    };
     use ratatui::{
         buffer::Buffer,
         layout::Rect,
@@ -717,5 +795,42 @@ mod tests {
 
         assert_eq!(stabilized, "🕸️");
         assert_eq!(stabilized.width(), 2);
+    }
+
+    #[test]
+    fn row_text_width_reserves_left_and_right_gutters() {
+        assert_eq!(row_text_width(Rect::new(0, 0, 12, 1)), 10);
+        assert_eq!(row_text_width(Rect::new(0, 0, 1, 1)), 0);
+    }
+
+    #[test]
+    fn truncates_long_ascii_text_with_right_gap_budget() {
+        let truncated = truncate_to_width_with_ellipsis("abcdef", 5);
+
+        assert_eq!(truncated, "ab...");
+        assert_eq!(truncated.width(), 5);
+    }
+
+    #[test]
+    fn keeps_text_that_fits_width_budget() {
+        let text = truncate_to_width_with_ellipsis("abc", 5);
+
+        assert_eq!(text, "abc");
+    }
+
+    #[test]
+    fn truncates_wide_text_without_exceeding_width() {
+        let truncated = truncate_to_width_with_ellipsis("我的歌单 36", 8);
+
+        assert!(truncated.ends_with("..."));
+        assert!(truncated.width() <= 8);
+    }
+
+    #[test]
+    fn duration_text_keeps_one_trailing_cell() {
+        let duration = format_duration_text("2:46".to_string());
+
+        assert_eq!(duration, "    2:46 ");
+        assert_eq!(duration.width(), DURATION_COLUMN_WIDTH as usize);
     }
 }

@@ -24,12 +24,34 @@ pub struct AppConfig {
     pub library: LibraryConfig,
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+fn default_track_index_base() -> isize {
+    1
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LibraryConfig {
+    #[serde(default)]
     pub pinned: Vec<String>,
+    #[serde(default)]
     pub folders: Vec<Folder>,
+    #[serde(default)]
     pub sort_mode: SortMode,
+    #[serde(default)]
     pub active_theme: Option<String>,
+    #[serde(default = "default_track_index_base")]
+    pub track_index_base: isize,
+}
+
+impl Default for LibraryConfig {
+    fn default() -> Self {
+        Self {
+            pinned: vec![],
+            folders: vec![],
+            sort_mode: SortMode::default(),
+            active_theme: None,
+            track_index_base: 1,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]

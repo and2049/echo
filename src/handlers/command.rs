@@ -57,6 +57,19 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.compute_library_view();
                         }
                     }
+                    "index" => {
+                        if let Some(base_str) = args.next() {
+                            if let Ok(base) = base_str.parse::<isize>() {
+                                state.library_config.track_index_base = base;
+                                state.save_library_config();
+                                state.status_message = Some(format!("Track index base set to {}", base));
+                            } else {
+                                state.status_message = Some("Invalid index base, must be a number".to_string());
+                            }
+                        } else {
+                            state.status_message = Some(format!("Current index base: {}", state.library_config.track_index_base));
+                        }
+                    }
                     "delfolder" => {
                         // Deletes currently selected folder
                         if state.active_view == crate::app::ActiveView::Library
