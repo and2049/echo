@@ -1,6 +1,6 @@
 primary = "#ff7b64"
 secondary = "#c4f765"
-background = "#131314"
+background = "#14120f"
 text = "#faf6c6"
 text_muted = "#494640" # progress remaining
 highlight_bg = "#f7b87e"
