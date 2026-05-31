@@ -1,14 +1,15 @@
 use ratatui::{
-    layout::Alignment,
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, List, ListItem},
+    widgets::{Block, Borders, Paragraph, List, ListItem, Gauge},
     Frame,
 };
 use crate::app::{AppMode, AppState, ActiveView};
-use crate::tui::layout::AppLayout;
 
 pub fn render_app(frame: &mut Frame, state: &AppState) {
+
+    
     if state.mode == AppMode::Setup {
         render_setup(frame, state);
         return;
@@ -19,7 +20,24 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         return;
     }
 
-    let layout = AppLayout::compute(frame.area());
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Header
+            Constraint::Min(0),    // Main content
+            Constraint::Length(5), // Track Info
+            Constraint::Length(1), // Progress bar
+            Constraint::Length(1), // Command bar
+        ])
+        .split(frame.area());
+
+    let main_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(30),
+            Constraint::Percentage(70),
+        ])
+        .split(chunks[1]);
 
     // Render Header
     let mode_str = match state.mode {
@@ -29,37 +47,110 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         AppMode::Visual => "VISUAL",
         AppMode::Command => "COMMAND",
     };
+    let shuffle_str = if state.playback.is_shuffled { " | SHUFFLE: ON " } else { "" };
     let header_text = Paragraph::new(Line::from(vec![
-        Span::styled(format!(" ECHO [{}] ", mode_str), Style::default().bg(Color::Blue).fg(Color::White)),
+        Span::styled(format!(" ECHO [{}] {} ", mode_str, shuffle_str), Style::default().bg(Color::Blue).fg(Color::White)),
     ]))
     .alignment(Alignment::Left);
-    frame.render_widget(header_text, layout.header);
+    frame.render_widget(header_text, chunks[0]);
 
     // Render Main Content
-    let (items_str, title, selected_idx) = match state.active_view {
-        ActiveView::Library => {
-            let items: Vec<String> = state.playlists.iter().map(|p| p.name.clone()).collect();
-            (items, " Library (Playlists) ", state.selected_playlist_index)
-        }
-        ActiveView::TrackList => {
-            let items: Vec<String> = state.tracks.iter().map(|t| format!("{} - {}", t.name, t.artist)).collect();
-            (items, " Tracks ", state.selected_track_index)
-        }
-    };
-
-    let list_items: Vec<ListItem> = items_str.into_iter().enumerate().map(|(i, item)| {
-        let style = if i == selected_idx {
-            Style::default().bg(Color::White).fg(Color::Black)
-        } else {
-            Style::default()
-        };
-        ListItem::new(item).style(style)
+    let library_items: Vec<ListItem> = state.playlists.iter().enumerate().map(|(i, p)| {
+        let style = if i == state.selected_playlist_index { Style::default().bg(Color::White).fg(Color::Black) } else { Style::default() };
+        ListItem::new(p.name.clone()).style(style)
     }).collect();
+    let library_style = if state.active_view == ActiveView::Library { Style::default().fg(Color::Green) } else { Style::default() };
+    let playlist_block = Block::default().title(" Library (Playlists) ").borders(Borders::ALL).border_style(library_style);
+    let playlist_list = List::new(library_items).block(playlist_block);
+    let mut playlist_state = ratatui::widgets::ListState::default();
+    playlist_state.select(Some(state.selected_playlist_index));
+    frame.render_stateful_widget(playlist_list, main_chunks[0], &mut playlist_state);
 
-    let list = List::new(list_items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+    let track_items: Vec<ListItem> = state.tracks.iter().enumerate().map(|(i, t)| {
+        let style = if i == state.selected_track_index { Style::default().bg(Color::White).fg(Color::Black) } else { Style::default() };
+        let prefix = if Some(t.id.clone()) == state.playback.playing_track_id { "▶ " } else { "" };
+        ListItem::new(format!("{}{} - {}", prefix, t.name, t.artist)).style(style)
+    }).collect();
+    let track_style = if state.active_view == ActiveView::TrackList { Style::default().fg(Color::Green) } else { Style::default() };
+    let track_block = Block::default().title(" Tracks ").borders(Borders::ALL).border_style(track_style);
+    let track_list_widget = List::new(track_items).block(track_block);
+    let mut track_state = ratatui::widgets::ListState::default();
+    track_state.select(Some(state.selected_track_index));
+    frame.render_stateful_widget(track_list_widget, main_chunks[1], &mut track_state);
+
+    // Render Progress Bar
+    let pb = &state.playback;
+    let ratio = if pb.duration_ms > 0 {
+        (pb.progress_ms as f64 / pb.duration_ms as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     
-    frame.render_widget(list, layout.main_content);
+    let progress_sec = pb.progress_ms / 1000;
+    let duration_sec = pb.duration_ms / 1000;
+    
+    let format_time = |s: u32| format!("{}:{:02}", s / 60, s % 60);
+    
+    let progress_str = format_time(progress_sec);
+    let duration_str = format_time(duration_sec);
+    
+    let pb_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(6), // current time
+            Constraint::Min(0),    // gauge
+            Constraint::Length(6), // duration
+        ])
+        .split(chunks[3]);
+        
+    let current_time_p = Paragraph::new(progress_str).alignment(Alignment::Right).style(Style::default().fg(Color::White));
+    let total_time_p = Paragraph::new(duration_str).alignment(Alignment::Left).style(Style::default().fg(Color::White));
+    
+    let gauge = Gauge::default()
+        .gauge_style(Style::default().fg(Color::White).bg(Color::DarkGray))
+        .ratio(ratio)
+        .label(""); // hide inner text
+        
+    frame.render_widget(current_time_p, pb_chunks[0]);
+    
+    // Add a tiny margin around the gauge to separate it from the text
+    let mut gauge_area = pb_chunks[1];
+    if gauge_area.width > 2 {
+        gauge_area.x += 1;
+        gauge_area.width -= 2;
+    }
+    frame.render_widget(gauge, gauge_area);
+    frame.render_widget(total_time_p, pb_chunks[2]);
+    
+    // Render Track Info
+    let track_info_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(14), // Image width
+            Constraint::Min(0),     // Text width
+        ])
+        .split(chunks[2]);
+        
+    if let Some(ref protocol) = state.playback.playing_track_image {
+        let image = ratatui_image::Image::new(protocol);
+        frame.render_widget(image, track_info_chunks[0]);
+    }
+    
+    // Create Title & Artist Text
+    let track_title = if state.playback.playing_track_title.is_empty() {
+        "Not Playing".to_string()
+    } else {
+        state.playback.playing_track_title.clone()
+    };
+    
+    let track_artist = state.playback.playing_track_artist.clone();
+    
+    let text_lines = vec![
+        Line::from(Span::styled(track_title, Style::default().fg(Color::White).add_modifier(ratatui::style::Modifier::BOLD))),
+        Line::from(Span::styled(track_artist, Style::default().fg(Color::DarkGray))),
+    ];
+    let track_text_p = Paragraph::new(text_lines).alignment(Alignment::Left).block(Block::default().padding(ratatui::widgets::Padding::new(1, 0, 1, 0)));
+    frame.render_widget(track_text_p, track_info_chunks[1]);
 
     // Render Command Bar
     let cmd_text = match state.mode {
@@ -67,7 +158,48 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         _ => "",
     };
     let cmd_bar = Paragraph::new(cmd_text).style(Style::default());
-    frame.render_widget(cmd_bar, layout.command_bar);
+    frame.render_widget(cmd_bar, chunks[3]);
+
+    // Check if we are waiting for discovery
+    if std::path::Path::new("echo-librespot-status.log").exists() {
+        let popup_area = centered_rect(60, 30, frame.area());
+        let popup = Paragraph::new(vec![
+            Line::from("Spotify Connect Onboarding Required").style(Style::default().fg(Color::Yellow)),
+            Line::from(""),
+            Line::from("1. Open the official Spotify app on your phone or desktop."),
+            Line::from("2. Tap the 'Devices' icon."),
+            Line::from("3. Select 'Echo TUI' from the list of available devices."),
+            Line::from(""),
+            Line::from("Once connected, Echo will automatically transition to normal operation!"),
+        ])
+        .block(Block::default().borders(Borders::ALL).title(" Setup ").style(Style::default().bg(Color::Black)))
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
+}
+
+// Helper function to create a centered rect
+fn centered_rect(percent_x: u16, percent_y: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - percent_y) / 2),
+            ratatui::layout::Constraint::Percentage(percent_y),
+            ratatui::layout::Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            ratatui::layout::Constraint::Percentage((100 - percent_x) / 2),
+            ratatui::layout::Constraint::Percentage(percent_x),
+            ratatui::layout::Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn render_authenticating(frame: &mut Frame) {
@@ -121,7 +253,7 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
     };
 
     let text = vec![
-        Line::from("Spotify Developer credentials not found in ~/.config/echo/config.toml"),
+        Line::from("Spotify Developer credentials not found in config.toml"),
         Line::from("Please paste your Client ID and Client Secret."),
         Line::from("Press [TAB] to switch fields, [ENTER] to save and authenticate."),
         Line::from(""),
@@ -132,3 +264,4 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
     let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Left);
     frame.render_widget(paragraph, setup_area);
 }
+

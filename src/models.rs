@@ -9,4 +9,5 @@ pub struct Track {
     pub id: String,
     pub name: String,
     pub artist: String,
+    pub duration_ms: u32,
 }

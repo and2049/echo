@@ -1,15 +1,13 @@
-use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{AppState, AppMode};
-use crate::config::{AppConfig, SpotifyCredentials};
 use crate::events::AppEvent;
+use crate::config::{AppConfig, SpotifyCredentials};
+use crossterm::event::{KeyEvent, KeyCode};
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
-        KeyCode::Esc => {
-            state.is_running = false;
-        }
         KeyCode::Tab => {
             state.setup_focus_secret = !state.setup_focus_secret;
+            None
         }
         KeyCode::Enter => {
             if !state.setup_client_id.is_empty() && !state.setup_client_secret.is_empty() {
@@ -21,7 +19,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let _ = config.save();
                 
                 state.mode = AppMode::Authenticating;
-                return Some(AppEvent::StartAuth);
+                Some(AppEvent::StartAuth)
+            } else {
+                None
             }
         }
         KeyCode::Backspace => {
@@ -30,6 +30,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             } else {
                 state.setup_client_id.pop();
             }
+            None
         }
         KeyCode::Char(c) => {
             if state.setup_focus_secret {
@@ -37,8 +38,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             } else {
                 state.setup_client_id.push(c);
             }
+            None
         }
-        _ => {}
+        KeyCode::Esc => Some(AppEvent::Quit),
+        _ => None
     }
-    None
 }

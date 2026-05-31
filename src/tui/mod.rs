@@ -1,4 +1,3 @@
-pub mod layout;
 pub mod render;
 
 use std::io::{stdout, Stdout};

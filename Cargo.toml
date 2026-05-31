@@ -8,7 +8,17 @@ anyhow = "1.0.102"
 chrono = "0.4.44"
 crossterm = "0.29.0"
 dirs = "6.0.0"
+env_logger = "0.11.10"
+futures-util = "0.3.32"
+image = "0.25.10"
+librespot-connect = { git = "https://github.com/librespot-org/librespot" }
+librespot-core = { git = "https://github.com/librespot-org/librespot" }
+librespot-discovery = { git = "https://github.com/librespot-org/librespot" }
+librespot-oauth = { git = "https://github.com/librespot-org/librespot" }
+librespot-playback = { git = "https://github.com/librespot-org/librespot", features = ["rodio-backend"] }
 ratatui = "0.30.0"
+ratatui-image = { version = "11.0.2", default-features = false, features = ["image-defaults", "crossterm"] }
+reqwest = "0.13.4"
 rspotify = { version = "0.16.1", features = ["cli"] }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"

@@ -3,11 +3,6 @@ use std::path::PathBuf;
 use std::fs;
 use anyhow::Result;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct SpotifyCredentials {
-    pub client_id: String,
-    pub client_secret: String,
-}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuthTokens {
@@ -15,7 +10,13 @@ pub struct AuthTokens {
     pub refresh_token: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct SpotifyCredentials {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
 pub struct AppConfig {
     pub spotify_credentials: Option<SpotifyCredentials>,
     pub auth_tokens: Option<AuthTokens>,

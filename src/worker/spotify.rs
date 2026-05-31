@@ -6,6 +6,7 @@ use anyhow::Result;
 
 pub struct SpotifyWorker {
     pub client: AuthCodeSpotify,
+    pub device_id: Option<String>,
 }
 
 impl SpotifyWorker {
@@ -20,6 +21,8 @@ impl SpotifyWorker {
             "user-library-read",
             "user-modify-playback-state",
             "user-read-playback-state",
+            "streaming",
+            "app-remote-control",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -48,11 +51,12 @@ impl SpotifyWorker {
                     };
                     
                     *spotify.get_token().lock().await.unwrap() = Some(token);
-                    return Ok(Self { client: spotify });
+                    return Ok(Self { client: spotify, device_id: None });
                 }
             }
         }
         
+        // AuthCodeSpotify standard challenge
         let auth_url = spotify.get_authorize_url(false)?;
         
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -84,7 +88,7 @@ impl SpotifyWorker {
             }
         }
         
-        // Write the fetched tokens to our BYOK config.toml
+        // Write the fetched tokens to our config.toml
         let token_mutex = spotify.get_token();
         let token_guard = token_mutex.lock().await;
         if let Some(t) = token_guard.unwrap().as_ref() {
@@ -96,7 +100,77 @@ impl SpotifyWorker {
             let _ = app_config.save();
         }
         
-        Ok(Self { client: spotify })
+        Ok(Self { client: spotify, device_id: None })
+    }
+
+    pub async fn get_device_id(&mut self) -> Option<String> {
+        if self.device_id.is_some() {
+            return self.device_id.clone();
+        }
+        
+        if let Ok(devices) = self.client.device().await {
+            for d in devices {
+                if d.name == "Echo TUI" {
+                    self.device_id = d.id.clone();
+                    return self.device_id.clone();
+                }
+            }
+        }
+        None
+    }
+
+    pub async fn sync_playback_state(&mut self) -> Result<Option<(bool, bool, u32, u32, Option<String>)>> {
+        if let Ok(Some(playback)) = self.client.current_playback(None, None::<Vec<_>>).await {
+            let is_playing = playback.is_playing;
+            let is_shuffled = playback.shuffle_state;
+            let progress_ms = playback.progress.unwrap_or_default().num_milliseconds() as u32;
+            
+            let mut duration_ms = 0;
+            let mut track_id = None;
+            if let Some(rspotify::model::PlayableItem::Track(t)) = playback.item {
+                duration_ms = t.duration.num_milliseconds() as u32;
+                track_id = t.id.map(|i| i.id().to_string());
+            }
+            
+            // Auto-cache the device ID if we found an active playback
+            if self.device_id.is_none() {
+                let device = &playback.device;
+                if device.name == "Echo TUI" {
+                    self.device_id = device.id.clone();
+                }
+            }
+            
+            return Ok(Some((is_playing, is_shuffled, progress_ms, duration_ms, track_id)));
+        }
+        Ok(None)
+    }
+
+    pub async fn toggle_playback(&mut self, is_playing: bool) -> Result<()> {
+        let device = self.get_device_id().await;
+        if is_playing {
+            self.client.resume_playback(device.as_deref(), None).await?;
+        } else {
+            self.client.pause_playback(device.as_deref()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn next_track(&mut self) -> Result<()> {
+        let device = self.get_device_id().await;
+        self.client.next_track(device.as_deref()).await?;
+        Ok(())
+    }
+
+    pub async fn previous_track(&mut self) -> Result<()> {
+        let device = self.get_device_id().await;
+        self.client.previous_track(device.as_deref()).await?;
+        Ok(())
+    }
+
+    pub async fn toggle_shuffle(&mut self, is_shuffled: bool) -> Result<()> {
+        let device = self.get_device_id().await;
+        self.client.shuffle(is_shuffled, device.as_deref()).await?;
+        Ok(())
     }
 
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
@@ -118,12 +192,47 @@ impl SpotifyWorker {
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
                 out.push(Track {
-                    id: track.id.map(|i| i.to_string()).unwrap_or_default(),
+                    id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     name: track.name,
                     artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    duration_ms: track.duration.num_milliseconds() as u32,
                 });
             }
         }
         Ok(out)
+    }
+
+    pub async fn play_track(&mut self, playlist_id: &str, track_id: &str) -> Result<()> {
+        let target_device = self.get_device_id().await;
+        
+        let context_uri = rspotify::model::PlayContextId::Playlist(rspotify::model::PlaylistId::from_id(playlist_id)?);
+        let track_uri = rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
+        let offset = rspotify::model::Offset::Uri(track_uri.uri());
+        
+        let res = self.client.start_context_playback(
+            context_uri,
+            target_device.as_deref(),
+            Some(offset),
+            None
+        ).await;
+
+        if let Err(e) = &res {
+            let _ = std::fs::write("echo-debug.log", format!("Playback error: {:?}\n", e));
+        }
+        
+        res?;
+        Ok(())
+    }
+
+    pub async fn get_track_metadata(&self, track_id: &str) -> anyhow::Result<(String, String, Option<String>)> {
+        use rspotify::model::TrackId;
+        let id = TrackId::from_id(track_id)?;
+        let track = self.client.track(id, None).await?;
+        
+        let title = track.name;
+        let artist = track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+        let image_url = track.album.images.first().map(|img| img.url.clone());
+        
+        Ok((title, artist, image_url))
     }
 }
