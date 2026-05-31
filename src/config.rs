@@ -20,6 +20,30 @@ pub struct SpotifyCredentials {
 pub struct AppConfig {
     pub spotify_credentials: Option<SpotifyCredentials>,
     pub auth_tokens: Option<AuthTokens>,
+    #[serde(default)]
+    pub library: LibraryConfig,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct LibraryConfig {
+    pub pinned: Vec<String>,
+    pub folders: Vec<Folder>,
+    pub sort_mode: SortMode,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub struct Folder {
+    pub name: String,
+    pub is_open: bool,
+    pub playlists: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone, PartialEq)]
+pub enum SortMode {
+    #[default]
+    Default,
+    Alphabetical,
+    Creator,
 }
 
 impl AppConfig {

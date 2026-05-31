@@ -2,6 +2,13 @@
 pub struct Playlist {
     pub id: String,
     pub name: String,
+    pub owner: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum LibraryNode {
+    Playlist { playlist: Playlist, indent: usize },
+    Folder(crate::config::Folder),
 }
 
 #[derive(Clone, Debug)]

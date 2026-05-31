@@ -299,9 +299,11 @@ impl SpotifyWorker {
             .await?;
         let mut out = Vec::new();
         for p in page.items {
+            let owner = p.owner.display_name.clone().unwrap_or_else(|| p.owner.id.id().to_string());
             out.push(Playlist {
                 id: p.id.id().to_string(),
                 name: p.name,
+                owner,
             });
         }
         Ok(out)

@@ -56,16 +56,43 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
 
     // Render Main Content
     let library_items: Vec<ListItem> = state
-        .playlists
+        .library_view
         .iter()
         .enumerate()
-        .map(|(i, p)| {
+        .map(|(i, node)| {
             let style = if i == state.selected_playlist_index {
                 Style::default().bg(Color::White).fg(Color::Black)
             } else {
                 Style::default()
             };
-            ListItem::new(p.name.clone()).style(style)
+            
+            match node {
+                crate::models::LibraryNode::Folder(f) => {
+                    let prefix = if f.is_open { "▼" } else { "▶" };
+                    let text = format!("{} {}", prefix, f.name);
+                    ListItem::new(text).style(style.fg(Color::Cyan).add_modifier(ratatui::style::Modifier::BOLD))
+                }
+                crate::models::LibraryNode::Playlist { playlist, indent } => {
+                    let mut prefix = String::new();
+                    for _ in 0..*indent {
+                        prefix.push_str("  ");
+                    }
+                    if state.library_config.pinned.contains(&playlist.id) {
+                        prefix.push_str("📌 ");
+                    }
+                    
+                    let text = format!("{}{}", prefix, playlist.name);
+                    
+                    // Mark as ghosted if it is in the cut register
+                    let list_style = if state.operation_register.contains(&playlist.id) {
+                        style.fg(Color::DarkGray)
+                    } else {
+                        style
+                    };
+                    
+                    ListItem::new(text).style(list_style)
+                }
+            }
         })
         .collect();
     let library_style = if state.active_view == ActiveView::Library {
@@ -213,11 +240,36 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
 
     // Render Command Bar
     let cmd_text = match state.mode {
-        AppMode::Command => ":",
-        _ => "",
+        AppMode::Command => format!(":{}", state.command_buffer),
+        _ => String::new(),
     };
     let cmd_bar = Paragraph::new(cmd_text).style(Style::default());
     frame.render_widget(cmd_bar, chunks[4]);
+
+    if let Some(folder_name) = &state.folder_delete_prompt {
+        let popup_area = centered_rect(60, 40, frame.area());
+        let popup = Paragraph::new(vec![
+            Line::from(Span::styled(
+                format!("Are you sure you want to delete the folder '{}'?", folder_name),
+                Style::default().fg(Color::Red),
+            )),
+            Line::from(""),
+            Line::from("Any playlists inside will be safely returned to the main library."),
+            Line::from(""),
+            Line::from(Span::styled("Press 'y' to confirm or any other key to cancel.", Style::default().add_modifier(ratatui::style::Modifier::BOLD))),
+        ])
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Delete Folder ")
+                .style(Style::default().bg(Color::Black)),
+        )
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
 
     // Check if we are waiting for discovery
     if std::path::Path::new("echo-librespot-status.log").exists() {

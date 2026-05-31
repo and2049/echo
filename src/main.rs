@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
 
     let config = config::AppConfig::load();
     let mut state = AppState::default();
+    state.library_config = config.library.clone();
 
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
     if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
@@ -123,6 +124,7 @@ async fn main() -> Result<()> {
                 }
                 WorkerEvent::PlaylistsLoaded(playlists) => {
                     state.playlists = playlists;
+                    state.compute_library_view();
                 }
                 WorkerEvent::TracksLoaded(tracks) => {
                     state.tracks = tracks;
