@@ -6,7 +6,8 @@ use ratatui::{
     style::Modifier,
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Gauge, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Block, Borders, Cell, Gauge, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
+        Table, TableState,
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -111,13 +112,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         .style(state.active_theme.base_style())
         .border_style(library_border_style)
         .title(title_text);
-    let library_inner_area = library_block.inner(library_area);
-    let library_list_area = Rect::new(
-        library_inner_area.x,
-        library_inner_area.y,
-        library_inner_area.width.saturating_sub(1),
-        library_inner_area.height,
-    );
+    let library_list_area = library_block.inner(library_area);
     frame.render_widget(library_block, library_area);
 
     if state.active_library_tab == crate::app::LibraryTab::Albums {
@@ -135,7 +130,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             })
             .collect();
 
-        let list = List::new(items).highlight_style(
+        let list = padded_library_list(items).highlight_style(
             state
                 .active_theme
                 .selected_style()
@@ -147,7 +142,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         frame.render_stateful_widget(list, library_list_area, &mut list_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else {
-        let playlist_list = List::new(library_items);
+        let playlist_list = padded_library_list(library_items);
         let mut playlist_state = ListState::default();
         playlist_state.select(Some(state.selected_playlist_index));
         frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
@@ -204,8 +199,9 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         .borders(Borders::ALL)
         .style(state.active_theme.base_style())
         .border_style(track_border_style);
+    let track_inner_area = track_block.inner(tracks_area);
 
-    let header_style = state.active_theme.table_header_style();
+    let header_style = track_border_style.add_modifier(Modifier::BOLD);
 
     let table = if is_albums_tab {
         let header = Row::new(vec!["Track", "Duration"])
@@ -215,6 +211,9 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             .column_spacing(1)
             .header(header)
             .block(track_block)
+            .row_highlight_style(state.active_theme.selected_style())
+            .highlight_symbol(" ")
+            .highlight_spacing(HighlightSpacing::Always)
     } else {
         let header = Row::new(vec!["Track", "Artist", "Duration"])
             .style(header_style)
@@ -230,11 +229,15 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         .column_spacing(1)
         .header(header)
         .block(track_block)
+        .row_highlight_style(state.active_theme.selected_style())
+        .highlight_symbol(" ")
+        .highlight_spacing(HighlightSpacing::Always)
     };
 
     let mut track_state = TableState::default();
     track_state.select(Some(state.selected_track_index));
     frame.render_stateful_widget(table, tracks_area, &mut track_state);
+    repair_wide_grapheme_trailing_styles(frame.buffer_mut(), track_inner_area);
 
     // Render Playback Bar Border
     let shuffle_str = if state.playback.is_shuffled {
@@ -460,6 +463,12 @@ fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
             x = x.saturating_add(width.max(1));
         }
     }
+}
+
+fn padded_library_list(items: Vec<ListItem>) -> List {
+    List::new(items)
+        .highlight_symbol(" ")
+        .highlight_spacing(HighlightSpacing::Always)
 }
 
 fn stabilize_terminal_emoji_width(text: &str) -> String {

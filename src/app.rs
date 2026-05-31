@@ -1,5 +1,5 @@
 use crate::models::{Playlist, Track};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 
 pub struct PlaybackState {
     pub is_playing: bool,
@@ -63,10 +63,6 @@ impl ResolvedTheme {
 
     pub fn selected_style(&self) -> Style {
         Style::default().fg(self.highlight_fg).bg(self.highlight_bg)
-    }
-
-    pub fn table_header_style(&self) -> Style {
-        self.primary_style().add_modifier(Modifier::BOLD)
     }
 
     pub fn gauge_style(&self) -> Style {

@@ -1,5 +1,5 @@
-primary = "#c4f765"
-secondary = "#ff7b64"
+primary = "#ff7b64"
+secondary = "#c4f765"
 background = "#131314"
 text = "#faf6c6"
 text_muted = "#494640" # progress remaining
