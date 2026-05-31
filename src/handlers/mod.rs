@@ -1,6 +1,6 @@
+pub mod command;
 pub mod normal;
 pub mod setup;
-pub mod command;
 
 use crate::app::{AppMode, AppState};
 use crate::events::AppEvent;
@@ -11,14 +11,12 @@ pub fn handle_event(state: &mut AppState, event: &AppEvent) -> Option<AppEvent> 
             state.is_running = false;
             None
         }
-        AppEvent::Key(key_event) => {
-            match state.mode {
-                AppMode::Setup => setup::handle_key(state, key_event),
-                AppMode::Normal => normal::handle_key(state, key_event),
-                AppMode::Command => command::handle_key(state, key_event),
-                _ => None
-            }
-        }
-        _ => None
+        AppEvent::Key(key_event) => match state.mode {
+            AppMode::Setup => setup::handle_key(state, key_event),
+            AppMode::Normal => normal::handle_key(state, key_event),
+            AppMode::Command => command::handle_key(state, key_event),
+            _ => None,
+        },
+        _ => None,
     }
 }

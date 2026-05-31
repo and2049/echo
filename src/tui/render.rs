@@ -59,7 +59,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             match node {
                 crate::models::LibraryNode::Folder(f) => {
                     let prefix = if f.is_open { "▼" } else { "▶" };
-                    let text = format!("{} {}", prefix, f.name);
+                    let text = format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name));
                     let folder_style = if i == state.selected_playlist_index {
                         style
                     } else {
@@ -76,7 +76,11 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                         prefix.push_str("📌 ");
                     }
 
-                    let text = format!("{}{}", prefix, playlist.name);
+                    let text = format!(
+                        "{}{}",
+                        prefix,
+                        stabilize_terminal_emoji_width(&playlist.name)
+                    );
 
                     // Mark as ghosted if it is in the cut register
                     let list_style = if state.operation_register.contains(&playlist.id) {
@@ -127,7 +131,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                 } else {
                     state.active_theme.base_style()
                 };
-                ListItem::new(album.name.clone()).style(style)
+                ListItem::new(stabilize_terminal_emoji_width(&album.name)).style(style)
             })
             .collect();
 
@@ -170,13 +174,17 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
                 ""
             };
 
-            let track_cell = Cell::from(format!("{}{}", prefix, t.name));
+            let track_cell = Cell::from(format!(
+                "{}{}",
+                prefix,
+                stabilize_terminal_emoji_width(&t.name)
+            ));
             let duration_cell = Cell::from(format_time(t.duration_ms / 1000));
 
             let row = if is_albums_tab {
                 Row::new(vec![track_cell, duration_cell])
             } else {
-                let artist_cell = Cell::from(t.artist.clone());
+                let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
                 Row::new(vec![track_cell, artist_cell, duration_cell])
             };
 
@@ -328,10 +336,10 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let track_title = if state.playback.playing_track_title.is_empty() {
         String::new()
     } else {
-        state.playback.playing_track_title.clone()
+        stabilize_terminal_emoji_width(&state.playback.playing_track_title)
     };
 
-    let track_artist = state.playback.playing_track_artist.clone();
+    let track_artist = stabilize_terminal_emoji_width(&state.playback.playing_track_artist);
 
     let text_lines = vec![
         Line::from(Span::styled(
@@ -446,12 +454,33 @@ fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
             if width > 1 {
                 let style = buffer[(x, y)].style();
                 for hidden_x in (x + 1)..x.saturating_add(width).min(area.right()) {
-                    buffer[(hidden_x, y)].set_style(style);
+                    buffer[(hidden_x, y)].set_style(style).set_skip(true);
                 }
             }
             x = x.saturating_add(width.max(1));
         }
     }
+}
+
+fn stabilize_terminal_emoji_width(text: &str) -> String {
+    let mut stabilized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        stabilized.push(ch);
+
+        if needs_emoji_variation_selector(ch)
+            && !matches!(chars.peek(), Some('\u{fe0e}' | '\u{fe0f}'))
+        {
+            stabilized.push('\u{fe0f}');
+        }
+    }
+
+    stabilized
+}
+
+fn needs_emoji_variation_selector(ch: char) -> bool {
+    matches!(ch, '\u{1f578}')
 }
 
 // Helper function to create a centered rect
@@ -560,12 +589,13 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
 
 #[cfg(test)]
 mod tests {
-    use super::repair_wide_grapheme_trailing_styles;
+    use super::{repair_wide_grapheme_trailing_styles, stabilize_terminal_emoji_width};
     use ratatui::{
         buffer::Buffer,
         layout::Rect,
         style::{Color, Style},
     };
+    use unicode_width::UnicodeWidthStr;
 
     fn render_row_text(text: &str, style: Style) -> Buffer {
         let area = Rect::new(0, 0, 24, 1);
@@ -587,6 +617,7 @@ mod tests {
         assert_eq!(buffer[(1, 0)].symbol(), " ");
         assert_eq!(buffer[(1, 0)].fg, Color::White);
         assert_eq!(buffer[(1, 0)].bg, Color::Rgb(12, 34, 56));
+        assert!(buffer[(1, 0)].skip);
     }
 
     #[test]
@@ -601,6 +632,7 @@ mod tests {
         assert_eq!(buffer[(1, 0)].symbol(), " ");
         assert_eq!(buffer[(1, 0)].fg, Color::Cyan);
         assert_eq!(buffer[(1, 0)].bg, Color::Rgb(8, 9, 10));
+        assert!(buffer[(1, 0)].skip);
     }
 
     #[test]
@@ -625,6 +657,7 @@ mod tests {
 
         assert_eq!(buffer[(1, 0)].fg, Color::Black);
         assert_eq!(buffer[(1, 0)].bg, Color::White);
+        assert!(buffer[(1, 0)].skip);
     }
 
     #[test]
@@ -640,5 +673,40 @@ mod tests {
         assert_eq!(buffer[(4, 0)].symbol(), "│");
         assert_eq!(buffer[(4, 0)].fg, Color::Magenta);
         assert_eq!(buffer[(4, 0)].bg, Color::Rgb(1, 2, 3));
+    }
+
+    #[test]
+    fn repair_skips_hidden_cells_in_diff() {
+        let old_style = Style::default().fg(Color::White).bg(Color::Black);
+        let new_style = Style::default().fg(Color::Black).bg(Color::White);
+        let mut previous = render_row_text("♥️ Liked Songs", old_style);
+        repair_wide_grapheme_trailing_styles(&mut previous, Rect::new(0, 0, 24, 1));
+
+        let mut next = render_row_text("♥️ Liked Songs", new_style);
+        repair_wide_grapheme_trailing_styles(&mut next, Rect::new(0, 0, 24, 1));
+
+        let diff = previous.diff(&next);
+
+        assert!(
+            diff.iter()
+                .any(|(x, y, cell)| { *x == 0 && *y == 0 && cell.symbol() == "♥️" })
+        );
+        assert!(!diff.iter().any(|(x, y, _)| *x == 1 && *y == 0));
+    }
+
+    #[test]
+    fn stabilizes_cobweb_to_emoji_width() {
+        let stabilized = stabilize_terminal_emoji_width("🕸");
+
+        assert_eq!(stabilized, "🕸️");
+        assert_eq!(stabilized.width(), 2);
+    }
+
+    #[test]
+    fn does_not_duplicate_existing_cobweb_variation_selector() {
+        let stabilized = stabilize_terminal_emoji_width("🕸️");
+
+        assert_eq!(stabilized, "🕸️");
+        assert_eq!(stabilized.width(), 2);
     }
 }

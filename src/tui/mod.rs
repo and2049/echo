@@ -4,10 +4,7 @@ use anyhow::Result;
 use crossterm::style::{Color as CrosstermColor, ResetColor, SetBackgroundColor};
 use crossterm::{
     execute,
-    terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend, style::Color as RatatuiColor};
 use std::io::{Stdout, stdout};
@@ -34,27 +31,22 @@ impl Tui {
         Ok(())
     }
 
-    pub fn apply_background(&mut self, color: RatatuiColor) -> Result<()> {
-        if self.background == Some(color) {
+    pub fn apply_background(&mut self, color: RatatuiColor, force_clear: bool) -> Result<()> {
+        if self.background == Some(color) && !force_clear {
             return Ok(());
         }
 
         match to_crossterm_color(color) {
             CrosstermColor::Reset => {
-                execute!(
-                    self.terminal.backend_mut(),
-                    ResetColor,
-                    Clear(ClearType::All)
-                )?;
+                execute!(self.terminal.backend_mut(), ResetColor)?;
             }
             color => {
-                execute!(
-                    self.terminal.backend_mut(),
-                    SetBackgroundColor(color),
-                    Clear(ClearType::All)
-                )?;
+                execute!(self.terminal.backend_mut(), SetBackgroundColor(color))?;
             }
         }
+
+        self.terminal.clear()?;
+        execute!(self.terminal.backend_mut(), ResetColor)?;
         self.background = Some(color);
         Ok(())
     }

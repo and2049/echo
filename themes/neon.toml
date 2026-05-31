@@ -1,0 +1,8 @@
+primary = "#c4f765"
+secondary = "#ff7b64"
+background = "#131314"
+text = "#faf6c6"
+text_muted = "#494640" # progress remaining
+highlight_bg = "#f7b87e"
+highlight_fg = "#25251a"
+error = "Red"

@@ -91,7 +91,9 @@ async fn main() -> Result<()> {
     tui.enter()?;
 
     while state.is_running {
-        tui.apply_background(state.active_theme.background)?;
+        let force_clear = state.needs_terminal_clear;
+        tui.apply_background(state.active_theme.background, force_clear)?;
+        state.needs_terminal_clear = false;
         tui.terminal.draw(|f| {
             tui::render::render_app(f, &state);
         })?;

@@ -137,6 +137,7 @@ pub struct AppState {
     pub playback: PlaybackState,
     pub themes: std::collections::HashMap<String, crate::config::Theme>,
     pub active_theme: ResolvedTheme,
+    pub needs_terminal_clear: bool,
 }
 
 impl AppState {
@@ -185,6 +186,7 @@ impl AppState {
             playback: PlaybackState::default(),
             themes,
             active_theme,
+            needs_terminal_clear: true,
         }
     }
 }

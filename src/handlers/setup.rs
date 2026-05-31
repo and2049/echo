@@ -1,7 +1,7 @@
-use crate::app::{AppState, AppMode};
-use crate::events::AppEvent;
+use crate::app::{AppMode, AppState};
 use crate::config::{AppConfig, SpotifyCredentials};
-use crossterm::event::{KeyEvent, KeyCode};
+use crate::events::AppEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
@@ -17,7 +17,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     client_secret: state.setup_client_secret.clone(),
                 });
                 let _ = config.save();
-                
+
                 state.mode = AppMode::Authenticating;
                 Some(AppEvent::StartAuth)
             } else {
@@ -41,6 +41,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             None
         }
         KeyCode::Esc => Some(AppEvent::Quit),
-        _ => None
+        _ => None,
     }
 }

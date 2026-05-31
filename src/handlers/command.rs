@@ -78,6 +78,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 state.active_theme =
                                     crate::app::ResolvedTheme::from_theme(theme_config);
                                 state.library_config.active_theme = Some(theme_name.to_string());
+                                state.needs_terminal_clear = true;
                                 state.save_library_config();
                                 state.status_message = Some(format!("Theme: {}", theme_name));
                             } else {
