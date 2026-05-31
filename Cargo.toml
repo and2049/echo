@@ -5,7 +5,13 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+chrono = "0.4.44"
 crossterm = "0.29.0"
+dirs = "6.0.0"
 ratatui = "0.30.0"
+rspotify = { version = "0.16.1", features = ["cli"] }
+serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
+toml = "1.1.2"
+webbrowser = "1.2.1"

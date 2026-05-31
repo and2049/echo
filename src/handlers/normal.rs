@@ -1,7 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{AppState, ActiveView};
+use crate::events::AppEvent;
 
-pub fn handle_key(state: &mut AppState, key: &KeyEvent) {
+pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => {
             state.is_running = false;
@@ -36,8 +37,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) {
         }
         KeyCode::Enter | KeyCode::Char('l') => {
             if state.active_view == ActiveView::Library {
-                state.active_view = ActiveView::TrackList;
-                state.selected_track_index = 0; // Reset track selection when entering
+                if state.selected_playlist_index < state.playlists.len() {
+                    let playlist_id = state.playlists[state.selected_playlist_index].id.clone();
+                    
+                    // Instantly swap view to provide UI feedback while the network request runs in background
+                    state.active_view = ActiveView::TrackList;
+                    state.tracks.clear();
+                    state.selected_track_index = 0;
+                    
+                    return Some(AppEvent::LoadPlaylistTracks(playlist_id));
+                }
             }
         }
         KeyCode::Backspace | KeyCode::Char('h') => {
@@ -47,4 +56,5 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) {
         }
         _ => {}
     }
+    None
 }
