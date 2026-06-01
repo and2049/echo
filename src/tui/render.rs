@@ -16,7 +16,7 @@ const ROW_TEXT_LEFT_GUTTER: u16 = 1;
 const ROW_TEXT_RIGHT_GUTTER: u16 = 1;
 pub const DURATION_COLUMN_WIDTH: u16 = 9;
 
-pub fn render_app(frame: &mut Frame, state: &AppState) {
+pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     fill_background(frame, state);
 
     if state.mode == AppMode::Setup {
@@ -169,11 +169,15 @@ pub fn fill_background(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let style = state.active_theme.base_style();
     let buffer = frame.buffer_mut();
-    buffer.set_style(area, style);
 
     for y in area.top()..area.bottom() {
         for x in area.left()..area.right() {
-            buffer[(x, y)].set_symbol(" ");
+            let cell = &mut buffer[(x, y)];
+            if cell.skip {
+                continue;
+            }
+            cell.set_style(style);
+            cell.set_symbol(" ");
         }
     }
 }

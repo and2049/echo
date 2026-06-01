@@ -78,17 +78,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         },
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('z') => {
             if state.active_view == ActiveView::Library {
-                let context_id = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                let (context_id, image_url) = if state.active_library_tab == crate::app::LibraryTab::Albums {
                     if state.selected_playlist_index < state.saved_albums.len() {
-                        state.saved_albums[state.selected_playlist_index].id.clone()
+                        let album = &state.saved_albums[state.selected_playlist_index];
+                        (album.id.clone(), album.image_url.clone())
                     } else {
-                        String::new()
+                        (String::new(), None)
                     }
                 } else {
                     if state.selected_playlist_index < state.library_view.len() {
                         match &state.library_view[state.selected_playlist_index] {
                             crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                playlist.id.clone()
+                                (playlist.id.clone(), playlist.image_url.clone())
                             }
                             crate::models::LibraryNode::Folder(f) => {
                                 let folder_name = f.name.clone();
@@ -102,11 +103,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 }
                                 state.save_library_config();
                                 state.compute_library_view();
-                                String::new()
+                                (String::new(), None)
                             }
                         }
                     } else {
-                        String::new()
+                        (String::new(), None)
                     }
                 };
 
@@ -115,7 +116,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.active_view = ActiveView::TrackList;
                     state.tracks.clear();
                     state.selected_track_index = 0;
-                    return Some(AppEvent::LoadContextTracks(context_id, is_album));
+                    state.active_library_header_image = None;
+                    state.header_image_cache = None;
+                    state.header_image_dirty = false;
+                    return Some(AppEvent::LoadContextTracks(context_id, is_album, image_url));
                 }
             } else if state.active_view == ActiveView::TrackList {
                 if state.selected_track_index < state.tracks.len() {
@@ -177,7 +181,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.selected_track_index = 0;
                             // Stash SearchResults as previous view context
                             state.prev_view = None; // album loaded from search, Backspace returns to Search
-                            return Some(AppEvent::LoadContextTracks(album_id, true));
+                            return Some(AppEvent::LoadContextTracks(album_id, true, None));
                         }
                     }
                 }

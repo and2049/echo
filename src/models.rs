@@ -3,12 +3,15 @@ pub struct Playlist {
     pub id: String,
     pub name: String,
     pub owner: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Album {
     pub id: String,
     pub name: String,
+    pub artists: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]

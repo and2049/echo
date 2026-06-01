@@ -3,7 +3,7 @@ use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
     Key(KeyEvent),
-    LoadContextTracks(String, bool),
+    LoadContextTracks(String, bool, Option<String>),
     PlayTrack {
         context_id: String,
         track_id: String,
@@ -58,9 +58,10 @@ pub enum WorkerEvent {
     },
     TrackImageProcessed {
         track_id: String,
-        protocol: ratatui_image::protocol::Protocol,
+        protocol: ratatui_image::protocol::StatefulProtocol,
     },
     SearchResultsLoaded(SearchResults),
     QueueLoaded(Vec<Track>),
     TracksQueued(usize),
+    HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
 }

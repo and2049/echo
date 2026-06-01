@@ -8,7 +8,7 @@ use ratatui::{
 };
 use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
 
-pub fn render_playback_bar(frame: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let shuffle_str = if state.playback.is_shuffled {
         "On"
     } else {
@@ -93,15 +93,21 @@ pub fn render_playback_bar(frame: &mut Frame, state: &AppState, area: Rect) {
         ])
         .split(playback_chunks[0]);
 
-    if let Some(ref protocol) = state.playback.playing_track_image {
-        let image = ratatui_image::Image::new(protocol);
+    let protocol = state
+        .playback
+        .playing_track_image
+        .as_mut()
+        .or_else(|| state.playback.previous_track_image.as_mut());
+
+    if let Some(protocol) = protocol {
+        let image = ratatui_image::StatefulImage::default();
         let mut image_area = track_info_chunks[1];
         // Center vertically in the 7-row tall block (1 row top padding, 1 row bottom padding)
         if image_area.height >= 7 {
             image_area.y += 1;
             image_area.height = 5;
         }
-        frame.render_widget(image, image_area);
+        frame.render_stateful_widget(image, image_area, protocol);
     }
 
     // Create Title & Artist Text

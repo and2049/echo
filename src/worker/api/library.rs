@@ -27,6 +27,7 @@ impl SpotifyWorker {
                 id: p.id.id().to_string(),
                 name: p.name,
                 owner,
+                image_url: p.images.first().map(|i| i.url.clone()),
             });
         }
         Ok(out)
@@ -44,6 +45,8 @@ impl SpotifyWorker {
                 out.push(crate::models::Album {
                     id: album.id.id().to_string(),
                     name: album.name,
+                    artists: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    image_url: album.images.first().map(|i| i.url.clone()),
                 });
             }
             if out.len() >= 100 {

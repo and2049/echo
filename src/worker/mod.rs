@@ -98,25 +98,28 @@ impl Worker {
 
     pub async fn run(mut self) {
         let mut spotify_opt: Option<SpotifyWorker> = None;
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         let mut sync_interval = tokio::time::interval(std::time::Duration::from_secs(10));
-        let mut is_playing = false;
+        let is_playing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut current_track_id: Option<String> = None;
 
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
-                    if let Some(ref mut sp) = spotify_opt
-                        && let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
-                            is_playing = playing;
-                            if let Some(item) = item.as_ref() {
-                                current_track_id = Some(item.id.clone());
+                    if let Some(ref sp) = spotify_opt {
+                        let client = sp.client.clone();
+                        let tx = self.tx.clone();
+                        let is_playing_clone = is_playing.clone();
+                        tokio::spawn(async move {
+                            if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = SpotifyWorker::playback_snapshot_from_client(&client).await {
+                                is_playing_clone.store(playing, std::sync::atomic::Ordering::SeqCst);
+                                let _ = tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                             }
-                            let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
-                        }
+                        });
+                    }
                 }
                 _ = interval.tick() => {
-                    if is_playing {
+                    if is_playing.load(std::sync::atomic::Ordering::SeqCst) {
                         let _ = self.tx.send(WorkerEvent::Tick).await;
                     }
                 }
@@ -146,11 +149,19 @@ impl Worker {
                                             let mut found_playback = false;
                                             for _ in 0..5 {
                                                 if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
-                                                    is_playing = playing;
+                                                    let mut actual_playing = playing;
+                                                    
+                                                    // On first boot, if librespot automatically resumed playing, force it to pause
+                                                    if playing && dev_name == "echo-rs" {
+                                                        let _ = sp.toggle_playback(false).await;
+                                                        actual_playing = false;
+                                                    }
+
+                                                    is_playing.store(actual_playing, std::sync::atomic::Ordering::SeqCst);
                                                     if let Some(item) = item.as_ref() {
                                                         current_track_id = Some(item.id.clone());
                                                     }
-                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
+                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: actual_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                                                     found_playback = true;
                                                     break;
                                                 }
@@ -168,7 +179,7 @@ impl Worker {
                                         }
                                     }
                             }
-                            AppEvent::LoadContextTracks(id, is_album) => {
+                            AppEvent::LoadContextTracks(id, is_album, _) => {
                                 if let Some(ref sp) = spotify_opt {
                                     let tracks = if is_album {
                                         sp.fetch_album_tracks(&id).await.unwrap_or_default()
@@ -182,7 +193,7 @@ impl Worker {
                                 if let Some(ref mut sp) = spotify_opt {
                                     match sp.play_track(&context_id, &track_id, is_album).await {
                                         Ok(_) => {
-                                            is_playing = true;
+                                            is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                             current_track_id = Some(track_id.clone());
                                             let item = PlaybackItem {
                                                 id: track_id,
@@ -202,6 +213,7 @@ impl Worker {
                                 }
                             }
                             AppEvent::TogglePlayback(playing) => {
+                                is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
                                 if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.toggle_playback(playing).await;
                                 }
@@ -229,7 +241,7 @@ impl Worker {
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.next_track().await;
-                                    is_playing = true;
+                                    is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
                                     Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, false);
                                 }
@@ -237,7 +249,7 @@ impl Worker {
                             AppEvent::PreviousTrack { current_track_id: ui_current_track_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.previous_track().await;
-                                    is_playing = true;
+                                    is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
                                     Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, true);
                                 }

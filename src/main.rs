@@ -29,20 +29,42 @@ fn spawn_track_image_processing(
         if let Ok(resp) = reqwest::get(&url).await
             && let Ok(bytes) = resp.bytes().await
                 && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
-                    if let Ok(dyn_img) = image::load_from_memory(&bytes)
-                        && let Ok(protocol) = picker_clone.new_protocol(
-                            dyn_img,
-                            ratatui::layout::Size::new(10, 5),
-                            ratatui_image::Resize::Fit(None),
-                        ) {
-                            return Some(protocol);
-                        }
+                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                        let protocol = picker_clone.new_resize_protocol(dyn_img);
+                        return Some(protocol);
+                    }
                     None
                 })
                 .await
                     && let Some(protocol) = image_handle {
                         let _ = tx
                             .send(WorkerEvent::TrackImageProcessed { track_id, protocol })
+                            .await;
+                    }
+    });
+}
+
+fn spawn_header_image_processing(
+    url: String,
+    picker: &ratatui_image::picker::Picker,
+    tx: mpsc::Sender<WorkerEvent>,
+) {
+    let picker_clone = picker.clone();
+
+    tokio::spawn(async move {
+        if let Ok(resp) = reqwest::get(&url).await
+            && let Ok(bytes) = resp.bytes().await
+                && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
+                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                        let protocol = picker_clone.new_resize_protocol(dyn_img);
+                        return Some(protocol);
+                    }
+                    None
+                })
+                .await
+                    && let Some(protocol) = image_handle {
+                        let _ = tx
+                            .send(WorkerEvent::HeaderImageProcessed(protocol))
                             .await;
                     }
     });
@@ -85,24 +107,28 @@ async fn main() -> Result<()> {
     let mut tui = Tui::new()?;
     tui.enter()?;
 
+    let mut is_first_frame = true;
+
     while state.is_running {
+        let mut needs_draw = is_first_frame;
+        is_first_frame = false;
+
         if let Some(expiry) = state.status_message_expiry
             && std::time::Instant::now() >= expiry {
                 state.status_message = None;
                 state.status_message_expiry = None;
                 state.recent_queue_count = 0;
+                needs_draw = true;
             }
 
-        let force_clear = state.needs_terminal_clear;
-        tui.apply_background(state.active_theme.background, force_clear)?;
-        state.needs_terminal_clear = false;
-        tui.terminal.draw(|f| {
-            tui::render::render_app(f, &state);
-        })?;
+        if state.needs_terminal_clear {
+            needs_draw = true;
+        }
 
         if event::poll(Duration::from_millis(16))?
             && let Event::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press {
+                    needs_draw = true;
                     let event = AppEvent::Key(key);
                     let mut outgoing_event = None;
                     if let Some(cmd) = handlers::handle_event(&mut state, &event) {
@@ -115,12 +141,21 @@ async fn main() -> Result<()> {
                         let _ = app_tx.send(event).await;
 
                         if let Some(ev) = outgoing_event {
-                            let _ = app_tx.send(ev).await;
+                            if let AppEvent::LoadContextTracks(_, _, ref img_url) = ev {
+                                if let Some(url) = img_url
+                                    && let Some(picker) = &state.image_picker {
+                                        spawn_header_image_processing(url.clone(), picker, worker_tx_clone.clone());
+                                }
+                                let _ = app_tx.send(ev).await;
+                            } else {
+                                let _ = app_tx.send(ev).await;
+                            }
                         }
                     }
                 }
 
         while let Ok(worker_event) = app_rx.try_recv() {
+            needs_draw = true;
             match worker_event {
                 WorkerEvent::AuthenticationComplete => {
                     state.mode = app::AppMode::Normal;
@@ -142,7 +177,7 @@ async fn main() -> Result<()> {
                     state.playback.playing_track_id = Some(item.id.clone());
                     state.playback.playing_track_title = item.title.clone();
                     state.playback.playing_track_artist = item.artist.clone();
-                    state.playback.playing_track_image = None;
+                    state.playback.previous_track_image = state.playback.playing_track_image.take();
                     state.playback.duration_ms = item.duration_ms;
                     state.playback.progress_ms = 0;
 
@@ -161,7 +196,7 @@ async fn main() -> Result<()> {
                 }
                 WorkerEvent::Tick => {
                     if state.playback.is_playing {
-                        state.playback.progress_ms += 1000;
+                        state.playback.progress_ms += 100;
                         // Only auto-stop if duration_ms is known (> 0); when it's 0 we are
                         // in the transitional window after a skip, waiting for SyncPlaybackState.
                         if state.playback.duration_ms > 0
@@ -199,16 +234,19 @@ async fn main() -> Result<()> {
                         state.playback.duration_ms = item.duration_ms;
 
                         if track_changed {
-                            state.playback.playing_track_image = None;
+                            state.playback.previous_track_image = state.playback.playing_track_image.take();
                         }
 
                         if let Some(url) = item.image_url {
                             if let Some(ref picker) = state.image_picker {
-                                let should_process_image =
-                                    track_changed || state.playback.playing_track_image.is_none();
+                                let should_process_image = track_changed
+                                    || (state.playback.playing_track_image.is_none()
+                                        && state.playback.fetching_track_id.as_deref() != Some(item.id.as_str()));
+
                                 if should_process_image {
+                                    state.playback.fetching_track_id = Some(item.id.clone());
                                     spawn_track_image_processing(
-                                        item.id,
+                                        item.id.clone(),
                                         url,
                                         picker,
                                         worker_tx_clone.clone(),
@@ -246,7 +284,15 @@ async fn main() -> Result<()> {
                 WorkerEvent::TrackImageProcessed { track_id, protocol } => {
                     if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
                         state.playback.playing_track_image = Some(protocol);
+                        state.playback.previous_track_image = None;
+                        if state.playback.fetching_track_id.as_deref() == Some(track_id.as_str()) {
+                            state.playback.fetching_track_id = None;
+                        }
                     }
+                }
+                WorkerEvent::HeaderImageProcessed(protocol) => {
+                    state.active_library_header_image = Some(protocol);
+                    state.header_image_dirty = true;
                 }
                 WorkerEvent::ForceRedraw => {
                     let _ = tui.terminal.clear();
@@ -271,6 +317,15 @@ async fn main() -> Result<()> {
                     state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                 }
             }
+        }
+
+        if needs_draw {
+            let force_clear = state.needs_terminal_clear;
+            tui.apply_background(state.active_theme.background, force_clear)?;
+            state.needs_terminal_clear = false;
+            tui.terminal.draw(|f| {
+                tui::render::render_app(f, &mut state);
+            })?;
         }
     }
 

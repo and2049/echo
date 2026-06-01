@@ -31,6 +31,8 @@ impl SpotifyWorker {
     pub async fn wake_up_device(&mut self) -> Result<()> {
         if let Some(device_id) = self.get_device_id().await {
             let _ = self.client.transfer_playback(&device_id, Some(false)).await;
+            // Force pause it so it doesn't automatically resume the previous session's playback
+            let _ = self.client.pause_playback(Some(&device_id)).await;
         }
         Ok(())
     }

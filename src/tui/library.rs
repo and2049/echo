@@ -1,10 +1,14 @@
 use crate::app::{ActiveView, AppMode, AppState};
 use ratatui::{
+    buffer::Buffer,
     Frame,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, Table, TableState},
+    widgets::{
+        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, StatefulWidget, Table,
+        TableState,
+    },
 };
 use crate::tui::render::{
     format_duration_text, format_time, padded_library_list, repair_wide_grapheme_trailing_styles,
@@ -49,7 +53,7 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
 }
 
 
-pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Rect) {
+pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area: Rect) {
     let is_focused = state.active_view == ActiveView::Library;
     let title_text = match state.active_library_tab {
         crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
@@ -164,7 +168,7 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
     }
 }
 
-pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect) {
+pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
     let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
 
     let track_rows: Vec<Row> = state
@@ -244,7 +248,6 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
             ],
         )
         .column_spacing(1)
-        .block(track_block)
         .row_highlight_style(state.active_theme.selected_style())
         .highlight_symbol(" ")
         .highlight_spacing(HighlightSpacing::Always);
@@ -267,7 +270,6 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
             ],
         )
         .column_spacing(1)
-        .block(track_block)
         .row_highlight_style(state.active_theme.selected_style())
         .highlight_symbol(" ")
         .highlight_spacing(HighlightSpacing::Always);
@@ -278,6 +280,102 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
         t
     };
 
+    frame.render_widget(track_block, tracks_area);
+
+    let mut header_info: Option<(String, String)> = None;
+    if state.active_view == ActiveView::TrackList && !state.tracks.is_empty() {
+        if is_albums_tab {
+            if state.selected_playlist_index < state.saved_albums.len() {
+                let album = &state.saved_albums[state.selected_playlist_index];
+                header_info = Some((album.name.clone(), album.artists.clone()));
+            }
+        } else {
+            if state.selected_playlist_index < state.library_view.len() {
+                if let crate::models::LibraryNode::Playlist { playlist, .. } = &state.library_view[state.selected_playlist_index] {
+                    header_info = Some((playlist.name.clone(), playlist.owner.clone()));
+                }
+            }
+        }
+    }
+
+    let (header_area, table_area) = if let Some(_) = header_info {
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Length(7), // Header height
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(track_inner_area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, track_inner_area)
+    };
+
+    if let Some(h_area) = header_area {
+        if let Some((title, author)) = header_info {
+            let chunks = ratatui::layout::Layout::default()
+                .direction(ratatui::layout::Direction::Horizontal)
+                .constraints([
+                    ratatui::layout::Constraint::Length(14), // 10 for image + 4 margin
+                    ratatui::layout::Constraint::Min(0),
+                ])
+                .split(h_area);
+            
+            let img_area = Rect {
+                x: chunks[0].x + 2, // 2 left margin
+                y: chunks[0].y + 1, // 1 top margin
+                width: 10,
+                height: 5,
+            };
+
+            if state.header_image_dirty {
+                if let Some(ref mut protocol) = state.active_library_header_image {
+                    let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
+                    let mut cached = Buffer::empty(cache_area);
+                    let image = ratatui_image::StatefulImage::default();
+                    StatefulWidget::render(image, cache_area, &mut cached, protocol);
+                    state.header_image_cache = Some(cached);
+                }
+                state.header_image_dirty = false;
+            }
+
+            if let Some(ref cached) = state.header_image_cache {
+                let buf = frame.buffer_mut();
+                for y in 0..cached.area.height.min(img_area.height) {
+                    for x in 0..cached.area.width.min(img_area.width) {
+                        let src = &cached[(x, y)];
+                        let dst = &mut buf[(img_area.x + x, img_area.y + y)];
+                        dst.set_style(src.style());
+                        dst.set_symbol(src.symbol());
+                        dst.set_skip(src.skip);
+                    }
+                }
+            }
+
+            let text_chunks = ratatui::layout::Layout::default()
+                .direction(ratatui::layout::Direction::Vertical)
+                .constraints([
+                    ratatui::layout::Constraint::Min(0),
+                    ratatui::layout::Constraint::Length(1),
+                    ratatui::layout::Constraint::Length(1),
+                    ratatui::layout::Constraint::Length(1),
+                    ratatui::layout::Constraint::Min(0),
+                ])
+                .split(chunks[1]);
+
+            let title_para = ratatui::widgets::Paragraph::new(title)
+                .style(Style::default().fg(state.active_theme.primary).add_modifier(Modifier::BOLD));
+            let author_para = ratatui::widgets::Paragraph::new(author)
+                .style(Style::default().fg(state.active_theme.secondary));
+            let count_para = ratatui::widgets::Paragraph::new(format!("{} tracks", state.tracks.len()))
+                .style(Style::default().fg(Color::DarkGray));
+
+            frame.render_widget(title_para, text_chunks[1]);
+            frame.render_widget(author_para, text_chunks[2]);
+            frame.render_widget(count_para, text_chunks[3]);
+        }
+    }
+
     let mut ts = TableState::default();
     let sel = if state.tracks.is_empty() {
         0
@@ -285,7 +383,7 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
         state.selected_track_index.min(state.tracks.len() - 1)
     };
     ts.select(Some(sel));
-    frame.render_stateful_widget(table, tracks_area, &mut ts);
+    frame.render_stateful_widget(table, table_area, &mut ts);
 
     if state.tracks.is_empty() {
         let logo_height = ECHO_LOGO.len() as u16;

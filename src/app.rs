@@ -1,4 +1,5 @@
 use crate::models::{Playlist, SearchResults, Track};
+use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 
 pub struct PlaybackState {
@@ -9,7 +10,9 @@ pub struct PlaybackState {
     pub playing_track_id: Option<String>,
     pub playing_track_title: String,
     pub playing_track_artist: String,
-    pub playing_track_image: Option<ratatui_image::protocol::Protocol>,
+    pub playing_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
+    pub previous_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
+    pub fetching_track_id: Option<String>,
     pub device_name: String,
     pub repeat_mode: String,
     pub volume: u32,
@@ -23,6 +26,8 @@ pub struct ResolvedTheme {
     pub text_muted: Color,
     pub highlight_bg: Color,
     pub highlight_fg: Color,
+    pub selection_bg: Color,
+    pub selected_item: Color,
     pub error: Color,
 }
 
@@ -37,6 +42,8 @@ impl ResolvedTheme {
             text_muted: Color::from_str(&theme.text_muted).unwrap_or(Color::DarkGray),
             highlight_bg: Color::from_str(&theme.highlight_bg).unwrap_or(Color::White),
             highlight_fg: Color::from_str(&theme.highlight_fg).unwrap_or(Color::Black),
+            selection_bg: Color::from_str(&theme.highlight_bg).unwrap_or(Color::White),
+            selected_item: Color::from_str(&theme.highlight_fg).unwrap_or(Color::Black),
             error: Color::from_str(&theme.error).unwrap_or(Color::Red),
         }
     }
@@ -81,6 +88,8 @@ impl Default for PlaybackState {
             playing_track_title: String::new(),
             playing_track_artist: String::new(),
             playing_track_image: None,
+            previous_track_image: None,
+            fetching_track_id: None,
             device_name: "echo-rs".to_string(),
             repeat_mode: "Off".to_string(),
             volume: 100,
@@ -143,6 +152,9 @@ pub struct AppState {
     pub setup_client_secret: String,
     pub setup_focus_secret: bool,
     pub image_picker: Option<ratatui_image::picker::Picker>,
+    pub active_library_header_image: Option<ratatui_image::protocol::StatefulProtocol>,
+    pub header_image_cache: Option<Buffer>,
+    pub header_image_dirty: bool,
     pub playback: PlaybackState,
     pub themes: std::collections::HashMap<String, crate::config::Theme>,
     pub active_theme: ResolvedTheme,
@@ -206,6 +218,9 @@ impl AppState {
             setup_client_secret: String::new(),
             setup_focus_secret: false,
             image_picker: None,
+            active_library_header_image: None,
+            header_image_cache: None,
+            header_image_dirty: false,
             playback: PlaybackState::default(),
             themes,
             active_theme,
@@ -237,6 +252,7 @@ impl AppState {
                 id: "LIKED_SONGS".to_string(),
                 name: "♥️ Liked Songs".to_string(),
                 owner: "Spotify".to_string(),
+                image_url: None,
             },
             indent: 0,
         });
