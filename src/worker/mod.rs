@@ -234,6 +234,18 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::GlobalSearch(query) => {
+                                if let Some(ref mut sp) = spotify_opt {
+                                    match sp.search_catalog(&query).await {
+                                        Ok(results) => {
+                                            let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(results)).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = std::fs::write("echo-debug-search.log", format!("Search error: {:?}", e));
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     } else {

@@ -1,4 +1,4 @@
-use crate::models::{Playlist, Track};
+use crate::models::{Playlist, SearchResults, Track};
 use ratatui::style::{Color, Style};
 
 pub struct PlaybackState {
@@ -92,6 +92,13 @@ impl Default for PlaybackState {
 pub enum ActiveView {
     Library,
     TrackList,
+    SearchResults,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum SearchTab {
+    Tracks,
+    Albums,
 }
 
 #[derive(PartialEq)]
@@ -101,6 +108,7 @@ pub enum AppMode {
     Normal,
     Visual,
     Command,
+    Search,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -134,6 +142,13 @@ pub struct AppState {
     pub themes: std::collections::HashMap<String, crate::config::Theme>,
     pub active_theme: ResolvedTheme,
     pub needs_terminal_clear: bool,
+    pub search_query: String,
+    pub search_matches: Vec<usize>,
+    pub search_results: SearchResults,
+    pub search_context_query: String,
+    pub active_search_tab: SearchTab,
+    pub selected_search_index: usize,
+    pub prev_view: Option<ActiveView>,
 }
 
 impl AppState {
@@ -182,7 +197,14 @@ impl AppState {
             playback: PlaybackState::default(),
             themes,
             active_theme,
-            needs_terminal_clear: true,
+            needs_terminal_clear: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_results: SearchResults::default(),
+            search_context_query: String::new(),
+            active_search_tab: SearchTab::Tracks,
+            selected_search_index: 0,
+            prev_view: None,
         }
     }
 }

@@ -252,6 +252,12 @@ async fn main() -> Result<()> {
                 WorkerEvent::ForceRedraw => {
                     let _ = tui.terminal.clear();
                 }
+                WorkerEvent::SearchResultsLoaded(results) => {
+                    state.search_results = results;
+                    state.selected_search_index = 0;
+                    state.active_view = app::ActiveView::SearchResults;
+                    state.status_message = Some(format!("Search: {}", state.search_context_query));
+                }
             }
         }
     }

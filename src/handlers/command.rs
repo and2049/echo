@@ -120,6 +120,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             ));
                         }
                     }
+                    "search" => {
+                        let query = args.collect::<Vec<&str>>().join(" ");
+                        if !query.is_empty() {
+                            state.search_context_query = query.clone();
+                            state.status_message = Some(format!("Searching for '{}'...", query));
+                            return Some(crate::events::AppEvent::GlobalSearch(query));
+                        } else {
+                            state.status_message = Some("Usage: search <query>".to_string());
+                        }
+                    }
                     _ => {}
                 }
             }

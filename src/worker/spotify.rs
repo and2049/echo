@@ -356,10 +356,16 @@ impl SpotifyWorker {
     }
 
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
-        let page = self
+        let page = match self
             .client
             .current_user_playlists_manual(None, None)
-            .await?;
+            .await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = std::fs::write("echo-debug-user-playlists.log", format!("User playlists fetch error: {:?}", e));
+                return Err(e.into());
+            }
+        };
         let mut out = Vec::new();
         for p in page.items {
             let owner = p
@@ -438,10 +444,31 @@ impl SpotifyWorker {
         }
 
         let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
-        let page = self
+        
+        // Debug raw request
+        if let Ok(token_mutex) = self.client.get_token().lock().await {
+            if let Some(token) = token_mutex.as_ref() {
+                let raw_url = format!("https://api.spotify.com/v1/playlists/{}/items", id.id());
+                let client = reqwest::Client::new();
+                if let Ok(res) = client.get(&raw_url).bearer_auth(&token.access_token).send().await {
+                    let status = res.status();
+                    if let Ok(body) = res.text().await {
+                        let _ = std::fs::write("echo-debug-playlist.log", format!("RAW REQUEST RESPONSE ({}): {}", status, body));
+                    }
+                }
+            }
+        }
+
+        let page = match self
             .client
             .playlist_items_manual(id, None, None, None, None)
-            .await?;
+            .await {
+            Ok(p) => p,
+            Err(e) => {
+                // The raw request above already wrote the body, so we can just return
+                return Err(e.into());
+            }
+        };
         let mut out = Vec::new();
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
@@ -548,5 +575,66 @@ impl SpotifyWorker {
         let image_url = track.album.images.first().map(|img| img.url.clone());
 
         Ok((title, artist, image_url))
+    }
+
+    pub async fn search_catalog(&self, query: &str) -> anyhow::Result<crate::models::SearchResults> {
+        use rspotify::model::SearchType;
+        use rspotify::prelude::BaseClient;
+
+        let mut results = crate::models::SearchResults::default();
+
+        match self.client.search(query, SearchType::Track, None, None, None, None).await {
+            Ok(rspotify::model::SearchResult::Tracks(page)) => {
+                results.tracks = page.items.into_iter().filter_map(|t| {
+                    let id = t.id?.id().to_string();
+                    let name = t.name;
+                    let artist = t.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+                    let album = t.album.name;
+                    let duration_ms = t.duration.num_milliseconds() as u32;
+                    let image_url = t.album.images.first().map(|i| i.url.clone());
+                    Some(crate::models::SearchTrack { id, name, artist, album, duration_ms, image_url })
+                }).collect();
+            }
+            _ => {}
+        }
+
+        match self.client.search(query, SearchType::Album, None, None, None, None).await {
+            Ok(rspotify::model::SearchResult::Albums(page)) => {
+                results.albums = page.items.into_iter().filter_map(|a| {
+                    let id = a.id?.id().to_string();
+                    let name = a.name;
+                    let artist = a.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
+                    let image_url = a.images.first().map(|i| i.url.clone());
+                    Some(crate::models::SearchAlbum { id, name, artist, image_url })
+                }).collect();
+            }
+            _ => {}
+        }
+
+        match self.client.search(query, SearchType::Artist, None, None, None, None).await {
+            Ok(rspotify::model::SearchResult::Artists(page)) => {
+                results.artists = page.items.into_iter().filter_map(|a| {
+                    let id = a.id.id().to_string();
+                    let name = a.name;
+                    let image_url = a.images.first().map(|i| i.url.clone());
+                    Some(crate::models::SearchArtist { id, name, image_url })
+                }).collect();
+            }
+            _ => {}
+        }
+
+        match self.client.search(query, SearchType::Playlist, None, None, None, None).await {
+            Ok(rspotify::model::SearchResult::Playlists(page)) => {
+                results.playlists = page.items.into_iter().filter_map(|p| {
+                    let id = p.id.id().to_string();
+                    let name = p.name;
+                    let owner = p.owner.display_name.unwrap_or_else(|| p.owner.id.id().to_string());
+                    Some(crate::models::SearchPlaylist { id, name, owner })
+                }).collect();
+            }
+            _ => {}
+        }
+
+        Ok(results)
     }
 }

@@ -42,6 +42,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_track_index += 1;
                 }
             }
+            ActiveView::SearchResults => {
+                let max = search_results_len(state);
+                if max > 0 && state.selected_search_index < max.saturating_sub(1) {
+                    state.selected_search_index += 1;
+                }
+            }
         },
         KeyCode::Char('k') => match state.active_view {
             ActiveView::Library => {
@@ -52,6 +58,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             ActiveView::TrackList => {
                 if state.selected_track_index > 0 {
                     state.selected_track_index -= 1;
+                }
+            }
+            ActiveView::SearchResults => {
+                if state.selected_search_index > 0 {
+                    state.selected_search_index -= 1;
                 }
             }
         },
@@ -130,12 +141,75 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         });
                     }
                 }
+            } else if state.active_view == ActiveView::SearchResults {
+                let i = state.selected_search_index;
+                match state.active_search_tab {
+                    crate::app::SearchTab::Tracks => {
+                        if let Some(t) = state.search_results.tracks.get(i) {
+                            // Play track directly (no context — use URI playback)
+                            let track_id = t.id.clone();
+                            return Some(AppEvent::PlayTrack {
+                                context_id: "LIKED_SONGS".to_string(), // URI-only play
+                                track_id,
+                                is_album: false,
+                                title: t.name.clone(),
+                                artist: t.artist.clone(),
+                                duration_ms: t.duration_ms,
+                                image_url: t.image_url.clone(),
+                            });
+                        }
+                    }
+                    crate::app::SearchTab::Albums => {
+                        if let Some(album) = state.search_results.albums.get(i) {
+                            let album_id = album.id.clone();
+                            state.active_view = ActiveView::TrackList;
+                            state.tracks.clear();
+                            state.selected_track_index = 0;
+                            // Stash SearchResults as previous view context
+                            state.prev_view = None; // album loaded from search, Backspace returns to Search
+                            return Some(AppEvent::LoadContextTracks(album_id, true));
+                        }
+                    }
+                }
             }
         }
         KeyCode::Char(':') => {
             state.mode = crate::app::AppMode::Command;
             state.command_buffer.clear();
             state.status_message = None;
+        }
+        KeyCode::Char('/') => {
+            state.mode = crate::app::AppMode::Search;
+            state.search_query.clear();
+            state.search_matches.clear();
+            state.status_message = None;
+        }
+        KeyCode::Char('s') => {
+            state.mode = crate::app::AppMode::Command;
+            state.command_buffer = "search ".to_string();
+            state.status_message = None;
+        }
+        KeyCode::Char('n') => {
+            if !state.search_matches.is_empty() {
+                // Find the first match index that is greater than the current selected_track_index
+                if let Some(&next_idx) = state.search_matches.iter().find(|&&i| i > state.selected_track_index) {
+                    state.selected_track_index = next_idx;
+                } else {
+                    // Wrap around to the first match
+                    state.selected_track_index = state.search_matches[0];
+                }
+            }
+        }
+        KeyCode::Char('N') => {
+            if !state.search_matches.is_empty() {
+                // Find the last match index that is less than the current selected_track_index
+                if let Some(&prev_idx) = state.search_matches.iter().rev().find(|&&i| i < state.selected_track_index) {
+                    state.selected_track_index = prev_idx;
+                } else {
+                    // Wrap around to the last match
+                    state.selected_track_index = *state.search_matches.last().unwrap();
+                }
+            }
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
             if state.active_view == ActiveView::Library {
@@ -234,14 +308,29 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('h') | KeyCode::Esc | KeyCode::Backspace => {
             if state.active_view == ActiveView::TrackList {
+                if state.search_results.tracks.len() > 0
+                    || state.search_results.albums.len() > 0
+                    || state.search_results.artists.len() > 0
+                    || state.search_results.playlists.len() > 0
+                {
+                    // Came from a search drill-down — go back to search results
+                    state.active_view = ActiveView::SearchResults;
+                } else {
+                    state.active_view = ActiveView::Library;
+                }
+            } else if state.active_view == ActiveView::SearchResults {
+                // Clear search and return to Library
                 state.active_view = ActiveView::Library;
+                state.search_results = crate::models::SearchResults::default();
+                state.search_context_query.clear();
+                state.status_message = None;
             }
         }
         KeyCode::Char(' ') => {
             state.playback.is_playing = !state.playback.is_playing;
             return Some(AppEvent::TogglePlayback(state.playback.is_playing));
         }
-        KeyCode::Char('s') => {
+        KeyCode::Char('S') => {
             state.playback.is_shuffled = !state.playback.is_shuffled;
             return Some(AppEvent::ToggleShuffle(state.playback.is_shuffled));
         }
@@ -295,9 +384,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     crate::app::LibraryTab::Albums => crate::app::LibraryTab::Playlists,
                 };
                 state.selected_playlist_index = 0;
+            } else if state.active_view == ActiveView::SearchResults {
+                state.active_search_tab = match state.active_search_tab {
+                    crate::app::SearchTab::Tracks => crate::app::SearchTab::Albums,
+                    crate::app::SearchTab::Albums => crate::app::SearchTab::Tracks,
+                };
+                state.selected_search_index = 0;
             }
         }
         _ => {}
     }
     None
+}
+
+fn search_results_len(state: &AppState) -> usize {
+    match state.active_search_tab {
+        crate::app::SearchTab::Tracks => state.search_results.tracks.len(),
+        crate::app::SearchTab::Albums => state.search_results.albums.len(),
+    }
 }

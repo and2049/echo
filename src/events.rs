@@ -1,4 +1,4 @@
-use crate::models::{PlaybackItem, Playlist, Track};
+use crate::models::{PlaybackItem, Playlist, SearchResults, Track};
 use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
@@ -26,6 +26,7 @@ pub enum AppEvent {
     SetRepeatMode(String),
     SetVolume(u8),
     LoadTrackMetadata(String),
+    GlobalSearch(String),
 }
 
 pub enum WorkerEvent {
@@ -57,4 +58,5 @@ pub enum WorkerEvent {
         track_id: String,
         protocol: ratatui_image::protocol::Protocol,
     },
+    SearchResultsLoaded(SearchResults),
 }
