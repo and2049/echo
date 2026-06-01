@@ -462,7 +462,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
             Line::from(""),
             Line::from("1. Open the official Spotify app on your phone or desktop."),
             Line::from("2. Tap the 'Devices' icon."),
-            Line::from("3. Select 'Echo TUI' from the list of available devices."),
+            Line::from("3. Select 'echo-rs' from the list of available devices."),
             Line::from(""),
             Line::from("Once connected, Echo will automatically transition to normal operation!"),
         ])

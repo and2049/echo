@@ -132,7 +132,7 @@ impl Worker {
                                         spotify_opt = Some(client);
                                         let _ = self.tx.send(WorkerEvent::AuthenticationComplete).await;
 
-                                        audio::spawn_librespot_daemon(String::new(), "Echo TUI".to_string(), self.tx.clone()).await;
+                                        audio::spawn_librespot_daemon(String::new(), "echo-rs".to_string(), self.tx.clone()).await;
 
                                         // Fetch playlists initially
                                         if let Some(ref mut sp) = spotify_opt {
@@ -143,11 +143,29 @@ impl Worker {
                                                 let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                             }
                                             // Initial State Sync (Seamless Handoff)
-                                            if let Ok(Some((is_playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
-                                                if let Some(item) = item.as_ref() {
-                                                    current_track_id = Some(item.id.clone());
+                                            // Try up to 5 times to sync, allowing the librespot daemon to authenticate
+                                            let mut found_playback = false;
+                                            for _ in 0..5 {
+                                                if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
+                                                    is_playing = playing;
+                                                    if let Some(item) = item.as_ref() {
+                                                        current_track_id = Some(item.id.clone());
+                                                    }
+                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
+                                                    found_playback = true;
+                                                    break;
                                                 }
-                                                let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
+                                                
+                                                // If no active session exists, forcefully wake up our integrated device
+                                                let _ = sp.wake_up_device().await;
+                                                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                            }
+
+                                            // Fetch queue initially only if we have an active session
+                                            if found_playback {
+                                                if let Ok(queue) = sp.fetch_queue().await {
+                                                    let _ = self.tx.send(WorkerEvent::QueueLoaded(queue)).await;
+                                                }
                                             }
                                         }
                                     }

@@ -81,7 +81,7 @@ impl Default for PlaybackState {
             playing_track_title: String::new(),
             playing_track_artist: String::new(),
             playing_track_image: None,
-            device_name: "Echo TUI".to_string(),
+            device_name: "echo-rs".to_string(),
             repeat_mode: "Off".to_string(),
             volume: 100,
         }

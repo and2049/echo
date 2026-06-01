@@ -131,13 +131,20 @@ impl SpotifyWorker {
 
         if let Ok(devices) = self.client.device().await {
             for d in devices {
-                if d.name == "Echo TUI" {
+                if d.name == "echo-rs" {
                     self.device_id = d.id.clone();
                     return self.device_id.clone();
                 }
             }
         }
         None
+    }
+
+    pub async fn wake_up_device(&mut self) -> Result<()> {
+        if let Some(device_id) = self.get_device_id().await {
+            let _ = self.client.transfer_playback(&device_id, Some(false)).await;
+        }
+        Ok(())
     }
 
     fn playback_item_from_unknown(value: &serde_json::Value) -> Option<PlaybackItem> {
@@ -297,7 +304,7 @@ impl SpotifyWorker {
 
             // Auto-cache the device ID if we found an active playback
             if self.device_id.is_none() {
-                if device.name == "Echo TUI" {
+                if device.name == "echo-rs" {
                     self.device_id = device.id.clone();
                 }
             }
@@ -312,6 +319,31 @@ impl SpotifyWorker {
                 item,
             )));
         }
+
+        // Fallback: If no active device, check if Spotify remembers the last playing track
+        if let Some(playing) = self
+            .client
+            .current_playing(None, Some(PLAYBACK_TYPES))
+            .await?
+        {
+            let is_playing = playing.is_playing;
+            let progress_ms = playing.progress.unwrap_or_default().num_milliseconds() as u32;
+            let item = playing
+                .item
+                .as_ref()
+                .and_then(Self::playback_item_from_playable);
+
+            return Ok(Some((
+                is_playing,
+                false, // Default shuffle
+                "Off".to_string(), // Default repeat
+                None,
+                "Unknown Device".to_string(),
+                progress_ms,
+                item,
+            )));
+        }
+
         Ok(None)
     }
 
