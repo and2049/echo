@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod api;
+pub mod visualization;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};

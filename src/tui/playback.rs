@@ -83,14 +83,22 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     frame.render_widget(total_time_p, pb_chunks[2]);
 
     // Render Track Info
+    let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+    let mut constraints = vec![
+        Constraint::Length(2),  // Left padding
+        Constraint::Length(10), // Image width
+        Constraint::Length(2),  // Middle gap to text
+        Constraint::Min(0),     // Text width
+    ];
+    if is_vis_enabled {
+        constraints.push(Constraint::Length(4));  // Gap to visualizer
+        constraints.push(Constraint::Length(32)); // Visualizer width
+        constraints.push(Constraint::Length(2));  // Right padding
+    }
+    
     let track_info_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(2),  // Left padding
-            Constraint::Length(10), // Image width
-            Constraint::Length(2),  // Middle gap to text
-            Constraint::Min(0),     // Text width
-        ])
+        .constraints(constraints)
         .split(playback_chunks[0]);
 
     let protocol = state
@@ -132,4 +140,32 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         // Add top padding to vertically align with the center of the image
         .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
     frame.render_widget(track_text_p, track_info_chunks[3]);
+
+    if is_vis_enabled {
+        if let Some(shared_bands) = &state.playback.audio_visualization {
+        if let Some(bands) = shared_bands.try_lock() {
+            use ratatui::widgets::{BarChart, BarGroup, Bar};
+            let mut bars = Vec::with_capacity(32);
+            for i in 0..32 {
+                let val = bands[i];
+                let color = if val > 60.0 { state.active_theme.primary } else { state.active_theme.secondary };
+                let bar = Bar::default().value(val as u64).style(ratatui::style::Style::default().fg(color));
+                bars.push(bar);
+            }
+            
+            let mut vis_area = track_info_chunks[5];
+            if vis_area.height >= 7 {
+                vis_area.y += 2;
+                vis_area.height = 4;
+            }
+            
+            let barchart = BarChart::default()
+                .data(BarGroup::default().bars(&bars))
+                .bar_width(1)
+                .bar_gap(0)
+                .max(100);
+            frame.render_widget(barchart, vis_area);
+        }
+    }
+    }
 }

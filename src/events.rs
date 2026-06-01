@@ -37,6 +37,7 @@ pub enum WorkerEvent {
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
     TracksLoaded(Vec<Track>),
+    AudioVisualizationReady(std::sync::Arc<parking_lot::Mutex<[f32; 32]>>, std::sync::Arc<std::sync::atomic::AtomicBool>),
     PlaybackStarted {
         item: PlaybackItem,
     },

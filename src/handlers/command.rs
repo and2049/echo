@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "folder", "delfolder", "sort", "index", "theme", "search", "queue"];
+    let commands = vec!["q", "qa", "wq", "folder", "delfolder", "sort", "index", "theme", "search", "queue", "vis"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();

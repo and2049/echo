@@ -16,6 +16,8 @@ pub struct PlaybackState {
     pub device_name: String,
     pub repeat_mode: String,
     pub volume: u32,
+    pub audio_visualization: Option<std::sync::Arc<parking_lot::Mutex<[f32; 32]>>>,
+    pub enable_visualizer: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 pub struct ResolvedTheme {
@@ -93,6 +95,8 @@ impl Default for PlaybackState {
             device_name: "echo-rs".to_string(),
             repeat_mode: "Off".to_string(),
             volume: 100,
+            audio_visualization: None,
+            enable_visualizer: None,
         }
     }
 }

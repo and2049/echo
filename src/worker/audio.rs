@@ -17,6 +17,7 @@ pub async fn spawn_librespot_daemon(
 ) {
     tokio::spawn(async move {
         loop {
+            let tx = tx.clone();
             let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 // Find or create cache directory
                 let mut cache_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -77,7 +78,16 @@ pub async fn spawn_librespot_daemon(
                     player_config,
                     session.clone(),
                     mixer.get_soft_volume(),
-                    move || backend_fn(None, Default::default()),
+                    move || {
+                        let backend = backend_fn(None, Default::default());
+                        let shared_bands = std::sync::Arc::new(parking_lot::Mutex::new([0.0f32; crate::worker::visualization::BANDS]));
+                        let enable_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+                        let tx_clone = tx.clone();
+                        let bands_clone = shared_bands.clone();
+                        let flag_clone = enable_flag.clone();
+                        let _ = tx_clone.blocking_send(WorkerEvent::AudioVisualizationReady(bands_clone, flag_clone));
+                        Box::new(crate::worker::visualization::VisualizationSink::new(backend, shared_bands, enable_flag))
+                    },
                 );
 
                 let connect_config = ConnectConfig {

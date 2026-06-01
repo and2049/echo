@@ -297,6 +297,10 @@ async fn main() -> Result<()> {
                 WorkerEvent::ForceRedraw => {
                     let _ = tui.terminal.clear();
                 }
+                WorkerEvent::AudioVisualizationReady(shared_bands, flag) => {
+                    state.playback.audio_visualization = Some(shared_bands);
+                    state.playback.enable_visualizer = Some(flag);
+                }
                 WorkerEvent::SearchResultsLoaded(results) => {
                     state.search_results = results;
                     state.selected_search_index = 0;
