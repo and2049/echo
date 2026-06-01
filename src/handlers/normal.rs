@@ -48,6 +48,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_search_index += 1;
                 }
             }
+            ActiveView::Queue => {
+                if state.queue.len() > 0 && state.selected_queue_index < state.queue.len().saturating_sub(1) {
+                    state.selected_queue_index += 1;
+                }
+            }
         },
         KeyCode::Char('k') => match state.active_view {
             ActiveView::Library => {
@@ -63,6 +68,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             ActiveView::SearchResults => {
                 if state.selected_search_index > 0 {
                     state.selected_search_index -= 1;
+                }
+            }
+            ActiveView::Queue => {
+                if state.selected_queue_index > 0 {
+                    state.selected_queue_index -= 1;
                 }
             }
         },
@@ -318,6 +328,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 } else {
                     state.active_view = ActiveView::Library;
                 }
+            } else if state.active_view == ActiveView::Queue {
+                state.active_view = ActiveView::Library;
             } else if state.active_view == ActiveView::SearchResults {
                 // Clear search and return to Library
                 state.active_view = ActiveView::Library;
@@ -325,6 +337,29 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.search_context_query.clear();
                 state.status_message = None;
             }
+        }
+        KeyCode::Char('q') => {
+            // Add currently hovered track to queue
+            let track_id = if state.active_view == ActiveView::TrackList {
+                state.tracks.get(state.selected_track_index).map(|t| t.id.clone())
+            } else if state.active_view == ActiveView::SearchResults {
+                if state.active_search_tab == crate::app::SearchTab::Tracks {
+                    state.search_results.tracks.get(state.selected_search_index).map(|t| t.id.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(id) = track_id {
+                return Some(AppEvent::AddToQueue(vec![id]));
+            }
+        }
+        KeyCode::Char('Q') => {
+            // Open queue view
+            state.active_view = ActiveView::Queue;
+            state.selected_queue_index = 0;
+            return Some(AppEvent::FetchQueue);
         }
         KeyCode::Char(' ') => {
             state.playback.is_playing = !state.playback.is_playing;

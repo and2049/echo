@@ -27,6 +27,8 @@ pub enum AppEvent {
     SetVolume(u8),
     LoadTrackMetadata(String),
     GlobalSearch(String),
+    AddToQueue(Vec<String>),
+    FetchQueue,
 }
 
 pub enum WorkerEvent {
@@ -59,4 +61,7 @@ pub enum WorkerEvent {
         protocol: ratatui_image::protocol::Protocol,
     },
     SearchResultsLoaded(SearchResults),
+    QueueLoaded(Vec<Track>),
+    StatusMessage(String),
+    TracksQueued(usize),
 }

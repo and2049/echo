@@ -637,4 +637,86 @@ impl SpotifyWorker {
 
         Ok(results)
     }
+
+    pub async fn add_to_queue(&self, track_ids: Vec<String>) -> anyhow::Result<()> {
+        use rspotify::model::TrackId;
+        use rspotify::prelude::OAuthClient;
+        for track_id in track_ids {
+            if let Ok(id) = TrackId::from_id(&track_id) {
+                let _ = self.client.add_item_to_queue(id.into(), self.device_id.as_deref()).await;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn fetch_queue(&self) -> anyhow::Result<Vec<Track>> {
+        let queue = match self.client.current_user_queue().await {
+            Ok(q) => q,
+            Err(e) => {
+                let _ = std::fs::write("echo-debug-queue.log", format!("fetch_queue error: {:?}", e));
+                return Err(e.into());
+            }
+        };
+        let _ = std::fs::write("echo-debug-queue.log", format!(
+            "currently_playing: {:?}\nqueue length: {}\nfirst item type: {:?}",
+            queue.currently_playing.as_ref().map(|i| match i {
+                rspotify::model::PlayableItem::Track(t) => format!("Track: {}", t.name),
+                rspotify::model::PlayableItem::Episode(e) => format!("Episode: {}", e.name),
+                _ => "Unknown".to_string(),
+            }),
+            queue.queue.len(),
+            queue.queue.first().map(|i| match i {
+                rspotify::model::PlayableItem::Track(_) => "Track",
+                rspotify::model::PlayableItem::Episode(_) => "Episode",
+                _ => "Unknown",
+            }),
+        ));
+        let mut out = Vec::new();
+        for item in queue.queue {
+            match item {
+                rspotify::model::PlayableItem::Track(track) => {
+                    if track.is_local { continue; }
+                    out.push(Track {
+                        id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                        name: track.name,
+                        artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        duration_ms: track.duration.num_milliseconds() as u32,
+                        image_url: track.album.images.first().map(|img| img.url.clone()),
+                    });
+                }
+                rspotify::model::PlayableItem::Unknown(val) => {
+                    // The queue endpoint returns simplified track objects that rspotify
+                    // can't deserialize as FullTrack — extract from raw JSON.
+                    let item_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    if item_type == "episode" { continue; }
+
+                    let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    if id.is_empty() { continue; }
+
+                    let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+                    let artist = val.get("artists")
+                        .and_then(|a| a.as_array())
+                        .map(|arr| arr.iter()
+                            .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", "))
+                        .unwrap_or_default();
+                    let duration_ms = val.get("duration_ms")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as u32;
+                    let image_url = val.get("album")
+                        .and_then(|a| a.get("images"))
+                        .and_then(|imgs| imgs.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|img| img.get("url"))
+                        .and_then(|u| u.as_str())
+                        .map(|s| s.to_string());
+
+                    out.push(Track { id, name, artist, duration_ms, image_url });
+                }
+                _ => {}
+            }
+        }
+        Ok(out)
+    }
 }

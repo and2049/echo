@@ -91,6 +91,14 @@ async fn main() -> Result<()> {
     tui.enter()?;
 
     while state.is_running {
+        if let Some(expiry) = state.status_message_expiry {
+            if std::time::Instant::now() >= expiry {
+                state.status_message = None;
+                state.status_message_expiry = None;
+                state.recent_queue_count = 0;
+            }
+        }
+
         let force_clear = state.needs_terminal_clear;
         tui.apply_background(state.active_theme.background, force_clear)?;
         state.needs_terminal_clear = false;
@@ -257,6 +265,24 @@ async fn main() -> Result<()> {
                     state.selected_search_index = 0;
                     state.active_view = app::ActiveView::SearchResults;
                     state.status_message = Some(format!("Search: {}", state.search_context_query));
+                }
+                WorkerEvent::QueueLoaded(tracks) => {
+                    state.queue = tracks;
+                    state.selected_queue_index = 0;
+                }
+                WorkerEvent::StatusMessage(msg) => {
+                    state.status_message = Some(msg);
+                    state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    state.recent_queue_count = 0;
+                }
+                WorkerEvent::TracksQueued(count) => {
+                    state.recent_queue_count += count;
+                    state.status_message = Some(if state.recent_queue_count == 1 {
+                        "Added 1 track to queue".to_string()
+                    } else {
+                        format!("Added {} tracks to queue", state.recent_queue_count)
+                    });
+                    state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                 }
             }
         }

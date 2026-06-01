@@ -125,10 +125,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         if !query.is_empty() {
                             state.search_context_query = query.clone();
                             state.status_message = Some(format!("Searching for '{}'...", query));
+                            state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(crate::events::AppEvent::GlobalSearch(query));
                         } else {
                             state.status_message = Some("Usage: search <query>".to_string());
+                            state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
+                    }
+                    "queue" => {
+                        state.active_view = crate::app::ActiveView::Queue;
+                        state.selected_queue_index = 0;
+                        return Some(crate::events::AppEvent::FetchQueue);
                     }
                     _ => {}
                 }

@@ -93,6 +93,7 @@ pub enum ActiveView {
     Library,
     TrackList,
     SearchResults,
+    Queue,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -129,6 +130,8 @@ pub struct AppState {
     pub operation_register: Vec<String>,
     pub command_buffer: String,
     pub status_message: Option<String>,
+    pub status_message_expiry: Option<std::time::Instant>,
+    pub recent_queue_count: usize,
     pub pending_d_press: bool,
     pub folder_delete_prompt: Option<String>,
     pub selected_playlist_index: usize,
@@ -149,6 +152,8 @@ pub struct AppState {
     pub active_search_tab: SearchTab,
     pub selected_search_index: usize,
     pub prev_view: Option<ActiveView>,
+    pub queue: Vec<crate::models::Track>,
+    pub selected_queue_index: usize,
 }
 
 impl AppState {
@@ -185,6 +190,8 @@ impl AppState {
             operation_register: vec![],
             command_buffer: String::new(),
             status_message: None,
+            status_message_expiry: None,
+            recent_queue_count: 0,
             pending_d_press: false,
             folder_delete_prompt: None,
             selected_playlist_index: 0,
@@ -205,6 +212,8 @@ impl AppState {
             active_search_tab: SearchTab::Tracks,
             selected_search_index: 0,
             prev_view: None,
+            queue: Vec::new(),
+            selected_queue_index: 0,
         }
     }
 }

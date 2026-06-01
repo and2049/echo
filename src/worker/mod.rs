@@ -246,6 +246,25 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::AddToQueue(track_ids) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    let count = track_ids.len();
+                                    let _ = sp.add_to_queue(track_ids).await;
+                                    let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                }
+                            }
+                            AppEvent::FetchQueue => {
+                                if let Some(ref sp) = spotify_opt {
+                                    match sp.fetch_queue().await {
+                                        Ok(tracks) => {
+                                            let _ = self.tx.send(WorkerEvent::QueueLoaded(tracks)).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = std::fs::write("echo-debug-queue.log", format!("Queue fetch error: {:?}", e));
+                                        }
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     } else {
