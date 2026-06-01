@@ -1,126 +1,16 @@
-use crate::config::AppConfig;
-use crate::models::{PlaybackItem, Playlist, Track};
+use super::SpotifyWorker;
+use crate::models::{PlaybackItem, Track};
 use anyhow::Result;
-use rspotify::{AuthCodeSpotify, Credentials, OAuth, prelude::*};
-use std::collections::HashSet;
+use rspotify::prelude::*;
+use rspotify::model::Id;
+use rspotify::AuthCodeSpotify;
 
 const PLAYBACK_TYPES: [&rspotify::model::AdditionalType; 2] = [
     &rspotify::model::AdditionalType::Track,
     &rspotify::model::AdditionalType::Episode,
 ];
 
-pub struct SpotifyWorker {
-    pub client: AuthCodeSpotify,
-    pub device_id: Option<String>,
-}
-
 impl SpotifyWorker {
-    pub async fn new(config: &AppConfig) -> Result<Self> {
-        let creds = config.spotify_credentials.as_ref().unwrap();
-        let credentials = Credentials::new(&creds.client_id, &creds.client_secret);
-
-        let scopes: HashSet<String> = [
-            "user-read-private",
-            "playlist-read-private",
-            "playlist-read-collaborative",
-            "user-library-read",
-            "user-modify-playback-state",
-            "user-read-playback-state",
-            "streaming",
-            "app-remote-control",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
-        let oauth = OAuth {
-            redirect_uri: "http://127.0.0.1:8888/callback".to_string(),
-            scopes: scopes.clone(),
-            ..Default::default()
-        };
-
-        let spotify = AuthCodeSpotify::new(credentials, oauth);
-
-        if let Some(tokens) = &config.auth_tokens
-            && let Some(access) = &tokens.access_token
-                && let Some(refresh) = &tokens.refresh_token {
-                    use chrono::Utc;
-                    use rspotify::model::Token;
-
-                    let token = Token {
-                        access_token: access.clone(),
-                        refresh_token: Some(refresh.clone()),
-                        expires_in: chrono::Duration::seconds(0),
-                        expires_at: Some(Utc::now()),
-                        scopes: scopes.clone(),
-                    };
-
-                    *spotify.get_token().lock().await.unwrap() = Some(token);
-                    return Ok(Self {
-                        client: spotify,
-                        device_id: None,
-                    });
-                }
-
-        // AuthCodeSpotify standard challenge
-        let auth_url = spotify.get_authorize_url(false)?;
-
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:8888").await?;
-
-        // Open the browser to the REAL Spotify auth URL
-        if let Err(_e) = webbrowser::open(&auth_url) {
-            // fallback if webbrowser fails
-        }
-
-        if let Ok((mut socket, _)) = listener.accept().await {
-            let mut buffer = [0; 1024];
-            if let Ok(bytes_read) = socket.read(&mut buffer).await {
-                let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-                if let Some(code_start) = request.find("code=") {
-                    let code_rest = &request[code_start + 5..];
-                    let code = code_rest
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or("")
-                        .split('&')
-                        .next()
-                        .unwrap_or("");
-                    let code_str = code.to_string();
-
-                    let body = "<!DOCTYPE html><html><head><title>Success</title></head><body style=\"background-color: #121212; color: #ffffff; font-family: sans-serif; text-align: center; margin-top: 20%;\"><h1>Success, return to echo app</h1><p>You can safely close this tab.</p><script>setTimeout(() => window.close(), 3000);</script></body></html>";
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
-                        body.len(),
-                        body
-                    );
-
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    let _ = socket.flush().await;
-                    drop(socket); // explicitly close the socket so the browser finishes loading
-
-                    spotify.request_token(&code_str).await?;
-                }
-            }
-        }
-
-        // Write the fetched tokens to our config.toml
-        let token_mutex = spotify.get_token();
-        let token_guard = token_mutex.lock().await;
-        if let Some(t) = token_guard.unwrap().as_ref() {
-            let mut app_config = AppConfig::load();
-            app_config.auth_tokens = Some(crate::config::AuthTokens {
-                access_token: Some(t.access_token.clone()),
-                refresh_token: t.refresh_token.clone(),
-            });
-            let _ = app_config.save();
-        }
-
-        Ok(Self {
-            client: spotify,
-            device_id: None,
-        })
-    }
 
     pub async fn get_device_id(&mut self) -> Option<String> {
         if self.device_id.is_some() {
@@ -384,156 +274,6 @@ impl SpotifyWorker {
         Ok(())
     }
 
-    pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
-        let page = match self
-            .client
-            .current_user_playlists_manual(None, None)
-            .await {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = std::fs::write("echo-debug-user-playlists.log", format!("User playlists fetch error: {:?}", e));
-                return Err(e.into());
-            }
-        };
-        let mut out = Vec::new();
-        for p in page.items {
-            let owner = p
-                .owner
-                .display_name
-                .clone()
-                .unwrap_or_else(|| p.owner.id.id().to_string());
-            out.push(Playlist {
-                id: p.id.id().to_string(),
-                name: p.name,
-                owner,
-            });
-        }
-        Ok(out)
-    }
-
-    pub async fn fetch_albums(&self) -> Result<Vec<crate::models::Album>> {
-        use futures_util::StreamExt;
-        let stream = self.client.current_user_saved_albums(None);
-        let mut out = Vec::new();
-
-        let mut stream = Box::pin(stream);
-        while let Some(item) = stream.next().await {
-            if let Ok(saved_album) = item {
-                let album = saved_album.album;
-                out.push(crate::models::Album {
-                    id: album.id.id().to_string(),
-                    name: album.name,
-                });
-            }
-            if out.len() >= 100 {
-                break;
-            }
-        }
-        Ok(out)
-    }
-
-    pub async fn fetch_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
-        if playlist_id == "LIKED_SONGS" {
-            use futures_util::StreamExt;
-            let stream = self.client.current_user_saved_tracks(None);
-            let mut out = Vec::new();
-
-            let mut stream = Box::pin(stream);
-            while let Some(item) = stream.next().await {
-                if let Ok(saved_track) = item {
-                    let track = saved_track.track;
-                    if track.is_local {
-                        continue;
-                    }
-                    out.push(Track {
-                        id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
-                        name: track.name,
-                        artist: track
-                            .artists
-                            .into_iter()
-                            .map(|a| a.name)
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        duration_ms: track.duration.num_milliseconds() as u32,
-                        image_url: track.album.images.first().map(|img| img.url.clone()),
-                    });
-                }
-
-                if out.len() >= 100 {
-                    break;
-                }
-            }
-            return Ok(out);
-        }
-
-        let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
-        
-        // Debug raw request
-        if let Ok(token_mutex) = self.client.get_token().lock().await
-            && let Some(token) = token_mutex.as_ref() {
-                let raw_url = format!("https://api.spotify.com/v1/playlists/{}/items", id.id());
-                let client = reqwest::Client::new();
-                if let Ok(res) = client.get(&raw_url).bearer_auth(&token.access_token).send().await {
-                    let status = res.status();
-                    if let Ok(body) = res.text().await {
-                        let _ = std::fs::write("echo-debug-playlist.log", format!("RAW REQUEST RESPONSE ({}): {}", status, body));
-                    }
-                }
-            }
-
-        let page = match self
-            .client
-            .playlist_items_manual(id, None, None, None, None)
-            .await {
-            Ok(p) => p,
-            Err(e) => {
-                // The raw request above already wrote the body, so we can just return
-                return Err(e.into());
-            }
-        };
-        let mut out = Vec::new();
-        for item in page.items {
-            if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
-                out.push(Track {
-                    id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
-                    name: track.name,
-                    artist: track
-                        .artists
-                        .into_iter()
-                        .map(|a| a.name)
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    duration_ms: track.duration.num_milliseconds() as u32,
-                    image_url: track.album.images.first().map(|img| img.url.clone()),
-                });
-            }
-        }
-        Ok(out)
-    }
-
-    pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
-        let id = rspotify::model::AlbumId::from_id(album_id)?;
-        let page = self.client.album_track_manual(id, None, None, None).await?;
-        let mut out = Vec::new();
-        for track in page.items {
-            if track.is_local {
-                continue;
-            }
-            out.push(Track {
-                id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
-                name: track.name,
-                artist: track
-                    .artists
-                    .into_iter()
-                    .map(|a| a.name)
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                duration_ms: track.duration.num_milliseconds() as u32,
-                image_url: None, // Simplified tracks don't have images directly, normally it inherits from the album, we can omit it or pass it down later
-            });
-        }
-        Ok(out)
-    }
 
     pub async fn play_track(
         &mut self,
@@ -599,35 +339,7 @@ impl SpotifyWorker {
         Ok((title, artist, image_url))
     }
 
-    pub async fn search_catalog(&self, query: &str) -> anyhow::Result<crate::models::SearchResults> {
-        use rspotify::model::SearchType;
-        use rspotify::prelude::BaseClient;
 
-        let mut results = crate::models::SearchResults::default();
-
-        if let Ok(rspotify::model::SearchResult::Tracks(page)) = self.client.search(query, SearchType::Track, None, None, None, None).await {
-            results.tracks = page.items.into_iter().filter_map(|t| {
-                let id = t.id?.id().to_string();
-                let name = t.name;
-                let artist = t.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
-                let album = t.album.name;
-                let duration_ms = t.duration.num_milliseconds() as u32;
-                let image_url = t.album.images.first().map(|i| i.url.clone());
-                Some(crate::models::SearchTrack { id, name, artist, album, duration_ms, image_url })
-            }).collect();
-        }
-
-        if let Ok(rspotify::model::SearchResult::Albums(page)) = self.client.search(query, SearchType::Album, None, None, None, None).await {
-            results.albums = page.items.into_iter().filter_map(|a| {
-                let id = a.id?.id().to_string();
-                let name = a.name;
-                let artist = a.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
-                Some(crate::models::SearchAlbum { id, name, artist })
-            }).collect();
-        }
-
-        Ok(results)
-    }
 
     pub async fn add_to_queue(&self, track_ids: Vec<String>) -> anyhow::Result<()> {
         use rspotify::model::TrackId;
@@ -710,4 +422,5 @@ impl SpotifyWorker {
         }
         Ok(out)
     }
+
 }

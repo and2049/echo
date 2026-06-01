@@ -1,13 +1,53 @@
 use crate::app::{ActiveView, AppMode, AppState};
 use ratatui::{
     Frame,
-    buffer::Buffer,
     layout::{Constraint, Rect},
-    style::Modifier,
-    text::Line,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, Table, TableState},
 };
-use crate::tui::mod::{row_text_width, truncate_to_width_with_ellipsis, stabilize_terminal_emoji_width, padded_library_list, repair_wide_grapheme_trailing_styles, format_duration_text, format_time};
+use crate::tui::render::{
+    format_duration_text, format_time, padded_library_list, repair_wide_grapheme_trailing_styles,
+    row_text_width, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
+    DURATION_COLUMN_WIDTH,
+};
+
+const ECHO_LOGO: [&str; 6] = [
+    "███████╗ ██████╗██╗  ██╗ ██████╗               ██████╗ ███████╗",
+    "██╔════╝██╔════╝██║  ██║██╔═══██╗              ██╔══██╗██╔════╝",
+    "█████╗  ██║     ███████║██║   ██║    █████╗    ██████╔╝███████╗",
+    "██╔══╝  ██║     ██╔══██║██║   ██║    ╚════╝    ██╔══██╗╚════██║",
+    "███████╗╚██████╗██║  ██║╚██████╔╝              ██║  ██║███████║",
+    "╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝               ╚═╝  ╚═╝╚══════╝",
+];
+
+fn color_to_rgb(color: Color) -> (f32, f32, f32) {
+    match color {
+        Color::Reset | Color::Black => (0., 0., 0.),
+        Color::Red | Color::LightRed => (255., 0., 0.),
+        Color::Green | Color::LightGreen => (0., 255., 0.),
+        Color::Yellow | Color::LightYellow => (255., 255., 0.),
+        Color::Blue | Color::LightBlue => (0., 0., 255.),
+        Color::Magenta | Color::LightMagenta => (255., 0., 255.),
+        Color::Cyan | Color::LightCyan => (0., 255., 255.),
+        Color::Gray | Color::DarkGray => (128., 128., 128.),
+        Color::White => (255., 255., 255.),
+        Color::Rgb(r, g, b) => (r as f32, g as f32, b as f32),
+        Color::Indexed(_) => (255., 255., 255.),
+    }
+}
+
+fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
+    let (r1, g1, b1) = color_to_rgb(c1);
+    let (r2, g2, b2) = color_to_rgb(c2);
+    
+    let r = r1 + (r2 - r1) * t;
+    let g = g1 + (g2 - g1) * t;
+    let b = b1 + (b2 - b1) * t;
+    
+    Color::Rgb(r as u8, g as u8, b as u8)
+}
+
 
 pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Rect) {
     let is_focused = state.active_view == ActiveView::Library;
@@ -28,7 +68,7 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
         .border_style(library_border_style)
         .title(title_text);
     let library_list_area = library_block.inner(library_area);
-    let library_text_width = super::row_text_width(library_list_area);
+    let library_text_width = row_text_width(library_list_area);
     frame.render_widget(library_block, library_area);
 
     let library_items: Vec<ListItem> = state
@@ -45,8 +85,8 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
             match node {
                 crate::models::LibraryNode::Folder(f) => {
                     let prefix = if f.is_open { "▼" } else { "▶" };
-                    let text = super::truncate_to_width_with_ellipsis(
-                        &format!("{} {}", prefix, super::stabilize_terminal_emoji_width(&f.name)),
+                    let text = truncate_to_width_with_ellipsis(
+                        &format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name)),
                         library_text_width,
                     );
                     let folder_style = if i == state.selected_playlist_index {
@@ -68,9 +108,9 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
                     let text = format!(
                         "{}{}",
                         prefix,
-                        super::stabilize_terminal_emoji_width(&playlist.name)
+                        stabilize_terminal_emoji_width(&playlist.name)
                     );
-                    let text = super::truncate_to_width_with_ellipsis(&text, library_text_width);
+                    let text = truncate_to_width_with_ellipsis(&text, library_text_width);
 
                     // Mark as ghosted if it is in the cut register
                     let list_style = if state.operation_register.contains(&playlist.id) {
@@ -96,15 +136,15 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
                 } else {
                     state.active_theme.base_style()
                 };
-                ListItem::new(super::truncate_to_width_with_ellipsis(
-                    &super::stabilize_terminal_emoji_width(&album.name),
+                ListItem::new(truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&album.name),
                     library_text_width,
                 ))
                 .style(style)
             })
             .collect();
 
-        let list = super::padded_library_list(items).highlight_style(
+        let list = padded_library_list(items).highlight_style(
             state
                 .active_theme
                 .selected_style()
@@ -114,13 +154,13 @@ pub fn render_library_list(frame: &mut Frame, state: &AppState, library_area: Re
         let mut list_state = ListState::default();
         list_state.select(Some(state.selected_playlist_index));
         frame.render_stateful_widget(list, library_list_area, &mut list_state);
-        super::repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
+        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else {
-        let playlist_list = super::padded_library_list(library_items);
+        let playlist_list = padded_library_list(library_items);
         let mut playlist_state = ListState::default();
         playlist_state.select(Some(state.selected_playlist_index));
         frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
-        super::repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
+        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     }
 }
 
@@ -152,22 +192,22 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
                 Cell::from(format!(
                     "{}{}",
                     prefix,
-                    super::stabilize_terminal_emoji_width(&t.name)
+                    stabilize_terminal_emoji_width(&t.name)
                 ))
             } else {
                 Cell::from(format!(
                     "{:>3} {}{}",
                     (i as isize) + state.library_config.track_index_base,
                     prefix,
-                    super::stabilize_terminal_emoji_width(&t.name)
+                    stabilize_terminal_emoji_width(&t.name)
                 ))
             };
-            let duration_cell = Cell::from(super::format_duration_text(super::format_time(t.duration_ms / 1000)));
+            let duration_cell = Cell::from(format_duration_text(format_time(t.duration_ms / 1000)));
 
             let row = if is_albums_tab {
                 Row::new(vec![track_cell, duration_cell])
             } else {
-                let artist_cell = Cell::from(super::stabilize_terminal_emoji_width(&t.artist));
+                let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
                 Row::new(vec![track_cell, artist_cell, duration_cell])
             };
 
@@ -196,38 +236,46 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
         let header = Row::new(vec![header_str, "Duration "])
             .style(header_style)
             .height(1);
-        Table::new(
+        let mut t = Table::new(
             track_rows,
             [
                 Constraint::Min(20),
-                Constraint::Length(super::DURATION_COLUMN_WIDTH),
+                Constraint::Length(DURATION_COLUMN_WIDTH),
             ],
         )
         .column_spacing(1)
-        .header(header)
         .block(track_block)
         .row_highlight_style(state.active_theme.selected_style())
         .highlight_symbol(" ")
-        .highlight_spacing(HighlightSpacing::Always)
+        .highlight_spacing(HighlightSpacing::Always);
+
+        if !state.tracks.is_empty() {
+            t = t.header(header);
+        }
+        t
     } else {
         let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
         let header = Row::new(vec![header_str, "Artist", "Duration "])
             .style(header_style)
             .height(1);
-        Table::new(
+        let mut t = Table::new(
             track_rows,
             [
                 Constraint::Percentage(50),
                 Constraint::Percentage(50),
-                Constraint::Length(super::DURATION_COLUMN_WIDTH),
+                Constraint::Length(DURATION_COLUMN_WIDTH),
             ],
         )
         .column_spacing(1)
-        .header(header)
         .block(track_block)
         .row_highlight_style(state.active_theme.selected_style())
         .highlight_symbol(" ")
-        .highlight_spacing(HighlightSpacing::Always)
+        .highlight_spacing(HighlightSpacing::Always);
+
+        if !state.tracks.is_empty() {
+            t = t.header(header);
+        }
+        t
     };
 
     let mut ts = TableState::default();
@@ -237,5 +285,42 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
         state.selected_track_index.min(state.tracks.len() - 1)
     };
     ts.select(Some(sel));
-    frame.render_stateful_widget(table, track_inner_area, &mut ts);
+    frame.render_stateful_widget(table, tracks_area, &mut ts);
+
+    if state.tracks.is_empty() {
+        let logo_height = ECHO_LOGO.len() as u16;
+        let logo_width = 63; // Width of the longest line in ECHO_LOGO
+        
+        if track_inner_area.width > logo_width && track_inner_area.height > logo_height {
+            let x_offset = (track_inner_area.width - logo_width) / 2;
+            let y_offset = (track_inner_area.height - logo_height) / 2;
+            
+            let gradient_lines: Vec<Line> = ECHO_LOGO.iter().map(|&line| {
+                let mut spans = Vec::new();
+                for (i, c) in line.chars().enumerate() {
+                    let t = i as f32 / logo_width as f32;
+                    let base_color = lerp_color(state.active_theme.secondary, state.active_theme.primary, t);
+                    
+                    let style = if c == '█' {
+                        Style::default().fg(base_color)
+                    } else if c != ' ' {
+                        let (r, g, b) = color_to_rgb(base_color);
+                        let dark_color = Color::Rgb((r * 0.5) as u8, (g * 0.5) as u8, (b * 0.5) as u8);
+                        Style::default().fg(dark_color)
+                    } else {
+                        Style::default()
+                    };
+                    spans.push(Span::styled(c.to_string(), style));
+                }
+                Line::from(spans)
+            }).collect();
+            let gradient_area = Rect {
+                x: track_inner_area.x + x_offset,
+                y: track_inner_area.y + y_offset,
+                width: logo_width,
+                height: logo_height,
+            };
+            frame.render_widget(ratatui::widgets::Paragraph::new(gradient_lines), gradient_area);
+        }
+    }
 }

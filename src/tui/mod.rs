@@ -1,4 +1,8 @@
+pub mod library;
+pub mod playback;
+pub mod queue;
 pub mod render;
+pub mod search;
 
 use anyhow::Result;
 use crossterm::style::{Color as CrosstermColor, ResetColor, SetBackgroundColor};

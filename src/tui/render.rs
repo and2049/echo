@@ -1,4 +1,4 @@
-use crate::app::{ActiveView, AppMode, AppState, SearchTab};
+use crate::app::{ActiveView, AppMode, AppState};
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -6,8 +6,7 @@ use ratatui::{
     style::Modifier,
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Gauge, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
-        Table, TableState,
+        Block, Borders, HighlightSpacing, List, ListItem, Paragraph,
     },
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -15,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 
 const ROW_TEXT_LEFT_GUTTER: u16 = 1;
 const ROW_TEXT_RIGHT_GUTTER: u16 = 1;
-const DURATION_COLUMN_WIDTH: u16 = 9;
+pub const DURATION_COLUMN_WIDTH: u16 = 9;
 
 pub fn render_app(frame: &mut Frame, state: &AppState) {
     fill_background(frame, state);
@@ -50,355 +49,17 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let library_area = main_chunks[0];
     let tracks_area = main_chunks[2];
 
-    // Render Main Content
-    let is_focused = state.active_view == ActiveView::Library;
-    let title_text = match state.active_library_tab {
-        crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
-        crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
-    };
-
-    let library_border_style = if is_focused {
-        state.active_theme.secondary_style()
-    } else {
-        state.active_theme.primary_style()
-    };
-
-    let library_block = Block::default()
-        .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(library_border_style)
-        .title(title_text);
-    let library_list_area = library_block.inner(library_area);
-    let library_text_width = row_text_width(library_list_area);
-    frame.render_widget(library_block, library_area);
-
-    let library_items: Vec<ListItem> = state
-        .library_view
-        .iter()
-        .enumerate()
-        .map(|(i, node)| {
-            let style = if i == state.selected_playlist_index {
-                state.active_theme.selected_style()
-            } else {
-                state.active_theme.base_style()
-            };
-
-            match node {
-                crate::models::LibraryNode::Folder(f) => {
-                    let prefix = if f.is_open { "▼" } else { "▶" };
-                    let text = truncate_to_width_with_ellipsis(
-                        &format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name)),
-                        library_text_width,
-                    );
-                    let folder_style = if i == state.selected_playlist_index {
-                        style
-                    } else {
-                        state.active_theme.primary_style()
-                    };
-                    ListItem::new(text).style(folder_style.add_modifier(Modifier::BOLD))
-                }
-                crate::models::LibraryNode::Playlist { playlist, indent } => {
-                    let mut prefix = String::new();
-                    for _ in 0..*indent {
-                        prefix.push_str("  ");
-                    }
-                    if state.library_config.pinned.contains(&playlist.id) {
-                        prefix.push_str("📌 ");
-                    }
-
-                    let text = format!(
-                        "{}{}",
-                        prefix,
-                        stabilize_terminal_emoji_width(&playlist.name)
-                    );
-                    let text = truncate_to_width_with_ellipsis(&text, library_text_width);
-
-                    // Mark as ghosted if it is in the cut register
-                    let list_style = if state.operation_register.contains(&playlist.id) {
-                        style.fg(state.active_theme.text_muted)
-                    } else {
-                        style
-                    };
-
-                    ListItem::new(text).style(list_style)
-                }
-            }
-        })
-        .collect();
-
-    if state.active_library_tab == crate::app::LibraryTab::Albums {
-        let items: Vec<ListItem> = state
-            .saved_albums
-            .iter()
-            .enumerate()
-            .map(|(i, album)| {
-                let style = if is_focused && i == state.selected_playlist_index {
-                    state.active_theme.selected_style()
-                } else {
-                    state.active_theme.base_style()
-                };
-                ListItem::new(truncate_to_width_with_ellipsis(
-                    &stabilize_terminal_emoji_width(&album.name),
-                    library_text_width,
-                ))
-                .style(style)
-            })
-            .collect();
-
-        let list = padded_library_list(items).highlight_style(
-            state
-                .active_theme
-                .selected_style()
-                .add_modifier(Modifier::BOLD),
-        );
-
-        let mut list_state = ListState::default();
-        list_state.select(Some(state.selected_playlist_index));
-        frame.render_stateful_widget(list, library_list_area, &mut list_state);
-        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
-    } else {
-        let playlist_list = padded_library_list(library_items);
-        let mut playlist_state = ListState::default();
-        playlist_state.select(Some(state.selected_playlist_index));
-        frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
-        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
-    }
-
-    let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
-
-    let track_rows: Vec<Row> = state
-        .tracks
-        .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let is_match = state.mode == AppMode::Search && state.search_matches.contains(&i);
-            
-            let style = if i == state.selected_track_index {
-                state.active_theme.selected_style()
-            } else if is_match {
-                state.active_theme.base_style().fg(state.active_theme.secondary)
-            } else {
-                state.active_theme.base_style()
-            };
-            
-            let prefix = if Some(t.id.clone()) == state.playback.playing_track_id {
-                "▶ "
-            } else {
-                ""
-            };
-
-            let track_cell = if state.library_config.track_index_base < 0 {
-                Cell::from(format!(
-                    "{}{}",
-                    prefix,
-                    stabilize_terminal_emoji_width(&t.name)
-                ))
-            } else {
-                Cell::from(format!(
-                    "{:>3} {}{}",
-                    (i as isize) + state.library_config.track_index_base,
-                    prefix,
-                    stabilize_terminal_emoji_width(&t.name)
-                ))
-            };
-            let duration_cell = Cell::from(format_duration_text(format_time(t.duration_ms / 1000)));
-
-            let row = if is_albums_tab {
-                Row::new(vec![track_cell, duration_cell])
-            } else {
-                let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
-                Row::new(vec![track_cell, artist_cell, duration_cell])
-            };
-
-            row.style(style)
-        })
-        .collect();
-
-    let is_track_focused = state.active_view == ActiveView::TrackList;
-    let track_border_style = if is_track_focused {
-        state.active_theme.secondary_style()
-    } else {
-        state.active_theme.primary_style()
-    };
-
-    let track_block = Block::default()
-        .title(" Tracks ")
-        .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(track_border_style);
-    let track_inner_area = track_block.inner(tracks_area);
-
-    let header_style = track_border_style.add_modifier(Modifier::BOLD);
-
-    let table = if is_albums_tab {
-        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
-        let header = Row::new(vec![header_str, "Duration "])
-            .style(header_style)
-            .height(1);
-        Table::new(
-            track_rows,
-            [
-                Constraint::Min(20),
-                Constraint::Length(DURATION_COLUMN_WIDTH),
-            ],
-        )
-        .column_spacing(1)
-        .header(header)
-        .block(track_block)
-        .row_highlight_style(state.active_theme.selected_style())
-        .highlight_symbol(" ")
-        .highlight_spacing(HighlightSpacing::Always)
-    } else {
-        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
-        let header = Row::new(vec![header_str, "Artist", "Duration "])
-            .style(header_style)
-            .height(1);
-        Table::new(
-            track_rows,
-            [
-                Constraint::Percentage(45),
-                Constraint::Min(20),
-                Constraint::Length(DURATION_COLUMN_WIDTH),
-            ],
-        )
-        .column_spacing(1)
-        .header(header)
-        .block(track_block)
-        .row_highlight_style(state.active_theme.selected_style())
-        .highlight_symbol(" ")
-        .highlight_spacing(HighlightSpacing::Always)
-    };
-
-    let mut track_state = TableState::default();
-    track_state.select(Some(state.selected_track_index));
+    crate::tui::library::render_library_list(frame, state, library_area);
 
     if state.active_view == ActiveView::SearchResults {
-        render_search_results(frame, state, tracks_area);
+        crate::tui::search::render_search_results(frame, state, tracks_area);
     } else if state.active_view == ActiveView::Queue {
-        render_queue(frame, state, tracks_area);
+        crate::tui::queue::render_queue(frame, state, tracks_area);
     } else {
-        frame.render_stateful_widget(table, tracks_area, &mut track_state);
-        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), track_inner_area);
+        crate::tui::library::render_track_list(frame, state, tracks_area);
     }
 
-    // Render Playback Bar Border
-    let shuffle_str = if state.playback.is_shuffled {
-        "On"
-    } else {
-        "Off"
-    };
-    let border_title = format!(
-        " Playing (Shuffle: {:<7} | Repeat: {:<7} | Volume: {:>3}%) ",
-        shuffle_str, state.playback.repeat_mode, state.playback.volume
-    );
-
-    let playback_block = Block::default()
-        .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style())
-        .title(border_title);
-
-    let playback_inner = playback_block.inner(chunks[1]);
-    frame.render_widget(playback_block, chunks[1]);
-
-    let playback_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(7), // Track Info
-            Constraint::Length(1), // Progress bar
-        ])
-        .split(playback_inner);
-
-    // Render Progress Bar
-    let pb = &state.playback;
-    let ratio = if pb.duration_ms > 0 {
-        (pb.progress_ms as f64 / pb.duration_ms as f64).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-
-    let progress_sec = pb.progress_ms / 1000;
-    let duration_sec = pb.duration_ms / 1000;
-
-    let progress_str = format_time(progress_sec);
-    let duration_str = format_time(duration_sec);
-
-    let pb_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(6), // current time
-            Constraint::Min(0),    // gauge
-            Constraint::Length(6), // duration
-        ])
-        .split(playback_chunks[1]);
-
-    let current_time_p = Paragraph::new(progress_str)
-        .alignment(Alignment::Right)
-        .style(state.active_theme.base_style());
-    let total_time_p = Paragraph::new(duration_str)
-        .alignment(Alignment::Left)
-        .style(state.active_theme.base_style());
-
-    let gauge = Gauge::default()
-        .gauge_style(state.active_theme.gauge_style())
-        .ratio(ratio)
-        .label(""); // hide inner text
-
-    frame.render_widget(current_time_p, pb_chunks[0]);
-
-    // Add a tiny margin around the gauge to separate it from the text
-    let mut gauge_area = pb_chunks[1];
-    if gauge_area.width > 2 {
-        gauge_area.x += 1;
-        gauge_area.width -= 2;
-    }
-    frame.render_widget(gauge, gauge_area);
-    frame.render_widget(total_time_p, pb_chunks[2]);
-
-    // Render Track Info
-    let track_info_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(2),  // Left padding
-            Constraint::Length(10), // Image width
-            Constraint::Length(2),  // Middle gap to text
-            Constraint::Min(0),     // Text width
-        ])
-        .split(playback_chunks[0]);
-
-    if let Some(ref protocol) = state.playback.playing_track_image {
-        let image = ratatui_image::Image::new(protocol);
-        let mut image_area = track_info_chunks[1];
-        // Center vertically in the 7-row tall block (1 row top padding, 1 row bottom padding)
-        if image_area.height >= 7 {
-            image_area.y += 1;
-            image_area.height = 5;
-        }
-        frame.render_widget(image, image_area);
-    }
-
-    // Create Title & Artist Text
-    let track_title = if state.playback.playing_track_title.is_empty() {
-        String::new()
-    } else {
-        stabilize_terminal_emoji_width(&state.playback.playing_track_title)
-    };
-
-    let track_artist = stabilize_terminal_emoji_width(&state.playback.playing_track_artist);
-
-    let text_lines = vec![
-        Line::from(Span::styled(
-            track_title,
-            state.active_theme.base_style().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(track_artist, state.active_theme.muted_style())),
-    ];
-    let track_text_p = Paragraph::new(text_lines)
-        .alignment(Alignment::Left)
-        .style(state.active_theme.base_style())
-        // Add top padding to vertically align with the center of the image
-        .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
-    frame.render_widget(track_text_p, track_info_chunks[3]);
+    crate::tui::playback::render_playback_bar(frame, state, chunks[1]);
 
     // Render Command Bar
     let (cmd_text, cmd_style) = match state.mode {
@@ -480,7 +141,7 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     }
 }
 
-fn fill_background(frame: &mut Frame, state: &AppState) {
+pub fn fill_background(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let style = state.active_theme.base_style();
     let buffer = frame.buffer_mut();
@@ -493,7 +154,7 @@ fn fill_background(frame: &mut Frame, state: &AppState) {
     }
 }
 
-fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
+pub fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
     let area = buffer.area().intersection(area);
 
     for y in area.top()..area.bottom() {
@@ -511,26 +172,26 @@ fn repair_wide_grapheme_trailing_styles(buffer: &mut Buffer, area: Rect) {
     }
 }
 
-fn padded_library_list(items: Vec<ListItem>) -> List {
+pub fn padded_library_list(items: Vec<ListItem>) -> List {
     List::new(items)
         .highlight_symbol(" ")
         .highlight_spacing(HighlightSpacing::Always)
 }
 
-fn row_text_width(area: Rect) -> u16 {
+pub fn row_text_width(area: Rect) -> u16 {
     area.width
         .saturating_sub(ROW_TEXT_LEFT_GUTTER + ROW_TEXT_RIGHT_GUTTER)
 }
 
-fn format_duration_text(time: String) -> String {
+pub fn format_duration_text(time: String) -> String {
     format!("{:>8} ", time)
 }
 
-fn format_time(s: u32) -> String {
+pub fn format_time(s: u32) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-fn truncate_to_width_with_ellipsis(text: &str, max_width: u16) -> String {
+pub fn truncate_to_width_with_ellipsis(text: &str, max_width: u16) -> String {
     let max_width = max_width as usize;
 
     if text.width() <= max_width {
@@ -564,7 +225,7 @@ fn truncate_to_width_with_ellipsis(text: &str, max_width: u16) -> String {
     truncated
 }
 
-fn stabilize_terminal_emoji_width(text: &str) -> String {
+pub fn stabilize_terminal_emoji_width(text: &str) -> String {
     let mut stabilized = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
 
@@ -581,12 +242,12 @@ fn stabilize_terminal_emoji_width(text: &str) -> String {
     stabilized
 }
 
-fn needs_emoji_variation_selector(ch: char) -> bool {
+pub fn needs_emoji_variation_selector(ch: char) -> bool {
     matches!(ch, '\u{1f578}')
 }
 
 // Helper function to create a centered rect
-fn centered_rect(
+pub fn centered_rect(
     percent_x: u16,
     percent_y: u16,
     r: ratatui::layout::Rect,
@@ -610,7 +271,7 @@ fn centered_rect(
         .split(popup_layout[1])[1]
 }
 
-fn render_authenticating(frame: &mut Frame, state: &AppState) {
+pub fn render_authenticating(frame: &mut Frame, state: &AppState) {
     let block = Block::default()
         .title(" Authenticating ")
         .borders(Borders::ALL)
@@ -629,7 +290,7 @@ fn render_authenticating(frame: &mut Frame, state: &AppState) {
     frame.render_widget(paragraph, frame.area());
 }
 
-fn render_setup(frame: &mut Frame, state: &AppState) {
+pub fn render_setup(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let layout = ratatui::layout::Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
@@ -689,171 +350,10 @@ fn render_setup(frame: &mut Frame, state: &AppState) {
     frame.render_widget(paragraph, setup_area);
 }
 
-fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
-    let header_style = state.active_theme.muted_style();
-    let title = format!(
-        " Queue ({} upcoming) ",
-        state.queue.len()
-    );
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(state.active_theme.primary_style());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if state.queue.is_empty() {
-        let msg = Paragraph::new("Queue is empty. Press q on any track to add it.")
-            .style(state.active_theme.muted_style())
-            .alignment(Alignment::Center);
-        frame.render_widget(msg, inner);
-        return;
-    }
-
-    let w_track = inner.width.saturating_sub(DURATION_COLUMN_WIDTH + 2) * 60 / 100;
-    let w_artist = inner.width.saturating_sub(DURATION_COLUMN_WIDTH + 2).saturating_sub(w_track);
-
-    let header = Row::new(vec!["Track", "Artist", "Duration"])
-        .style(header_style)
-        .height(1);
-
-    let sel = state.selected_queue_index;
-    let rows: Vec<Row> = state.queue.iter().enumerate().map(|(i, track)| {
-        let style = if i == sel {
-            state.active_theme.selected_style()
-        } else {
-            state.active_theme.base_style()
-        };
-        let name = truncate_to_width_with_ellipsis(&stabilize_terminal_emoji_width(&track.name), w_track);
-        let artist = truncate_to_width_with_ellipsis(&stabilize_terminal_emoji_width(&track.artist), w_artist);
-        let dur = format_duration_text(format_time(track.duration_ms / 1000));
-        Row::new(vec![
-            Cell::from(name),
-            Cell::from(artist).style(style.fg(state.active_theme.text_muted)),
-            Cell::from(dur).style(style.fg(state.active_theme.text_muted)),
-        ]).style(style)
-    }).collect();
-
-    let table = Table::new(rows, [
-        Constraint::Length(w_track),
-        Constraint::Min(0),
-        Constraint::Length(DURATION_COLUMN_WIDTH),
-    ])
-    .column_spacing(1)
-    .header(header)
-    .row_highlight_style(state.active_theme.selected_style())
-    .highlight_symbol(" ")
-    .highlight_spacing(HighlightSpacing::Always);
-
-    let mut ts = TableState::default();
-    ts.select(Some(sel));
-    frame.render_stateful_widget(table, inner, &mut ts);
-}
-
-fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
-    let is_focused = state.active_view == ActiveView::SearchResults;
-    let border_style = if is_focused {
-        state.active_theme.secondary_style()
-    } else {
-        state.active_theme.primary_style()
-    };
-
-    // Build tab header title
-    let tab_title = match state.active_search_tab {
-        SearchTab::Tracks  => "[ Tracks ] Albums",
-        SearchTab::Albums  => " Tracks [ Albums ]",
-    };
-
-    let search_block = Block::default()
-        .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(border_style)
-        .title(format!(" Search: {} — {} ", state.search_context_query, tab_title));
-
-    let inner = search_block.inner(area);
-    frame.render_widget(search_block, area);
-
-    let sel = state.selected_search_index;
-    let header_style = border_style.add_modifier(Modifier::BOLD);
-
-    match state.active_search_tab {
-        SearchTab::Tracks => {
-            let header = Row::new(vec!["Track", "Artist", "Album", "Duration "])
-                .style(header_style)
-                .height(1);
-            let rows: Vec<Row> = state.search_results.tracks.iter().enumerate().map(|(i, t)| {
-                let style = if i == sel {
-                    state.active_theme.selected_style()
-                } else {
-                    state.active_theme.base_style()
-                };
-                let dur = format!("{}:{:02}", t.duration_ms / 1000 / 60, t.duration_ms / 1000 % 60);
-                let w_track = (inner.width * 35 / 100).saturating_sub(1);
-                let w_artist = (inner.width * 25 / 100).saturating_sub(1);
-                let w_album = (inner.width * 30 / 100).saturating_sub(1);
-                Row::new(vec![
-                    Cell::from(truncate_to_width_with_ellipsis(&t.name, w_track)),
-                    Cell::from(truncate_to_width_with_ellipsis(&t.artist, w_artist)),
-                    Cell::from(truncate_to_width_with_ellipsis(&t.album, w_album)),
-                    Cell::from(format_duration_text(dur)),
-                ]).style(style)
-            }).collect();
-            let table = Table::new(rows, [
-                Constraint::Percentage(35),
-                Constraint::Percentage(25),
-                Constraint::Percentage(30),
-                Constraint::Length(DURATION_COLUMN_WIDTH),
-            ])
-            .column_spacing(1)
-            .header(header)
-            .row_highlight_style(state.active_theme.selected_style())
-            .highlight_symbol(" ")
-            .highlight_spacing(HighlightSpacing::Always);
-            let mut ts = TableState::default();
-            ts.select(Some(sel));
-            frame.render_stateful_widget(table, inner, &mut ts);
-        }
-        SearchTab::Albums => {
-            let header = Row::new(vec!["Album", "Artist"])
-                .style(header_style)
-                .height(1);
-            let rows: Vec<Row> = state.search_results.albums.iter().enumerate().map(|(i, a)| {
-                let style = if i == sel {
-                    state.active_theme.selected_style()
-                } else {
-                    state.active_theme.base_style()
-                };
-                let w_album = (inner.width * 50 / 100).saturating_sub(1);
-                let w_artist = (inner.width * 50 / 100).saturating_sub(1);
-                Row::new(vec![
-                    Cell::from(truncate_to_width_with_ellipsis(&a.name, w_album)),
-                    Cell::from(truncate_to_width_with_ellipsis(&a.artist, w_artist)),
-                ]).style(style)
-            }).collect();
-            let table = Table::new(rows, [Constraint::Percentage(50), Constraint::Percentage(50)])
-                .column_spacing(1)
-                .header(header)
-                .row_highlight_style(state.active_theme.selected_style())
-                .highlight_symbol(" ")
-                .highlight_spacing(HighlightSpacing::Always);
-            let mut ts = TableState::default();
-            ts.select(Some(sel));
-            frame.render_stateful_widget(table, inner, &mut ts);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        DURATION_COLUMN_WIDTH, format_duration_text, repair_wide_grapheme_trailing_styles,
-        row_text_width, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
-    };
-    use ratatui::{
-        buffer::Buffer,
-        layout::Rect,
-        style::{Color, Style},
-    };
+    use super::*;
+    use ratatui::{buffer::Buffer, style::{Color, Style}};
     use unicode_width::UnicodeWidthStr;
 
     fn render_row_text(text: &str, style: Style) -> Buffer {
@@ -1005,4 +505,6 @@ mod tests {
         assert_eq!(duration, "    2:46 ");
         assert_eq!(duration.width(), DURATION_COLUMN_WIDTH as usize);
     }
+
+
 }

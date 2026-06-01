@@ -80,8 +80,10 @@ pub async fn spawn_librespot_daemon(
                     move || backend_fn(None, Default::default()),
                 );
 
-                let mut connect_config = ConnectConfig::default();
-                connect_config.name = device_name.clone();
+                let connect_config = ConnectConfig {
+                    name: device_name.clone(),
+                    ..Default::default()
+                };
 
                 let (_spirc, spirc_task) =
                     Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;

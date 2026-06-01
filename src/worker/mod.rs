@@ -1,10 +1,10 @@
 pub mod audio;
-pub mod spotify;
+pub mod api;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
 use crate::models::PlaybackItem;
-use spotify::SpotifyWorker;
+use api::SpotifyWorker;
 use tokio::sync::mpsc;
 
 pub struct Worker {
