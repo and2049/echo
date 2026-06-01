@@ -107,7 +107,6 @@ pub enum AppMode {
     Setup,
     Authenticating,
     Normal,
-    Visual,
     Command,
     Search,
 }
@@ -277,10 +276,10 @@ impl AppState {
 
         match self.library_config.sort_mode {
             SortMode::Alphabetical => {
-                loose.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                loose.sort_by_key(|a| a.name.to_lowercase())
             }
             SortMode::Creator => {
-                loose.sort_by(|a, b| a.owner.to_lowercase().cmp(&b.owner.to_lowercase()))
+                loose.sort_by_key(|a| a.owner.to_lowercase())
             }
             SortMode::Default => {}
         }

@@ -164,8 +164,6 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     }
 
-    let prefix = if state.playback.is_playing { "▶ " } else { "  " };
-
     let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
 
     let track_rows: Vec<Row> = state

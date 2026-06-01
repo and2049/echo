@@ -1,4 +1,3 @@
-use futures_util::StreamExt;
 use librespot_connect::{ConnectConfig, Spirc};
 use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;

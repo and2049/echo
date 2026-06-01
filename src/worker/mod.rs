@@ -106,15 +106,14 @@ impl Worker {
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
-                    if let Some(ref mut sp) = spotify_opt {
-                        if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
+                    if let Some(ref mut sp) = spotify_opt
+                        && let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
                             is_playing = playing;
                             if let Some(item) = item.as_ref() {
                                 current_track_id = Some(item.id.clone());
                             }
                             let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                         }
-                    }
                 }
                 _ = interval.tick() => {
                     if is_playing {
@@ -127,8 +126,8 @@ impl Worker {
                             AppEvent::Quit => break,
                             AppEvent::StartAuth => {
                                 let config = AppConfig::load();
-                                if config.spotify_credentials.is_some() {
-                                    if let Ok(client) = SpotifyWorker::new(&config).await {
+                                if config.spotify_credentials.is_some()
+                                    && let Ok(client) = SpotifyWorker::new(&config).await {
                                         spotify_opt = Some(client);
                                         let _ = self.tx.send(WorkerEvent::AuthenticationComplete).await;
 
@@ -162,14 +161,12 @@ impl Worker {
                                             }
 
                                             // Fetch queue initially only if we have an active session
-                                            if found_playback {
-                                                if let Ok(queue) = sp.fetch_queue().await {
+                                            if found_playback
+                                                && let Ok(queue) = sp.fetch_queue().await {
                                                     let _ = self.tx.send(WorkerEvent::QueueLoaded(queue)).await;
                                                 }
-                                            }
                                         }
                                     }
-                                }
                             }
                             AppEvent::LoadContextTracks(id, is_album) => {
                                 if let Some(ref sp) = spotify_opt {
@@ -246,11 +243,10 @@ impl Worker {
                                 }
                             }
                             AppEvent::LoadTrackMetadata(tid) => {
-                                if let Some(ref mut sp) = spotify_opt {
-                                    if let Ok((title, artist, image_url)) = sp.get_track_metadata(&tid).await {
+                                if let Some(ref mut sp) = spotify_opt
+                                    && let Ok((title, artist, image_url)) = sp.get_track_metadata(&tid).await {
                                         let _ = self.tx.send(WorkerEvent::TrackMetadataLoaded { track_id: tid, title, artist, image_url }).await;
                                     }
-                                }
                             }
                             AppEvent::GlobalSearch(query) => {
                                 if let Some(ref mut sp) = spotify_opt {

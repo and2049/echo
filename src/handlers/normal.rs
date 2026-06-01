@@ -49,7 +49,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::Queue => {
-                if state.queue.len() > 0 && state.selected_queue_index < state.queue.len().saturating_sub(1) {
+                if !state.queue.is_empty() && state.selected_queue_index < state.queue.len().saturating_sub(1) {
                     state.selected_queue_index += 1;
                 }
             }
@@ -199,8 +199,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.command_buffer = "search ".to_string();
             state.status_message = None;
         }
-        KeyCode::Char('n') => {
-            if !state.search_matches.is_empty() {
+        KeyCode::Char('n')
+            if !state.search_matches.is_empty() => {
                 // Find the first match index that is greater than the current selected_track_index
                 if let Some(&next_idx) = state.search_matches.iter().find(|&&i| i > state.selected_track_index) {
                     state.selected_track_index = next_idx;
@@ -209,9 +209,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_track_index = state.search_matches[0];
                 }
             }
-        }
-        KeyCode::Char('N') => {
-            if !state.search_matches.is_empty() {
+        KeyCode::Char('N')
+            if !state.search_matches.is_empty() => {
                 // Find the last match index that is less than the current selected_track_index
                 if let Some(&prev_idx) = state.search_matches.iter().rev().find(|&&i| i < state.selected_track_index) {
                     state.selected_track_index = prev_idx;
@@ -220,9 +219,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_track_index = *state.search_matches.last().unwrap();
                 }
             }
-        }
-        KeyCode::Char('d') | KeyCode::Char('x') => {
-            if state.active_view == ActiveView::Library {
+        KeyCode::Char('d') | KeyCode::Char('x')
+            if state.active_view == ActiveView::Library => {
                 if state.active_library_tab == crate::app::LibraryTab::Albums {
                     return None;
                 }
@@ -256,10 +254,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                 }
             }
-        }
-        KeyCode::Char('p') => {
-            if state.active_view == ActiveView::Library && !state.operation_register.is_empty() {
-                if state.selected_playlist_index < state.library_view.len() {
+        KeyCode::Char('p')
+            if state.active_view == ActiveView::Library && !state.operation_register.is_empty()
+                && state.selected_playlist_index < state.library_view.len() => {
                     let node = &state.library_view[state.selected_playlist_index];
                     match node {
                         crate::models::LibraryNode::Folder(f) => {
@@ -290,15 +287,13 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.save_library_config();
                     state.compute_library_view();
                 }
-            }
-        }
-        KeyCode::Char('m') => {
-            if state.active_view == ActiveView::Library {
+        KeyCode::Char('m')
+            if state.active_view == ActiveView::Library => {
                 if state.active_library_tab == crate::app::LibraryTab::Albums {
                     return None;
                 }
-                if state.selected_playlist_index < state.library_view.len() {
-                    if let crate::models::LibraryNode::Playlist { playlist, .. } =
+                if state.selected_playlist_index < state.library_view.len()
+                    && let crate::models::LibraryNode::Playlist { playlist, .. } =
                         &state.library_view[state.selected_playlist_index]
                     {
                         let id = &playlist.id;
@@ -313,15 +308,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.save_library_config();
                         state.compute_library_view();
                     }
-                }
             }
-        }
         KeyCode::Char('h') | KeyCode::Esc | KeyCode::Backspace => {
             if state.active_view == ActiveView::TrackList {
-                if state.search_results.tracks.len() > 0
-                    || state.search_results.albums.len() > 0
-                    || state.search_results.artists.len() > 0
-                    || state.search_results.playlists.len() > 0
+                if !state.search_results.tracks.is_empty()
+                    || !state.search_results.albums.is_empty()
                 {
                     // Came from a search drill-down — go back to search results
                     state.active_view = ActiveView::SearchResults;

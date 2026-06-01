@@ -9,7 +9,6 @@ pub struct Playlist {
 pub struct Album {
     pub id: String,
     pub name: String,
-    pub artist: String,
 }
 
 #[derive(Clone, Debug)]
@@ -51,27 +50,10 @@ pub struct SearchAlbum {
     pub id: String,
     pub name: String,
     pub artist: String,
-    pub image_url: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SearchArtist {
-    pub id: String,
-    pub name: String,
-    pub image_url: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct SearchPlaylist {
-    pub id: String,
-    pub name: String,
-    pub owner: String,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
     pub tracks: Vec<SearchTrack>,
     pub albums: Vec<SearchAlbum>,
-    pub artists: Vec<SearchArtist>,
-    pub playlists: Vec<SearchPlaylist>,
 }

@@ -179,10 +179,10 @@ fn load_themes_from_dir(
     if path.exists() {
         for entry in fs::read_dir(&path)?.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("toml") {
-                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if let Ok(contents) = fs::read_to_string(&path) {
-                        if let Ok(theme) = toml::from_str::<Theme>(&contents) {
+            if path.extension().and_then(|s| s.to_str()) == Some("toml")
+                && let Some(file_stem) = path.file_stem().and_then(|s| s.to_str())
+                    && let Ok(contents) = fs::read_to_string(&path)
+                        && let Ok(theme) = toml::from_str::<Theme>(&contents) {
                             let theme_name = match duplicate_theme {
                                 DuplicateTheme::Replace => file_stem.to_string(),
                                 DuplicateTheme::NamespaceUser if themes.contains_key(file_stem) => {
@@ -192,9 +192,6 @@ fn load_themes_from_dir(
                             };
                             themes.insert(theme_name, theme);
                         }
-                    }
-                }
-            }
         }
     }
 

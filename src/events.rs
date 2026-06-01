@@ -62,6 +62,5 @@ pub enum WorkerEvent {
     },
     SearchResultsLoaded(SearchResults),
     QueueLoaded(Vec<Track>),
-    StatusMessage(String),
     TracksQueued(usize),
 }

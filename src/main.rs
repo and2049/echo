@@ -26,30 +26,25 @@ fn spawn_track_image_processing(
     let picker_clone = picker.clone();
 
     tokio::spawn(async move {
-        if let Ok(resp) = reqwest::get(&url).await {
-            if let Ok(bytes) = resp.bytes().await {
-                if let Ok(image_handle) = tokio::task::spawn_blocking(move || {
-                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
-                        if let Ok(protocol) = picker_clone.new_protocol(
+        if let Ok(resp) = reqwest::get(&url).await
+            && let Ok(bytes) = resp.bytes().await
+                && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
+                    if let Ok(dyn_img) = image::load_from_memory(&bytes)
+                        && let Ok(protocol) = picker_clone.new_protocol(
                             dyn_img,
                             ratatui::layout::Size::new(10, 5),
                             ratatui_image::Resize::Fit(None),
                         ) {
                             return Some(protocol);
                         }
-                    }
                     None
                 })
                 .await
-                {
-                    if let Some(protocol) = image_handle {
+                    && let Some(protocol) = image_handle {
                         let _ = tx
                             .send(WorkerEvent::TrackImageProcessed { track_id, protocol })
                             .await;
                     }
-                }
-            }
-        }
     });
 }
 
@@ -91,13 +86,12 @@ async fn main() -> Result<()> {
     tui.enter()?;
 
     while state.is_running {
-        if let Some(expiry) = state.status_message_expiry {
-            if std::time::Instant::now() >= expiry {
+        if let Some(expiry) = state.status_message_expiry
+            && std::time::Instant::now() >= expiry {
                 state.status_message = None;
                 state.status_message_expiry = None;
                 state.recent_queue_count = 0;
             }
-        }
 
         let force_clear = state.needs_terminal_clear;
         tui.apply_background(state.active_theme.background, force_clear)?;
@@ -106,9 +100,9 @@ async fn main() -> Result<()> {
             tui::render::render_app(f, &state);
         })?;
 
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+        if event::poll(Duration::from_millis(16))?
+            && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press {
                     let event = AppEvent::Key(key);
                     let mut outgoing_event = None;
                     if let Some(cmd) = handlers::handle_event(&mut state, &event) {
@@ -125,8 +119,6 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-            }
-        }
 
         while let Ok(worker_event) = app_rx.try_recv() {
             match worker_event {
@@ -241,8 +233,8 @@ async fn main() -> Result<()> {
                     state.playback.playing_track_title = title;
                     state.playback.playing_track_artist = artist;
 
-                    if let Some(url) = image_url {
-                        if let Some(ref picker) = state.image_picker {
+                    if let Some(url) = image_url
+                        && let Some(ref picker) = state.image_picker {
                             spawn_track_image_processing(
                                 track_id,
                                 url,
@@ -250,7 +242,6 @@ async fn main() -> Result<()> {
                                 worker_tx_clone.clone(),
                             );
                         }
-                    }
                 }
                 WorkerEvent::TrackImageProcessed { track_id, protocol } => {
                     if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
@@ -269,11 +260,6 @@ async fn main() -> Result<()> {
                 WorkerEvent::QueueLoaded(tracks) => {
                     state.queue = tracks;
                     state.selected_queue_index = 0;
-                }
-                WorkerEvent::StatusMessage(msg) => {
-                    state.status_message = Some(msg);
-                    state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                    state.recent_queue_count = 0;
                 }
                 WorkerEvent::TracksQueued(count) => {
                     state.recent_queue_count += count;

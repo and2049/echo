@@ -74,8 +74,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         // Deletes currently selected folder
                         if state.active_view == crate::app::ActiveView::Library
                             && state.selected_playlist_index < state.library_view.len()
-                        {
-                            if let crate::models::LibraryNode::Folder(f) =
+                            && let crate::models::LibraryNode::Folder(f) =
                                 &state.library_view[state.selected_playlist_index]
                             {
                                 let name = f.name.clone();
@@ -83,7 +82,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 state.save_library_config();
                                 state.compute_library_view();
                             }
-                        }
                     }
                     "theme" => {
                         if let Some(theme_name) = args.next() {
