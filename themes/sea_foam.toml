@@ -1,0 +1,8 @@
+primary = "#bee3db"
+secondary = "#ffd6ba"
+background = "#2a2f3b"
+text = "#fdccb5"
+text_muted = "#425461"
+highlight_bg = "#ffc19d"
+highlight_fg = "#555b6e"
+error = "Red"

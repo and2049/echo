@@ -305,8 +305,14 @@ pub fn render_track_list(frame: &mut Frame, state: &AppState, tracks_area: Rect)
                         Style::default().fg(base_color)
                     } else if c != ' ' {
                         let (r, g, b) = color_to_rgb(base_color);
-                        let dark_color = Color::Rgb((r * 0.5) as u8, (g * 0.5) as u8, (b * 0.5) as u8);
-                        Style::default().fg(dark_color)
+                        let (bg_r, bg_g, bg_b) = color_to_rgb(state.active_theme.background);
+                        let alpha = 0.4;
+                        let shadow_color = Color::Rgb(
+                            (r * alpha + bg_r * (1.0 - alpha)) as u8,
+                            (g * alpha + bg_g * (1.0 - alpha)) as u8,
+                            (b * alpha + bg_b * (1.0 - alpha)) as u8,
+                        );
+                        Style::default().fg(shadow_color)
                     } else {
                         Style::default()
                     };
