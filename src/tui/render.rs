@@ -79,6 +79,30 @@ pub fn render_app(frame: &mut Frame, state: &AppState) {
     let cmd_bar = Paragraph::new(cmd_text).style(cmd_style);
     frame.render_widget(cmd_bar, chunks[2]);
 
+    if state.mode == AppMode::Command && !state.command_suggestions.is_empty() {
+        let max_len = state.command_suggestions.iter().map(|s| s.len()).max().unwrap_or(10) as u16;
+        let width = max_len + 4;
+        let height = state.command_suggestions.len() as u16 + 2; 
+        let x = 2; 
+        let y = chunks[2].y.saturating_sub(height);
+        let popup_area = Rect { x, y, width, height }; 
+        
+        let items: Vec<ratatui::widgets::ListItem> = state.command_suggestions.iter().enumerate().map(|(i, s)| {
+            let style = if Some(i) == state.command_suggestion_index {
+                ratatui::style::Style::default().bg(state.active_theme.highlight_bg).fg(state.active_theme.highlight_fg)
+            } else {
+                state.active_theme.base_style()
+            };
+            ratatui::widgets::ListItem::new(s.clone()).style(style)
+        }).collect();
+        
+        let list = ratatui::widgets::List::new(items)
+            .block(Block::default().borders(Borders::ALL).style(state.active_theme.base_style()));
+        
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(list, popup_area);
+    }
+
     if let Some(folder_name) = &state.folder_delete_prompt {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![

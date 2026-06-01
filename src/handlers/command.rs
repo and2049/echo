@@ -2,7 +2,66 @@ use crate::app::{AppMode, AppState};
 use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
+fn generate_command_suggestions(state: &AppState) -> Vec<String> {
+    let commands = vec!["q", "qa", "wq", "folder", "delfolder", "sort", "index", "theme", "search", "queue"];
+    let mut parts = state.command_buffer.splitn(2, ' ');
+    let cmd = parts.next().unwrap_or("");
+    let arg = parts.next();
+
+    if let Some(arg_str) = arg {
+        match cmd {
+            "theme" => {
+                let mut themes: Vec<String> = state.themes.keys().cloned().collect();
+                themes.sort();
+                themes.into_iter().filter(|t| t.starts_with(arg_str)).collect()
+            }
+            "sort" => {
+                let options = vec!["alpha".to_string(), "creator".to_string()];
+                options.into_iter().filter(|o| o.starts_with(arg_str)).collect()
+            }
+            _ => vec![],
+        }
+    } else {
+        commands.into_iter().filter(|c| c.starts_with(cmd)).map(String::from).collect()
+    }
+}
+
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
+    match key.code {
+        KeyCode::Tab | KeyCode::BackTab => {
+            if state.command_suggestions.is_empty() {
+                state.command_suggestions = generate_command_suggestions(state);
+                state.command_suggestion_index = if state.command_suggestions.is_empty() { None } else { Some(0) };
+                state.command_base_buffer = state.command_buffer.clone();
+            } else if let Some(idx) = state.command_suggestion_index {
+                if key.code == KeyCode::Tab {
+                    state.command_suggestion_index = Some((idx + 1) % state.command_suggestions.len());
+                } else {
+                    state.command_suggestion_index = Some((idx + state.command_suggestions.len() - 1) % state.command_suggestions.len());
+                }
+            }
+            
+            if let Some(idx) = state.command_suggestion_index {
+                let suggestion = &state.command_suggestions[idx];
+                let mut parts = state.command_base_buffer.splitn(2, ' ');
+                let cmd = parts.next().unwrap_or("");
+                let arg = parts.next();
+                
+                if arg.is_some() {
+                    state.command_buffer = format!("{} {}", cmd, suggestion);
+                } else {
+                    state.command_buffer = suggestion.clone();
+                }
+            }
+            return None;
+        }
+        _ => {
+            state.command_suggestions.clear();
+            state.command_suggestion_index = None;
+            state.command_base_buffer.clear();
+        }
+    }
+
     match key.code {
         KeyCode::Esc => {
             state.mode = AppMode::Normal;
@@ -69,6 +128,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         } else {
                             state.status_message = Some(format!("Current index base: {}", state.library_config.track_index_base));
                         }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "delfolder" => {
                         // Deletes currently selected folder
@@ -117,6 +177,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     .join(", ")
                             ));
                         }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");
