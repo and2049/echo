@@ -87,7 +87,7 @@ jobs:
           test "$(find release-assets -type f | wc -l)" -gt 0
           
           gh release create v${{ inputs.version }} \
-            --title "Echo v${{ inputs.version }}" \
+            --title "v${{ inputs.version }}" \
             --generate-notes \
             --target ${{ github.ref_name }} \
             release-assets/*
