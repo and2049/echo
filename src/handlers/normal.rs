@@ -31,6 +31,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if let Some(album_ids) = state.album_mass_delete_prompt.clone() {
+        if key.code == KeyCode::Char('y') {
+            state.album_mass_delete_prompt = None;
+            return Some(AppEvent::RemoveAlbums(album_ids));
+        }
+        state.album_mass_delete_prompt = None;
+        return None;
+    }
+
+
     if let Some((playlist_id, track_ids)) = state.track_delete_prompt.clone() {
         if key.code == KeyCode::Char('y') {
             state.track_delete_prompt = None;
@@ -286,6 +296,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('d') | KeyCode::Char('x')
             if state.active_view == ActiveView::Library => {
                 if state.active_library_tab == crate::app::LibraryTab::Albums {
+                    if key.code == KeyCode::Char('d') {
+                        if state.selected_playlist_index < state.saved_albums.len() {
+                            let album = &state.saved_albums[state.selected_playlist_index];
+                            if state.pending_d_press {
+                                state.album_mass_delete_prompt = Some(vec![album.id.clone()]);
+                                state.pending_d_press = false;
+                            } else {
+                                state.pending_d_press = true;
+                            }
+                        }
+                    }
                     return None;
                 }
                 if state.selected_playlist_index < state.library_view.len() {
@@ -346,8 +367,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('a') => {
-            state.playlist_add_modal_open = true;
-            state.selected_playlist_modal_index = 0;
+            if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Albums {
+                if state.selected_search_index < state.search_results.albums.len() {
+                    let album = &state.search_results.albums[state.selected_search_index];
+                    state.status_message = Some(format!("Saved '{}' to library", album.name));
+                    state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    return Some(AppEvent::SaveAlbums(vec![album.id.clone()]));
+                }
+            } else {
+                state.playlist_add_modal_open = true;
+                state.selected_playlist_modal_index = 0;
+            }
         }
         KeyCode::Char('p')
             if state.active_view == ActiveView::Library && !state.operation_register.is_empty()

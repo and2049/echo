@@ -132,6 +132,36 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
     }
+    
+    if let Some(album_ids) = &state.album_mass_delete_prompt {
+        let count = album_ids.len();
+        let popup_area = centered_rect(60, 20, frame.area());
+        let popup = Paragraph::new(vec![
+            Line::from(Span::styled(
+                if count == 1 {
+                    "Are you sure you want to remove this album from your library?".to_string()
+                } else {
+                    format!("Are you sure you want to remove these {} albums from your library?", count)
+                },
+                state.active_theme.error_style(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press 'y' to confirm or any other key to cancel.",
+                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+            )),
+        ])
+        .style(state.active_theme.base_style())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Remove Album ")
+                .style(state.active_theme.base_style())
+                .border_style(state.active_theme.error_style()),
+        );
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
 
     if let Some(folder_name) = &state.folder_delete_prompt {
         let popup_area = centered_rect(60, 40, frame.area());

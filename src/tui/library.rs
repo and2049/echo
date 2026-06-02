@@ -92,10 +92,10 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                 false
             };
 
-            let style = if i == state.selected_playlist_index {
-                state.active_theme.selected_style()
-            } else if is_in_visual {
+            let style = if is_in_visual {
                 state.active_theme.selected_style().bg(state.active_theme.primary)
+            } else if i == state.selected_playlist_index {
+                state.active_theme.selected_style()
             } else {
                 state.active_theme.base_style()
             };
@@ -149,7 +149,14 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
             .iter()
             .enumerate()
             .map(|(i, album)| {
-                let style = if is_focused && i == state.selected_playlist_index {
+                let is_in_visual = if let Some((start, end)) = visual_range {
+                    i >= start && i <= end
+                } else {
+                    false
+                };
+                let style = if is_in_visual {
+                    state.active_theme.selected_style().bg(state.active_theme.primary)
+                } else if is_focused && i == state.selected_playlist_index {
                     state.active_theme.selected_style()
                 } else {
                     state.active_theme.base_style()

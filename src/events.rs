@@ -34,6 +34,8 @@ pub enum AppEvent {
     CreatePlaylist(String),
     RenamePlaylist(String, String),
     DeletePlaylists(Vec<String>),
+    SaveAlbums(Vec<String>),
+    RemoveAlbums(Vec<String>),
 }
 
 pub enum WorkerEvent {

@@ -422,6 +422,28 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::SaveAlbums(album_ids) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok()).collect();
+                                    if !ids.is_empty() {
+                                        let _ = sp.client.current_user_saved_albums_add(ids).await;
+                                        if let Ok(albums) = sp.fetch_albums().await {
+                                            let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::RemoveAlbums(album_ids) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok()).collect();
+                                    if !ids.is_empty() {
+                                        let _ = sp.client.current_user_saved_albums_delete(ids).await;
+                                        if let Ok(albums) = sp.fetch_albums().await {
+                                            let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+                                        }
+                                    }
+                                }
+                            }
                             AppEvent::FetchQueue => {
                                 if let Some(ref sp) = spotify_opt {
                                     match sp.fetch_queue().await {

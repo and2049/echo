@@ -22,6 +22,7 @@ impl SpotifyWorker {
             "playlist-read-private",
             "playlist-read-collaborative",
             "user-library-read",
+            "user-library-modify",
             "user-modify-playback-state",
             "user-read-playback-state",
             "streaming",
