@@ -341,7 +341,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         header_info = state.tracklist_context_metadata.clone();
     }
 
-    let (header_area, table_area) = if let Some(_) = header_info {
+    let (header_area, table_area) = if header_info.is_some() {
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)
             .constraints([
@@ -354,8 +354,8 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         (None, track_inner_area)
     };
 
-    if let Some(h_area) = header_area {
-        if let Some((_, title, author, _)) = header_info {
+    if let Some(h_area) = header_area
+        && let Some((_, title, author, _)) = header_info {
             let chunks = ratatui::layout::Layout::default()
                 .direction(ratatui::layout::Direction::Horizontal)
                 .constraints([
@@ -421,7 +421,6 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             frame.render_widget(author_para, text_chunks[2]);
             frame.render_widget(count_para, text_chunks[3]);
         }
-    }
 
     let mut ts = TableState::default();
     let sel = if state.tracks.is_empty() {

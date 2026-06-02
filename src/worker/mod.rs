@@ -344,7 +344,7 @@ impl Worker {
                             }
                             AppEvent::RemoveTracksFromPlaylist(playlist_id, track_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    use rspotify::prelude::{OAuthClient, Id, BaseClient};
+                                    use rspotify::prelude::OAuthClient;
                                     use rspotify::model::{PlaylistId, PlayableId, TrackId};
                                     
                                     if let Ok(pid) = PlaylistId::from_id(&playlist_id) {
@@ -385,17 +385,16 @@ impl Worker {
                                             Some(false), // collaborative = false
                                             Some("Created by echo-rs"),
                                         ).await;
-                                        if res.is_ok() {
-                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                        if res.is_ok()
+                                            && let Ok(playlists) = sp.fetch_playlists().await {
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
-                                        }
                                     }
                                 }
                             }
                             AppEvent::RenamePlaylist(playlist_id, new_name) => {
-                                if let Some(ref sp) = spotify_opt {
-                                    if let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
+                                if let Some(ref sp) = spotify_opt
+                                    && let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
                                         let res = sp.client.playlist_change_detail(
                                             pid,
                                             Some(&new_name),
@@ -403,19 +402,17 @@ impl Worker {
                                             None,
                                             None,
                                         ).await;
-                                        if res.is_ok() {
-                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                        if res.is_ok()
+                                            && let Ok(playlists) = sp.fetch_playlists().await {
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
-                                        }
                                     }
-                                }
                             }
                             AppEvent::DeletePlaylists(playlist_ids) => {
                                 if let Some(ref sp) = spotify_opt {
                                     for id_str in &playlist_ids {
                                         if let Ok(pid) = rspotify::model::PlaylistId::from_id(id_str) {
-                                            let _ = sp.client.playlist_unfollow(pid).await;
+                                            let _ = sp.client.library_remove([rspotify::model::LibraryId::Playlist(pid)]).await;
                                         }
                                     }
                                     if let Ok(playlists) = sp.fetch_playlists().await {
@@ -425,9 +422,9 @@ impl Worker {
                             }
                             AppEvent::SaveAlbums(album_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok()).collect();
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(|id| rspotify::model::LibraryId::Album(id))).collect();
                                     if !ids.is_empty() {
-                                        let _ = sp.client.current_user_saved_albums_add(ids).await;
+                                        let _ = sp.client.library_add(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
                                             let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                         }
@@ -436,9 +433,9 @@ impl Worker {
                             }
                             AppEvent::RemoveAlbums(album_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok()).collect();
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(|id| rspotify::model::LibraryId::Album(id))).collect();
                                     if !ids.is_empty() {
-                                        let _ = sp.client.current_user_saved_albums_delete(ids).await;
+                                        let _ = sp.client.library_remove(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
                                             let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                         }

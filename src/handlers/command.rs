@@ -202,11 +202,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             if state.selected_track_index < state.queue.len() {
                                 album_id_opt = state.queue[state.selected_track_index].album_id.clone();
                             }
-                        } else if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Tracks {
-                            if state.selected_search_index < state.search_results.tracks.len() {
+                        } else if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Tracks
+                            && state.selected_search_index < state.search_results.tracks.len() {
                                 album_id_opt = state.search_results.tracks[state.selected_search_index].album_id.clone();
                             }
-                        }
 
                         if let Some(album_id) = album_id_opt {
                             state.active_view = ActiveView::TrackList;
@@ -229,9 +228,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "rename" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
-                        if !name.is_empty() {
-                            if state.active_view == crate::app::ActiveView::Library {
-                                if let Some(node) = state.library_view.get(state.selected_playlist_index) {
+                        if !name.is_empty()
+                            && state.active_view == crate::app::ActiveView::Library
+                                && let Some(node) = state.library_view.get(state.selected_playlist_index) {
                                     match node {
                                         crate::models::LibraryNode::Playlist { playlist, .. } => {
                                             return Some(AppEvent::RenamePlaylist(playlist.id.clone(), name));
@@ -248,8 +247,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                         }
                                     }
                                 }
-                            }
-                        }
                     }
                     "queue" => {
                         state.active_view = crate::app::ActiveView::Queue;

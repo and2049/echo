@@ -48,11 +48,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_playlist_modal_index += 1;
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if state.selected_playlist_modal_index > 0 {
+            KeyCode::Char('k') | KeyCode::Up
+                if state.selected_playlist_modal_index > 0 => {
                     state.selected_playlist_modal_index -= 1;
                 }
-            }
             KeyCode::Enter => {
                 let user_playlists: Vec<_> = state.playlists.iter().filter(|p| Some(&p.owner_id) == state.user_id.as_ref()).collect();
                 if let Some(playlist) = user_playlists.get(state.selected_playlist_modal_index) {
@@ -182,8 +181,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('x') => {
             if state.active_view == ActiveView::Library
                 && state.active_library_tab != crate::app::LibraryTab::Albums
-            {
-                if let Some((start, end)) = state.get_visual_selection_range() {
+                && let Some((start, end)) = state.get_visual_selection_range() {
                     let selected_ids: Vec<String> = state.library_view[start..=end]
                         .iter()
                         .filter_map(|node| match node {
@@ -213,13 +211,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.status_message = Some("Cut playlists".to_string());
                     }
                 }
-            }
         }
         KeyCode::Char('d') => {
-            if state.active_view == ActiveView::TrackList {
-                if let Some((start, end)) = state.get_visual_selection_range() {
-                    if let Some((playlist_id, _, _, playlist_owner_id)) = &state.tracklist_context_metadata {
-                        if Some(playlist_owner_id) == state.user_id.as_ref() {
+            if state.active_view == ActiveView::TrackList
+                && let Some((start, end)) = state.get_visual_selection_range()
+                    && let Some((playlist_id, _, _, playlist_owner_id)) = &state.tracklist_context_metadata
+                        && Some(playlist_owner_id) == state.user_id.as_ref() {
                             if state.pending_d_press {
                                 let track_ids = state.tracks[start..=end].iter().map(|t| t.id.clone()).collect();
                                 state.track_delete_prompt = Some((playlist_id.clone(), track_ids));
@@ -228,9 +225,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 state.pending_d_press = true;
                             }
                         }
-                    }
-                }
-            }
             if state.active_view == ActiveView::Library
                 && state.active_library_tab != crate::app::LibraryTab::Albums
             {
@@ -260,8 +254,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.pending_d_press = true;
                     }
                 }
-            } else if state.active_view == ActiveView::Library {
-                if let Some((start, end)) = state.get_visual_selection_range() {
+            } else if state.active_view == ActiveView::Library
+                && let Some((start, end)) = state.get_visual_selection_range() {
                     if state.pending_d_press {
                         if state.active_library_tab == crate::app::LibraryTab::Albums {
                             let album_ids = state.saved_albums[start..=end].iter().map(|a| a.id.clone()).collect();
@@ -290,7 +284,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.pending_d_press = true;
                     }
                 }
-            }
         }
         KeyCode::Char('a') => {
             state.playlist_add_modal_open = true;

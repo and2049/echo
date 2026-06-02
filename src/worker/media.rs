@@ -51,16 +51,14 @@ pub fn spawn_media_thread(
         let _ = controls.attach(move |e| {
             let is_playing = playing_clone.load(std::sync::atomic::Ordering::Relaxed);
             match e {
-                MediaControlEvent::Play => {
-                    if !is_playing {
+                MediaControlEvent::Play
+                    if !is_playing => {
                         let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(false));
                     }
-                }
-                MediaControlEvent::Pause => {
-                    if is_playing {
+                MediaControlEvent::Pause
+                    if is_playing => {
                         let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(true));
                     }
-                }
                 MediaControlEvent::Toggle => {
                     let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(is_playing));
                 }
@@ -82,7 +80,7 @@ pub fn spawn_media_thread(
                         if title != last_title {
                             last_title = title.clone();
                             let duration = Some(Duration::from_millis(duration_ms as u64));
-                            let mut meta = MediaMetadata {
+                            let meta = MediaMetadata {
                                 title: Some(&title),
                                 artist: Some(&artist),
                                 album: Some(&album),
@@ -116,7 +114,7 @@ pub fn spawn_media_thread(
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 pub mod windows {
-    use std::io::Error;
+    
     use std::mem;
 
     use windows::core::w;
@@ -168,7 +166,7 @@ pub mod windows {
                 .map_err(|e| format!("Failed to create window: {e}"))?;
 
                 if handle.0.is_null() {
-                    Err(format!("Window creation failed"))
+                    Err("Window creation failed".to_string())
                 } else {
                     Ok(DummyWindow { handle })
                 }

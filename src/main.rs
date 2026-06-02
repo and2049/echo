@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
     let (worker_tx, mut app_rx) = mpsc::channel::<WorkerEvent>(32);
     let worker_tx_clone = worker_tx.clone();
     
-    let mut worker = Worker::new(worker_rx, worker_tx, app_tx.clone());
+    let worker = Worker::new(worker_rx, worker_tx, app_tx.clone());
     tokio::spawn(async move {
         worker.run().await;
     });
@@ -161,13 +161,12 @@ async fn main() -> Result<()> {
                     state.mode = app::AppMode::Normal;
                 }
                 WorkerEvent::ForceContextRefresh => {
-                    if state.active_view == app::ActiveView::TrackList {
-                        if let Some((playlist_id, _, _, _)) = &state.tracklist_context_metadata {
+                    if state.active_view == app::ActiveView::TrackList
+                        && let Some((playlist_id, _, _, _)) = &state.tracklist_context_metadata {
                             let metadata = state.tracklist_context_metadata.clone();
                             let is_album = state.active_library_tab == app::LibraryTab::Albums;
                             let _ = app_tx.send(AppEvent::LoadContextTracks(playlist_id.clone(), is_album, None, metadata)).await;
                         }
-                    }
                 }
                 WorkerEvent::UserIdentityLoaded(user_id) => {
                     state.user_id = Some(user_id);
@@ -187,11 +186,10 @@ async fn main() -> Result<()> {
                     
                     if let Some(m) = metadata {
                         let url = m.3;
-                        if !url.is_empty() {
-                            if let Some(picker) = &state.image_picker {
+                        if !url.is_empty()
+                            && let Some(picker) = &state.image_picker {
                                 spawn_header_image_processing(url, picker, worker_tx_clone.clone());
                             }
-                        }
                     }
                 }
                 WorkerEvent::PlaybackStarted { item } => {
