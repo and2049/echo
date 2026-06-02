@@ -3,7 +3,7 @@ use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
     Key(KeyEvent),
-    LoadContextTracks(String, bool, Option<String>, Option<(String, String)>),
+    LoadContextTracks(String, bool, Option<String>, Option<(String, String, String, String)>),
     PlayTrack {
         context_id: String,
         track_id: String,
@@ -29,14 +29,17 @@ pub enum AppEvent {
     GlobalSearch(String),
     AddToQueue(Vec<String>),
     FetchQueue,
+    AddTracksToPlaylist(String, Vec<String>),
+    RemoveTracksFromPlaylist(String, Vec<String>),
 }
 
 pub enum WorkerEvent {
     Tick,
     AuthenticationComplete,
+    UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
-    TracksLoaded(Vec<Track>, Option<(String, String)>),
+    TracksLoaded(Vec<Track>, Option<(String, String, String, String)>),
     AudioVisualizationReady(std::sync::Arc<parking_lot::Mutex<[f32; 32]>>, std::sync::Arc<std::sync::atomic::AtomicBool>),
     PlaybackStarted {
         item: PlaybackItem,
@@ -51,6 +54,7 @@ pub enum WorkerEvent {
         item: Option<PlaybackItem>,
     },
     ForceRedraw,
+    ForceContextRefresh,
     TrackMetadataLoaded {
         track_id: String,
         title: String,

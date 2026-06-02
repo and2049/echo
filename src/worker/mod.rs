@@ -149,6 +149,14 @@ impl Worker {
                                     && let Ok(client) = SpotifyWorker::new(&config).await {
                                         spotify_opt = Some(client);
                                         let _ = self.tx.send(WorkerEvent::AuthenticationComplete).await;
+                                        
+                                        if let Some(ref sp) = spotify_opt {
+                                            use rspotify::prelude::OAuthClient;
+                                            use rspotify::model::Id;
+                                            if let Ok(user) = sp.client.current_user().await {
+                                                let _ = self.tx.send(WorkerEvent::UserIdentityLoaded(user.id.id().to_string())).await;
+                                            }
+                                        }
 
                                         audio::spawn_librespot_daemon(String::new(), "echo-rs".to_string(), self.tx.clone()).await;
 
@@ -197,12 +205,15 @@ impl Worker {
                             }
                             AppEvent::LoadContextTracks(id, is_album, _, metadata) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    let tracks = if is_album {
-                                        sp.fetch_album_tracks(&id).await.unwrap_or_default()
+                                    if is_album {
+                                        if let Ok(tracks) = sp.fetch_album_tracks(&id).await {
+                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
+                                        }
                                     } else {
-                                        sp.fetch_tracks(&id).await.unwrap_or_default()
-                                    };
-                                    let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
+                                        if let Ok(tracks) = sp.fetch_tracks(&id).await {
+                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
+                                        }
+                                    }
                                 }
                             }
                             AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url } => {
@@ -300,6 +311,64 @@ impl Worker {
                                     let count = track_ids.len();
                                     let _ = sp.add_to_queue(track_ids).await;
                                     let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                }
+                            }
+                            AppEvent::AddTracksToPlaylist(playlist_id, track_ids) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    use rspotify::prelude::OAuthClient;
+                                    use rspotify::model::{PlaylistId, PlayableId, TrackId};
+                                    
+                                    if let Ok(pid) = PlaylistId::from_id(&playlist_id) {
+                                        let mut items = Vec::new();
+                                        for t_id in &track_ids {
+                                            if let Ok(id) = TrackId::from_id(t_id) {
+                                                items.push(PlayableId::Track(id));
+                                            }
+                                        }
+                                        if !items.is_empty() {
+                                            let res = sp.client.playlist_add_items(pid.clone(), items, None).await;
+                                            if let Err(e) = res {
+                                                let _ = std::fs::write("echo-debug-add.log", format!("Add error: {:?}", e));
+                                            } else {
+                                                // Trigger a refresh of the playlists to show the new tracks count
+                                                if let Ok(playlists) = sp.fetch_playlists().await {
+                                                    let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                                }
+                                                let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::RemoveTracksFromPlaylist(playlist_id, track_ids) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    use rspotify::prelude::{OAuthClient, Id, BaseClient};
+                                    use rspotify::model::{PlaylistId, PlayableId, TrackId};
+                                    
+                                    if let Ok(pid) = PlaylistId::from_id(&playlist_id) {
+                                        let mut items = Vec::new();
+                                        for t_id in &track_ids {
+                                            if let Ok(id) = TrackId::from_id(t_id) {
+                                                items.push(PlayableId::Track(id));
+                                            }
+                                        }
+                                        let _ = std::fs::write("echo-debug-remove.log", format!("Attempting remove on {} with {} items (raw ids: {:?})", playlist_id, items.len(), track_ids));
+                                        if !items.is_empty() {
+                                            let res = sp.client.playlist_remove_all_occurrences_of_items(pid.clone(), items, None).await;
+                                            
+                                            if let Ok(_) = res {
+                                                let _ = std::fs::write("echo-debug-remove-success.log", "Remove succeeded API call");
+                                                if let Ok(playlists) = sp.fetch_playlists().await {
+                                                    let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                                }
+                                                let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
+                                            } else if let Err(e) = res {
+                                                let _ = std::fs::write("echo-debug-remove-err.log", format!("Remove error API: {:?}", e));
+                                            }
+                                        } else {
+                                            let _ = std::fs::write("echo-debug-remove.log", format!("No items parsed! track_ids: {:?}", track_ids));
+                                        }
+                                    }
                                 }
                             }
                             AppEvent::FetchQueue => {

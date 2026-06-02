@@ -3,6 +3,7 @@ pub struct Playlist {
     pub id: String,
     pub name: String,
     pub owner: String,
+    pub owner_id: String,
     pub image_url: Option<String>,
 }
 

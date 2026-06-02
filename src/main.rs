@@ -160,6 +160,18 @@ async fn main() -> Result<()> {
                 WorkerEvent::AuthenticationComplete => {
                     state.mode = app::AppMode::Normal;
                 }
+                WorkerEvent::ForceContextRefresh => {
+                    if state.active_view == app::ActiveView::TrackList {
+                        if let Some((playlist_id, _, _, _)) = &state.tracklist_context_metadata {
+                            let metadata = state.tracklist_context_metadata.clone();
+                            let is_album = state.active_library_tab == app::LibraryTab::Albums;
+                            let _ = app_tx.send(AppEvent::LoadContextTracks(playlist_id.clone(), is_album, None, metadata)).await;
+                        }
+                    }
+                }
+                WorkerEvent::UserIdentityLoaded(user_id) => {
+                    state.user_id = Some(user_id);
+                }
                 WorkerEvent::PlaylistsLoaded(playlists) => {
                     state.playlists = playlists;
                     state.compute_library_view();

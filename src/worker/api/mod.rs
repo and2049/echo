@@ -26,6 +26,8 @@ impl SpotifyWorker {
             "user-read-playback-state",
             "streaming",
             "app-remote-control",
+            "playlist-modify-public",
+            "playlist-modify-private",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -61,7 +63,7 @@ impl SpotifyWorker {
                 }
 
         // AuthCodeSpotify standard challenge
-        let auth_url = spotify.get_authorize_url(false)?;
+        let auth_url = spotify.get_authorize_url(true)?;
 
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:8888").await?;

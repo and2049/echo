@@ -43,13 +43,27 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             let header = Row::new(vec!["Track", "Artist", "Album", "Duration "])
                 .style(header_style)
                 .height(1);
+            let visual_range = if state.active_view == ActiveView::SearchResults {
+                state.get_visual_selection_range()
+            } else {
+                None
+            };
+
             let rows: Vec<Row> = state
                 .search_results
                 .tracks
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    let style = if i == sel {
+                    let is_in_visual = if let Some((start, end)) = visual_range {
+                        i >= start && i <= end
+                    } else {
+                        false
+                    };
+                    
+                    let style = if is_in_visual {
+                        state.active_theme.selected_style().bg(state.active_theme.primary)
+                    } else if i == sel {
                         state.active_theme.selected_style()
                     } else {
                         state.active_theme.base_style()

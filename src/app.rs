@@ -122,6 +122,7 @@ pub enum AppMode {
     Normal,
     Command,
     Search,
+    Visual,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -149,6 +150,10 @@ pub struct AppState {
     pub recent_queue_count: usize,
     pub pending_d_press: bool,
     pub folder_delete_prompt: Option<String>,
+    pub track_delete_prompt: Option<(String, Vec<String>)>,
+    pub playlist_add_modal_open: bool,
+    pub selected_playlist_modal_index: usize,
+    pub user_id: Option<String>,
     pub selected_playlist_index: usize,
     pub tracks: Vec<Track>,
     pub selected_track_index: usize,
@@ -172,7 +177,8 @@ pub struct AppState {
     pub prev_view: Option<ActiveView>,
     pub queue: Vec<crate::models::Track>,
     pub selected_queue_index: usize,
-    pub tracklist_context_metadata: Option<(String, String)>,
+    pub tracklist_context_metadata: Option<(String, String, String, String)>,
+    pub visual_selection_start: Option<usize>,
 }
 
 impl AppState {
@@ -216,6 +222,10 @@ impl AppState {
             recent_queue_count: 0,
             pending_d_press: false,
             folder_delete_prompt: None,
+            track_delete_prompt: None,
+            playlist_add_modal_open: false,
+            selected_playlist_modal_index: 0,
+            user_id: None,
             selected_playlist_index: 0,
             tracks: Vec::new(),
             selected_track_index: 0,
@@ -240,6 +250,25 @@ impl AppState {
             queue: Vec::new(),
             selected_queue_index: 0,
             tracklist_context_metadata: None,
+            visual_selection_start: None,
+        }
+    }
+
+    pub fn get_visual_selection_range(&self) -> Option<(usize, usize)> {
+        if self.mode != AppMode::Visual {
+            return None;
+        }
+        
+        if let Some(start) = self.visual_selection_start {
+            let current = match self.active_view {
+                ActiveView::TrackList => self.selected_track_index,
+                ActiveView::SearchResults => self.selected_search_index,
+                ActiveView::Queue => self.selected_queue_index,
+                _ => return None,
+            };
+            Some((std::cmp::min(start, current), std::cmp::max(start, current)))
+        } else {
+            None
         }
     }
 }
@@ -258,6 +287,7 @@ impl AppState {
                 id: "LIKED_SONGS".to_string(),
                 name: "♥️ Liked Songs".to_string(),
                 owner: "Spotify".to_string(),
+                owner_id: "spotify".to_string(),
                 image_url: None,
             },
             indent: 0,

@@ -136,6 +136,70 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
+    if let Some((_, track_ids)) = &state.track_delete_prompt {
+        let popup_area = centered_rect(60, 40, frame.area());
+        let popup = Paragraph::new(vec![
+            Line::from(Span::styled(
+                if track_ids.len() == 1 {
+                    "Are you sure you want to remove this track from the playlist?".to_string()
+                } else {
+                    format!("Are you sure you want to remove these {} tracks from the playlist?", track_ids.len())
+                },
+                state.active_theme.error_style(),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press 'y' to confirm or any other key to cancel.",
+                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+            )),
+        ])
+        .style(state.active_theme.base_style())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Remove From Playlist ")
+                .style(state.active_theme.base_style())
+                .border_style(state.active_theme.error_style()),
+        )
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
+
+    if state.playlist_add_modal_open {
+        let popup_area = centered_rect(50, 60, frame.area());
+        
+        let user_playlists: Vec<_> = state.playlists.iter().filter(|p| Some(&p.owner_id) == state.user_id.as_ref()).collect();
+        
+        let items: Vec<ratatui::widgets::ListItem> = user_playlists
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let style = if i == state.selected_playlist_modal_index {
+                    state.active_theme.selected_style()
+                } else {
+                    state.active_theme.base_style()
+                };
+                ratatui::widgets::ListItem::new(p.name.clone()).style(style)
+            })
+            .collect();
+
+        let list = ratatui::widgets::List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Add to Playlist ")
+                    .style(state.active_theme.base_style())
+                    .border_style(state.active_theme.primary_style()),
+            )
+            .highlight_style(state.active_theme.selected_style());
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(list, popup_area);
+    }
+
     // Check if we are waiting for discovery
     if std::path::Path::new("echo-librespot-status.log").exists() {
         let popup_area = centered_rect(60, 30, frame.area());

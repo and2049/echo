@@ -21,6 +21,55 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if let Some((playlist_id, track_ids)) = state.track_delete_prompt.clone() {
+        if key.code == KeyCode::Char('y') {
+            state.track_delete_prompt = None;
+            return Some(AppEvent::RemoveTracksFromPlaylist(playlist_id, track_ids));
+        }
+        state.track_delete_prompt = None;
+        return None;
+    }
+
+    if state.playlist_add_modal_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                state.playlist_add_modal_open = false;
+                state.selected_playlist_modal_index = 0;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                let user_playlists: Vec<_> = state.playlists.iter().filter(|p| Some(&p.owner_id) == state.user_id.as_ref()).collect();
+                if state.selected_playlist_modal_index + 1 < user_playlists.len() {
+                    state.selected_playlist_modal_index += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if state.selected_playlist_modal_index > 0 {
+                    state.selected_playlist_modal_index -= 1;
+                }
+            }
+            KeyCode::Enter => {
+                let user_playlists: Vec<_> = state.playlists.iter().filter(|p| Some(&p.owner_id) == state.user_id.as_ref()).collect();
+                if let Some(playlist) = user_playlists.get(state.selected_playlist_modal_index) {
+                    let track_ids = match state.active_view {
+                        ActiveView::TrackList => state.tracks.get(state.selected_track_index).map(|t| vec![t.id.clone()]).unwrap_or_default(),
+                        ActiveView::SearchResults => if state.active_search_tab == crate::app::SearchTab::Tracks {
+                            state.search_results.tracks.get(state.selected_search_index).map(|t| vec![t.id.clone()]).unwrap_or_default()
+                        } else { vec![] },
+                        ActiveView::Queue => state.queue.get(state.selected_queue_index).map(|t| vec![t.id.clone()]).unwrap_or_default(),
+                        _ => vec![],
+                    };
+                    state.playlist_add_modal_open = false;
+                    state.selected_playlist_modal_index = 0;
+                    if !track_ids.is_empty() {
+                        return Some(AppEvent::AddTracksToPlaylist(playlist.id.clone(), track_ids));
+                    }
+                }
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     if key.code != KeyCode::Char('d') {
         state.pending_d_press = false;
     }
@@ -81,7 +130,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let (context_id, image_url, metadata) = if state.active_library_tab == crate::app::LibraryTab::Albums {
                     if state.selected_playlist_index < state.saved_albums.len() {
                         let album = &state.saved_albums[state.selected_playlist_index];
-                        (album.id.clone(), album.image_url.clone(), Some((album.name.clone(), album.artists.clone())))
+                        (album.id.clone(), album.image_url.clone(), Some((album.id.clone(), album.name.clone(), album.artists.clone(), String::new())))
                     } else {
                         (String::new(), None, None)
                     }
@@ -89,7 +138,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     if state.selected_playlist_index < state.library_view.len() {
                         match &state.library_view[state.selected_playlist_index] {
                             crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                (playlist.id.clone(), playlist.image_url.clone(), Some((playlist.name.clone(), playlist.owner.clone())))
+                                (playlist.id.clone(), playlist.image_url.clone(), Some((playlist.id.clone(), playlist.name.clone(), playlist.owner.clone(), playlist.owner_id.clone())))
                             }
                             crate::models::LibraryNode::Folder(f) => {
                                 let folder_name = f.name.clone();
@@ -181,7 +230,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.selected_track_index = 0;
                             // Stash SearchResults as previous view context
                             state.prev_view = None; // album loaded from search, Backspace returns to Search
-                            let metadata = Some((album.name.clone(), album.artist.clone()));
+                            let metadata = Some((album_id.clone(), album.name.clone(), album.artist.clone(), String::new()));
                             return Some(AppEvent::LoadContextTracks(album_id, true, album.image_url.clone(), metadata));
                         }
                     }
@@ -259,6 +308,26 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                 }
             }
+        KeyCode::Char('d') => {
+            if state.active_view == ActiveView::TrackList {
+                if let Some(track) = state.tracks.get(state.selected_track_index) {
+                    if let Some((playlist_id, _, _, playlist_owner_id)) = &state.tracklist_context_metadata {
+                        if Some(playlist_owner_id) == state.user_id.as_ref() {
+                            if state.pending_d_press {
+                                state.track_delete_prompt = Some((playlist_id.clone(), vec![track.id.clone()]));
+                                state.pending_d_press = false;
+                            } else {
+                                state.pending_d_press = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            state.playlist_add_modal_open = true;
+            state.selected_playlist_modal_index = 0;
+        }
         KeyCode::Char('p')
             if state.active_view == ActiveView::Library && !state.operation_register.is_empty()
                 && state.selected_playlist_index < state.library_view.len() => {
@@ -364,6 +433,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('s') => {
             state.playback.is_shuffled = !state.playback.is_shuffled;
             return Some(AppEvent::ToggleShuffle(state.playback.is_shuffled));
+        }
+        KeyCode::Char('v') => {
+            state.mode = crate::app::AppMode::Visual;
+            let current_idx = match state.active_view {
+                ActiveView::TrackList => state.selected_track_index,
+                ActiveView::SearchResults => state.selected_search_index,
+                ActiveView::Queue => state.selected_queue_index,
+                _ => 0,
+            };
+            state.visual_selection_start = Some(current_idx);
+            state.status_message = Some("VISUAL BLOCK".to_string());
         }
         KeyCode::Char(']') | KeyCode::Char('>') => {
             state.playback.progress_ms = 0;

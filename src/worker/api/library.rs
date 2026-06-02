@@ -23,10 +23,12 @@ impl SpotifyWorker {
                 .display_name
                 .clone()
                 .unwrap_or_else(|| p.owner.id.id().to_string());
+            let owner_id = p.owner.id.id().to_string();
             out.push(Playlist {
                 id: p.id.id().to_string(),
                 name: p.name,
                 owner,
+                owner_id,
                 image_url: p.images.first().map(|i| i.url.clone()),
             });
         }

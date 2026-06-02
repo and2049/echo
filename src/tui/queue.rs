@@ -33,13 +33,27 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
         .style(header_style)
         .height(1);
 
+    let visual_range = if state.active_view == crate::app::ActiveView::Queue {
+        state.get_visual_selection_range()
+    } else {
+        None
+    };
+
     let sel = state.selected_queue_index;
     let rows: Vec<Row> = state
         .queue
         .iter()
         .enumerate()
         .map(|(i, track)| {
-            let style = if i == sel {
+            let is_in_visual = if let Some((start, end)) = visual_range {
+                i >= start && i <= end
+            } else {
+                false
+            };
+            
+            let style = if is_in_visual {
+                state.active_theme.selected_style().bg(state.active_theme.primary)
+            } else if i == sel {
                 state.active_theme.selected_style()
             } else {
                 state.active_theme.base_style()

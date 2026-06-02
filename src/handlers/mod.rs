@@ -2,6 +2,7 @@ pub mod command;
 pub mod normal;
 pub mod search;
 pub mod setup;
+pub mod visual;
 
 use crate::app::{AppMode, AppState};
 use crate::events::AppEvent;
@@ -17,6 +18,7 @@ pub fn handle_event(state: &mut AppState, event: &AppEvent) -> Option<AppEvent> 
             AppMode::Normal => normal::handle_key(state, key_event),
             AppMode::Command => command::handle_key(state, key_event),
             AppMode::Search => search::handle_key(state, key_event),
+            AppMode::Visual => visual::handle_key(state, key_event),
             _ => None,
         },
         _ => None,

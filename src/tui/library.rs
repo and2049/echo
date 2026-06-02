@@ -171,6 +171,12 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
 pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
     let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
 
+    let visual_range = if state.active_view == ActiveView::TrackList {
+        state.get_visual_selection_range()
+    } else {
+        None
+    };
+
     let track_rows: Vec<Row> = state
         .tracks
         .iter()
@@ -178,7 +184,15 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         .map(|(i, t)| {
             let is_match = state.mode == AppMode::Search && state.search_matches.contains(&i);
             
-            let style = if i == state.selected_track_index {
+            let is_in_visual = if let Some((start, end)) = visual_range {
+                i >= start && i <= end
+            } else {
+                false
+            };
+            
+            let style = if is_in_visual {
+                state.active_theme.selected_style().bg(state.active_theme.primary)
+            } else if i == state.selected_track_index {
                 state.active_theme.selected_style()
             } else if is_match {
                 state.active_theme.base_style().fg(state.active_theme.secondary)
@@ -282,7 +296,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
     frame.render_widget(track_block, tracks_area);
 
-    let mut header_info: Option<(String, String)> = None;
+    let mut header_info: Option<(String, String, String, String)> = None;
     if state.active_view == ActiveView::TrackList && !state.tracks.is_empty() {
         header_info = state.tracklist_context_metadata.clone();
     }
@@ -301,7 +315,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     };
 
     if let Some(h_area) = header_area {
-        if let Some((title, author)) = header_info {
+        if let Some((_, title, author, _)) = header_info {
             let chunks = ratatui::layout::Layout::default()
                 .direction(ratatui::layout::Direction::Horizontal)
                 .constraints([
