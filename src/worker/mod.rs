@@ -153,7 +153,36 @@ impl Worker {
                                         
                                         if let Some(ref sp) = spotify_opt {
                                             use rspotify::prelude::OAuthClient;
-                                            use rspotify::model::Id;
+                                            use rspotify::prelude::Id;
+                                            
+                                            // Eagerly fetch and cache Liked Songs in background
+                                            let client = sp.client.clone();
+                                            let tx = self.tx.clone();
+                                            tokio::spawn(async move {
+                                                use futures_util::stream::StreamExt;
+                                                let mut tracks = std::collections::HashSet::new();
+                                                let mut stream = client.current_user_saved_tracks(None);
+                                                while let Some(item) = stream.next().await {
+                                                    if let Ok(saved_track) = item {
+                                                        if let Some(id) = saved_track.track.id {
+                                                            tracks.insert(id.id().to_string());
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                if !tracks.is_empty() {
+                                                    let mut cache = crate::config::AppConfig::load_cache();
+                                                    cache.liked_tracks = tracks.clone();
+                                                    let _ = crate::config::AppConfig::save_cache(&cache);
+                                                    
+                                                    let mut results = std::collections::HashMap::new();
+                                                    for tid in tracks {
+                                                        results.insert(tid, true);
+                                                    }
+                                                    let _ = tx.send(WorkerEvent::LikedStatusUpdate(results)).await;
+                                                }
+                                            });
+
                                             if let Ok(user) = sp.client.current_user().await {
                                                 let _ = self.tx.send(WorkerEvent::UserIdentityLoaded(user.id.id().to_string())).await;
                                             }
@@ -449,7 +478,20 @@ impl Worker {
                                             let _ = self.tx.send(WorkerEvent::QueueLoaded(tracks)).await;
                                         }
                                         Err(e) => {
-                                            let _ = std::fs::write("echo-debug-queue.log", format!("Queue fetch error: {:?}", e));
+                                            let _ = std::fs::write("echo-debug-queue.log", format!("Queue error: {:?}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::ToggleTrackLike(track_id, like) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    use rspotify::model::{TrackId, LibraryId};
+                                    if let Ok(tid) = TrackId::from_id(&track_id) {
+                                        let lib_id = LibraryId::Track(tid);
+                                        if like {
+                                            let _ = sp.client.library_add([lib_id]).await;
+                                        } else {
+                                            let _ = sp.client.library_remove([lib_id]).await;
                                         }
                                     }
                                 }

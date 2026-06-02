@@ -153,6 +153,7 @@ pub struct AppState {
     pub playlist_delete_prompt: Option<Vec<String>>,
     pub album_mass_delete_prompt: Option<Vec<String>>,
     pub track_delete_prompt: Option<(String, Vec<String>)>,
+    pub liked_track_remove_prompt: Option<String>,
     pub playlist_add_modal_open: bool,
     pub selected_playlist_modal_index: usize,
     pub user_id: Option<String>,
@@ -181,6 +182,7 @@ pub struct AppState {
     pub selected_queue_index: usize,
     pub tracklist_context_metadata: Option<(String, String, String, String)>,
     pub visual_selection_start: Option<usize>,
+    pub liked_tracks: std::collections::HashSet<String>,
 }
 
 impl AppState {
@@ -232,6 +234,7 @@ impl AppState {
             playlist_delete_prompt: None,
             album_mass_delete_prompt: None,
             track_delete_prompt: None,
+            liked_track_remove_prompt: None,
             playlist_add_modal_open: false,
             selected_playlist_modal_index: 0,
             user_id: None,
@@ -260,6 +263,7 @@ impl AppState {
             selected_queue_index: 0,
             tracklist_context_metadata: None,
             visual_selection_start: None,
+            liked_tracks: std::collections::HashSet::new(),
         }
     }
 

@@ -228,6 +228,29 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
+    if state.liked_track_remove_prompt.is_some() {
+        let popup_area = centered_rect(60, 40, frame.area());
+        let popup = Paragraph::new(vec![
+            Line::from(Span::styled(
+                crate::i18n::t("prompts.remove_from_liked", &state.library_config.language),
+                state.active_theme.error_style(),
+            )),
+        ])
+        .style(state.active_theme.base_style())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Remove Liked Song ")
+                .style(state.active_theme.base_style())
+                .border_style(state.active_theme.error_style()),
+        )
+        .alignment(ratatui::layout::Alignment::Center)
+        .wrap(ratatui::widgets::Wrap { trim: true });
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_widget(popup, popup_area);
+    }
+
     if state.playlist_add_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
         

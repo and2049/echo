@@ -31,6 +31,7 @@
         "added_to_playlist": "已将 {} 首歌曲添加到 '{}'",
         "removed_from_playlist": "已将 {} 首歌曲从 '{}' 中移除",
         "added_to_queue": "已将 {} 首歌曲添加到播放队列",
+        "added_to_liked": "已添加到喜欢的歌曲",
         "unknown_theme": "未知主题: {}",
         "unknown_language": "未知语言: {}",
         "language_set": "语言已设置为 {}"
@@ -40,6 +41,7 @@
         "create_playlist": "新播放列表名称: ",
         "rename_playlist": "重命名播放列表: ",
         "theme": "主题: ",
-        "lang": "语言: "
+        "lang": "语言: ",
+        "remove_from_liked": "是否从喜欢的歌曲中移除? (y/n)"
     }
 }

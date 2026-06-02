@@ -50,6 +50,21 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if let Some(track_id) = state.liked_track_remove_prompt.clone() {
+        if key.code == KeyCode::Char('y') {
+            state.liked_track_remove_prompt = None;
+            state.liked_tracks.remove(&track_id);
+            
+            let mut cache = crate::config::AppConfig::load_cache();
+            cache.liked_tracks = state.liked_tracks.clone();
+            let _ = crate::config::AppConfig::save_cache(&cache);
+            
+            return Some(AppEvent::ToggleTrackLike(track_id, false));
+        }
+        state.liked_track_remove_prompt = None;
+        return None;
+    }
+
     if state.playlist_add_modal_open {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -144,7 +159,56 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
         },
-        KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('z') => {
+        KeyCode::Char('l') => {
+            if state.active_view == ActiveView::Library {
+                return crate::handlers::normal::handle_key(state, &KeyEvent::new(KeyCode::Enter, key.modifiers));
+            } else if state.active_view == ActiveView::TrackList {
+                if state.selected_track_index < state.tracks.len() {
+                    let track = &state.tracks[state.selected_track_index];
+                    let track_id = track.id.clone();
+                    if state.liked_tracks.contains(&track_id) {
+                        state.liked_track_remove_prompt = Some(track_id);
+                    } else {
+                        state.liked_tracks.insert(track_id.clone());
+                        state.status_message = Some(crate::i18n::t("messages.added_to_liked", &state.library_config.language));
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        return Some(AppEvent::ToggleTrackLike(track_id, true));
+                    }
+                }
+            } else if state.active_view == ActiveView::Queue {
+                if state.selected_queue_index < state.queue.len() {
+                    let track = &state.queue[state.selected_queue_index];
+                    let track_id = track.id.clone();
+                    if state.liked_tracks.contains(&track_id) {
+                        state.liked_track_remove_prompt = Some(track_id);
+                    } else {
+                        state.liked_tracks.insert(track_id.clone());
+                        state.status_message = Some(crate::i18n::t("messages.added_to_liked", &state.library_config.language));
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        return Some(AppEvent::ToggleTrackLike(track_id, true));
+                    }
+                }
+            } else if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Tracks {
+                let i = state.selected_search_index;
+                if let Some(track) = state.search_results.tracks.get(i) {
+                    let track_id = track.id.clone();
+                    if state.liked_tracks.contains(&track_id) {
+                        state.liked_track_remove_prompt = Some(track_id);
+                    } else {
+                        state.liked_tracks.insert(track_id.clone());
+                        
+                        let mut cache = crate::config::AppConfig::load_cache();
+                        cache.liked_tracks = state.liked_tracks.clone();
+                        let _ = crate::config::AppConfig::save_cache(&cache);
+                        
+                        state.status_message = Some(crate::i18n::t("messages.added_to_liked", &state.library_config.language));
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        return Some(AppEvent::ToggleTrackLike(track_id, true));
+                    }
+                }
+            }
+        }
+        KeyCode::Enter | KeyCode::Char('z') => {
             if state.active_view == ActiveView::Library {
                 let (context_id, image_url, metadata) = if state.active_library_tab == crate::app::LibraryTab::Albums {
                     if state.selected_playlist_index < state.saved_albums.len() {

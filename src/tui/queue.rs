@@ -30,6 +30,7 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     let w_artist = inner.width.saturating_sub(11).saturating_sub(w_track);
 
     let header = Row::new(vec![
+        "".to_string(), // liked col
         crate::i18n::t("ui.tracks", &state.library_config.language),
         crate::i18n::t("ui.artist", &state.library_config.language),
         crate::i18n::t("ui.duration", &state.library_config.language)
@@ -71,7 +72,15 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
                 w_artist,
             );
             let dur = format_duration_text(format_time(track.duration_ms / 1000));
+            let liked_str = if state.liked_tracks.contains(&track.id) {
+                "♥"
+            } else {
+                " "
+            };
+            let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+
             Row::new(vec![
+                liked_cell,
                 Cell::from(name),
                 Cell::from(artist).style(style.fg(state.active_theme.text_muted)),
                 Cell::from(dur).style(style.fg(state.active_theme.text_muted)),
@@ -83,6 +92,7 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     let table = Table::new(
         rows,
         [
+            Constraint::Length(2),
             Constraint::Length(w_track),
             Constraint::Min(0),
             Constraint::Length(9), // DURATION_COLUMN_WIDTH

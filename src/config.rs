@@ -25,6 +25,12 @@ pub struct AppConfig {
     pub library: LibraryConfig,
 }
 
+#[derive(Serialize, Deserialize, Default)]
+pub struct CacheData {
+    #[serde(default)]
+    pub liked_tracks: std::collections::HashSet<String>,
+}
+
 fn default_track_index_base() -> isize {
     1
 }
@@ -101,6 +107,32 @@ impl AppConfig {
         }
         let toml_str = toml::to_string_pretty(self)?;
         fs::write(path, toml_str)?;
+        Ok(())
+    }
+
+    pub fn cache_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("echo");
+        path.push("cache.json");
+        path
+    }
+
+    pub fn load_cache() -> CacheData {
+        let path = Self::cache_path();
+        if let Ok(contents) = fs::read_to_string(&path) {
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            CacheData::default()
+        }
+    }
+
+    pub fn save_cache(cache: &CacheData) -> Result<()> {
+        let path = Self::cache_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string(cache)?;
+        fs::write(path, contents)?;
         Ok(())
     }
 }

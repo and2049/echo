@@ -40,7 +40,8 @@ impl SpotifyWorker {
             ..Default::default()
         };
 
-        let spotify = AuthCodeSpotify::new(credentials, oauth);
+        let config_rspotify = rspotify::Config::default();
+        let spotify = AuthCodeSpotify::with_config(credentials, oauth, config_rspotify);
 
         if let Some(tokens) = &config.auth_tokens
             && let Some(access) = &tokens.access_token

@@ -93,6 +93,8 @@ async fn main() -> Result<()> {
 
     let config = config::AppConfig::load();
     let mut state = AppState::new();
+    let cache = config::AppConfig::load_cache();
+    state.liked_tracks = cache.liked_tracks;
     state.library_config = config.library.clone();
 
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
@@ -336,12 +338,17 @@ async fn main() -> Result<()> {
                 }
                 WorkerEvent::TracksQueued(count) => {
                     state.recent_queue_count += count;
-                    state.status_message = Some(if state.recent_queue_count == 1 {
-                        "Added 1 track to queue".to_string()
-                    } else {
-                        format!("Added {} tracks to queue", state.recent_queue_count)
-                    });
+                    state.status_message = Some(crate::i18n::t("messages.added_to_queue", &state.library_config.language).replace("{}", &count.to_string()));
                     state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                }
+                WorkerEvent::LikedStatusUpdate(results) => {
+                    for (id, liked) in results {
+                        if liked {
+                            state.liked_tracks.insert(id);
+                        } else {
+                            state.liked_tracks.remove(&id);
+                        }
+                    }
                 }
             }
         }

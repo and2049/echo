@@ -210,6 +210,8 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         None
     };
 
+    let is_liked_songs = state.tracklist_context_metadata.as_ref().map_or(false, |m| m.0 == "LIKED_SONGS");
+
     let track_rows: Vec<Row> = state
         .tracks
         .iter()
@@ -245,27 +247,35 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 ""
             };
 
-            let track_cell = if state.library_config.track_index_base < 0 {
-                Cell::from(format!(
-                    "{}{}",
-                    prefix,
-                    stabilize_terminal_emoji_width(&t.name)
-                ))
+            let number_cell = if state.library_config.track_index_base < 0 {
+                Cell::from("")
             } else {
-                Cell::from(format!(
-                    "{:>3} {}{}",
-                    (i as isize) + state.library_config.track_index_base,
-                    prefix,
-                    stabilize_terminal_emoji_width(&t.name)
-                ))
+                Cell::from(format!("{:>3}", (i as isize) + state.library_config.track_index_base))
             };
+
+            let liked_str = if is_liked_songs {
+                ""
+            } else if state.liked_tracks.contains(&t.id) {
+                "♥"
+            } else {
+                " "
+            };
+            // Use secondary style or a specific color for the heart
+            let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+
+            let title_cell = Cell::from(format!(
+                "{}{}",
+                prefix,
+                stabilize_terminal_emoji_width(&t.name)
+            ));
+
             let duration_cell = Cell::from(format_duration_text(format_time(t.duration_ms / 1000)));
 
             let row = if is_albums_tab {
-                Row::new(vec![track_cell, duration_cell])
+                Row::new(vec![number_cell, liked_cell, title_cell, duration_cell])
             } else {
                 let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
-                Row::new(vec![track_cell, artist_cell, duration_cell])
+                Row::new(vec![number_cell, liked_cell, title_cell, artist_cell, duration_cell])
             };
 
             row.style(style)
@@ -288,18 +298,19 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
     let header_style = track_border_style.add_modifier(Modifier::BOLD);
 
+    let liked_width = if is_liked_songs { 0 } else { 2 };
+
     let table = if is_albums_tab {
-        let header_str = if state.library_config.track_index_base < 0 {
-            "Track"
-        } else {
-            "  # Track"
-        };
-        let header = Row::new(vec![header_str, "Duration "])
+        let number_header = if state.library_config.track_index_base < 0 { "" } else { "  #" };
+        let header = Row::new(vec![number_header, "", "Track", "Duration "])
             .style(header_style)
             .height(1);
+        let number_width = if state.library_config.track_index_base < 0 { 0 } else { 4 };
         let mut t = Table::new(
             track_rows,
             [
+                Constraint::Length(number_width),
+                Constraint::Length(liked_width),
                 Constraint::Min(20),
                 Constraint::Length(DURATION_COLUMN_WIDTH),
             ],
@@ -314,17 +325,16 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         }
         t
     } else {
-        let header_str = if state.library_config.track_index_base < 0 {
-            "Track"
-        } else {
-            "  # Track"
-        };
-        let header = Row::new(vec![header_str, "Artist", "Duration "])
+        let number_header = if state.library_config.track_index_base < 0 { "" } else { "  #" };
+        let header = Row::new(vec![number_header, "", "Track", "Artist", "Duration "])
             .style(header_style)
             .height(1);
+        let number_width = if state.library_config.track_index_base < 0 { 0 } else { 4 };
         let mut t = Table::new(
             track_rows,
             [
+                Constraint::Length(number_width),
+                Constraint::Length(liked_width),
                 Constraint::Percentage(50),
                 Constraint::Percentage(50),
                 Constraint::Length(DURATION_COLUMN_WIDTH),

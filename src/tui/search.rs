@@ -48,6 +48,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
     match state.active_search_tab {
         SearchTab::Tracks => {
             let header = Row::new(vec![
+                "".to_string(), // liked col
                 crate::i18n::t("ui.tracks", &state.library_config.language),
                 crate::i18n::t("ui.artist", &state.library_config.language),
                 crate::i18n::t("ui.album", &state.library_config.language),
@@ -91,7 +92,16 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     let w_track = (inner.width * 35 / 100).saturating_sub(1);
                     let w_artist = (inner.width * 25 / 100).saturating_sub(1);
                     let w_album = (inner.width * 30 / 100).saturating_sub(1);
+                    
+                    let liked_str = if state.liked_tracks.contains(&t.id) {
+                        "♥"
+                    } else {
+                        " "
+                    };
+                    let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+
                     Row::new(vec![
+                        liked_cell,
                         Cell::from(truncate_to_width_with_ellipsis(&t.name, w_track)),
                         Cell::from(truncate_to_width_with_ellipsis(&t.artist, w_artist)),
                         Cell::from(truncate_to_width_with_ellipsis(&t.album, w_album)),
@@ -103,6 +113,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             let table = Table::new(
                 rows,
                 [
+                    Constraint::Length(2),
                     Constraint::Percentage(35),
                     Constraint::Percentage(25),
                     Constraint::Percentage(30),

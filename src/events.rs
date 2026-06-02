@@ -35,8 +35,10 @@ pub enum AppEvent {
     CreatePlaylist(String),
     RenamePlaylist(String, String),
     DeletePlaylists(Vec<String>),
+    DeletePlaylistTracks(String, Vec<String>),
     SaveAlbums(Vec<String>),
     RemoveAlbums(Vec<String>),
+    ToggleTrackLike(String, bool),
 }
 
 pub enum WorkerEvent {
@@ -75,4 +77,5 @@ pub enum WorkerEvent {
     QueueLoaded(Vec<Track>),
     TracksQueued(usize),
     HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
+    LikedStatusUpdate(std::collections::HashMap<String, bool>),
 }

@@ -31,6 +31,7 @@
         "added_to_playlist": "Added {} tracks to '{}'",
         "removed_from_playlist": "Removed {} tracks from '{}'",
         "added_to_queue": "Added {} items to queue",
+        "added_to_liked": "Added to Liked Songs",
         "unknown_theme": "Unknown theme: {}",
         "unknown_language": "Unknown language: {}",
         "language_set": "Language set to {}"
@@ -40,6 +41,7 @@
         "create_playlist": "New Playlist Name: ",
         "rename_playlist": "Rename Playlist: ",
         "theme": "Theme: ",
-        "lang": "Lang: "
+        "lang": "Lang: ",
+        "remove_from_liked": "Remove from Liked Songs? (y/n)"
     }
 }
