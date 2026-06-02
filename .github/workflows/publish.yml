@@ -59,12 +59,11 @@ jobs:
         with:
           name: echo-${{ matrix.target }}
           path: |
-            target/release/bundles/**/*.msi
-            target/release/bundles/**/*.dmg
-            target/release/bundles/**/*.deb
-            target/release/bundles/**/*.AppImage
-            target/release/bundles/**/*.app
-          if-no-files-found: warn
+            target/release/*.msi
+            target/release/*.dmg
+            target/release/*.deb
+            target/release/*.AppImage
+          if-no-files-found: error
 
   release:
     needs: build
@@ -83,8 +82,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p release-assets
-          # Flatten artifacts into release-assets dir
+          test -d artifacts
           find artifacts -type f -exec cp -v {} release-assets/ \;
+          test "$(find release-assets -type f | wc -l)" -gt 0
           
           gh release create v${{ inputs.version }} \
             --title "Echo v${{ inputs.version }}" \
