@@ -78,18 +78,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         },
         KeyCode::Enter | KeyCode::Char('l') | KeyCode::Char('z') => {
             if state.active_view == ActiveView::Library {
-                let (context_id, image_url) = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                let (context_id, image_url, metadata) = if state.active_library_tab == crate::app::LibraryTab::Albums {
                     if state.selected_playlist_index < state.saved_albums.len() {
                         let album = &state.saved_albums[state.selected_playlist_index];
-                        (album.id.clone(), album.image_url.clone())
+                        (album.id.clone(), album.image_url.clone(), Some((album.name.clone(), album.artists.clone())))
                     } else {
-                        (String::new(), None)
+                        (String::new(), None, None)
                     }
                 } else {
                     if state.selected_playlist_index < state.library_view.len() {
                         match &state.library_view[state.selected_playlist_index] {
                             crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                (playlist.id.clone(), playlist.image_url.clone())
+                                (playlist.id.clone(), playlist.image_url.clone(), Some((playlist.name.clone(), playlist.owner.clone())))
                             }
                             crate::models::LibraryNode::Folder(f) => {
                                 let folder_name = f.name.clone();
@@ -103,11 +103,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 }
                                 state.save_library_config();
                                 state.compute_library_view();
-                                (String::new(), None)
+                                (String::new(), None, None)
                             }
                         }
                     } else {
-                        (String::new(), None)
+                        (String::new(), None, None)
                     }
                 };
 
@@ -119,7 +119,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.active_library_header_image = None;
                     state.header_image_cache = None;
                     state.header_image_dirty = false;
-                    return Some(AppEvent::LoadContextTracks(context_id, is_album, image_url));
+                    return Some(AppEvent::LoadContextTracks(context_id, is_album, image_url, metadata));
                 }
             } else if state.active_view == ActiveView::TrackList {
                 if state.selected_track_index < state.tracks.len() {
@@ -181,7 +181,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.selected_track_index = 0;
                             // Stash SearchResults as previous view context
                             state.prev_view = None; // album loaded from search, Backspace returns to Search
-                            return Some(AppEvent::LoadContextTracks(album_id, true, None));
+                            let metadata = Some((album.name.clone(), album.artist.clone()));
+                            return Some(AppEvent::LoadContextTracks(album_id, true, album.image_url.clone(), metadata));
                         }
                     }
                 }
@@ -198,7 +199,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.search_matches.clear();
             state.status_message = None;
         }
-        KeyCode::Char('s') => {
+        KeyCode::Char('f') => {
             state.mode = crate::app::AppMode::Command;
             state.command_buffer = "search ".to_string();
             state.status_message = None;
@@ -360,7 +361,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.playback.is_playing = !state.playback.is_playing;
             return Some(AppEvent::TogglePlayback(state.playback.is_playing));
         }
-        KeyCode::Char('S') => {
+        KeyCode::Char('s') => {
             state.playback.is_shuffled = !state.playback.is_shuffled;
             return Some(AppEvent::ToggleShuffle(state.playback.is_shuffled));
         }

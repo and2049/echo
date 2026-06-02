@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod api;
 pub mod visualization;
+pub mod media;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
@@ -11,11 +12,14 @@ use tokio::sync::mpsc;
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
     tx: mpsc::Sender<WorkerEvent>,
+    media_tx: mpsc::Sender<media::MediaUpdate>,
 }
 
 impl Worker {
-    pub fn new(rx: mpsc::Receiver<AppEvent>, tx: mpsc::Sender<WorkerEvent>) -> Self {
-        Self { rx, tx }
+    pub fn new(rx: mpsc::Receiver<AppEvent>, tx: mpsc::Sender<WorkerEvent>, app_tx: mpsc::Sender<AppEvent>) -> Self {
+        let (media_tx, media_rx) = mpsc::channel(32);
+        media::spawn_media_thread(media_rx, app_tx);
+        Self { rx, tx, media_tx }
     }
 
     fn spawn_playback_sync(
@@ -110,10 +114,21 @@ impl Worker {
                     if let Some(ref sp) = spotify_opt {
                         let client = sp.client.clone();
                         let tx = self.tx.clone();
+                        let media_tx = self.media_tx.clone();
                         let is_playing_clone = is_playing.clone();
                         tokio::spawn(async move {
                             if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = SpotifyWorker::playback_snapshot_from_client(&client).await {
                                 is_playing_clone.store(playing, std::sync::atomic::Ordering::SeqCst);
+                                let _ = media_tx.send(media::MediaUpdate::Playback(playing, progress_ms)).await;
+                                if let Some(ref track) = item {
+                                    let _ = media_tx.send(media::MediaUpdate::Metadata {
+                                        title: track.title.clone(),
+                                        artist: track.artist.clone(),
+                                        album: "Unknown Album".to_string(),
+                                        duration_ms: track.duration_ms,
+                                        cover_url: track.image_url.clone(),
+                                    }).await;
+                                }
                                 let _ = tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                             }
                         });
@@ -180,14 +195,14 @@ impl Worker {
                                         }
                                     }
                             }
-                            AppEvent::LoadContextTracks(id, is_album, _) => {
+                            AppEvent::LoadContextTracks(id, is_album, _, metadata) => {
                                 if let Some(ref sp) = spotify_opt {
                                     let tracks = if is_album {
                                         sp.fetch_album_tracks(&id).await.unwrap_or_default()
                                     } else {
                                         sp.fetch_tracks(&id).await.unwrap_or_default()
                                     };
-                                    let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks)).await;
+                                    let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
                                 }
                             }
                             AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url } => {
@@ -198,13 +213,20 @@ impl Worker {
                                             current_track_id = Some(track_id.clone());
                                             let item = PlaybackItem {
                                                 id: track_id,
-                                                title,
-                                                artist,
+                                                title: title.clone(),
+                                                artist: artist.clone(),
                                                 duration_ms,
-                                                image_url,
+                                                image_url: image_url.clone(),
                                             };
                                             let _ = self.tx.send(WorkerEvent::PlaybackStarted {
-                                                item,
+                                                item: item.clone(),
+                                            }).await;
+                                            let _ = self.media_tx.send(media::MediaUpdate::Metadata {
+                                                title: title.clone(),
+                                                artist: artist.clone(),
+                                                album: "Unknown Album".to_string(),
+                                                duration_ms,
+                                                cover_url: image_url.clone(),
                                             }).await;
                                         }
                                         Err(e) => {

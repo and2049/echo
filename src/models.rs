@@ -53,6 +53,7 @@ pub struct SearchAlbum {
     pub id: String,
     pub name: String,
     pub artist: String,
+    pub image_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]

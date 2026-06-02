@@ -82,8 +82,8 @@ async fn main() -> Result<()> {
     let (app_tx, worker_rx) = mpsc::channel::<AppEvent>(32);
     let (worker_tx, mut app_rx) = mpsc::channel::<WorkerEvent>(32);
     let worker_tx_clone = worker_tx.clone();
-
-    let worker = Worker::new(worker_rx, worker_tx);
+    
+    let mut worker = Worker::new(worker_rx, worker_tx, app_tx.clone());
     tokio::spawn(async move {
         worker.run().await;
     });
@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
                         let _ = app_tx.send(event).await;
 
                         if let Some(ev) = outgoing_event {
-                            if let AppEvent::LoadContextTracks(_, _, ref img_url) = ev {
+                            if let AppEvent::LoadContextTracks(_, _, ref img_url, _) = ev {
                                 if let Some(url) = img_url
                                     && let Some(picker) = &state.image_picker {
                                         spawn_header_image_processing(url.clone(), picker, worker_tx_clone.clone());
@@ -167,8 +167,9 @@ async fn main() -> Result<()> {
                 WorkerEvent::AlbumsLoaded(albums) => {
                     state.saved_albums = albums;
                 }
-                WorkerEvent::TracksLoaded(tracks) => {
+                WorkerEvent::TracksLoaded(tracks, metadata) => {
                     state.tracks = tracks;
+                    state.tracklist_context_metadata = metadata;
                     state.active_view = app::ActiveView::TrackList;
                     state.selected_track_index = 0;
                 }

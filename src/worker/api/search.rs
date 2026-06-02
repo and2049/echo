@@ -24,7 +24,8 @@ impl SpotifyWorker {
                 let id = a.id?.id().to_string();
                 let name = a.name;
                 let artist = a.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", ");
-                Some(crate::models::SearchAlbum { id, name, artist })
+                let image_url = a.images.first().map(|i| i.url.clone());
+                Some(crate::models::SearchAlbum { id, name, artist, image_url })
             }).collect();
         }
 

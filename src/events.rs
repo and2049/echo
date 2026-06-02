@@ -3,7 +3,7 @@ use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
     Key(KeyEvent),
-    LoadContextTracks(String, bool, Option<String>),
+    LoadContextTracks(String, bool, Option<String>, Option<(String, String)>),
     PlayTrack {
         context_id: String,
         track_id: String,
@@ -36,7 +36,7 @@ pub enum WorkerEvent {
     AuthenticationComplete,
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
-    TracksLoaded(Vec<Track>),
+    TracksLoaded(Vec<Track>, Option<(String, String)>),
     AudioVisualizationReady(std::sync::Arc<parking_lot::Mutex<[f32; 32]>>, std::sync::Arc<std::sync::atomic::AtomicBool>),
     PlaybackStarted {
         item: PlaybackItem,

@@ -172,6 +172,7 @@ pub struct AppState {
     pub prev_view: Option<ActiveView>,
     pub queue: Vec<crate::models::Track>,
     pub selected_queue_index: usize,
+    pub tracklist_context_metadata: Option<(String, String)>,
 }
 
 impl AppState {
@@ -238,6 +239,7 @@ impl AppState {
             prev_view: None,
             queue: Vec::new(),
             selected_queue_index: 0,
+            tracklist_context_metadata: None,
         }
     }
 }

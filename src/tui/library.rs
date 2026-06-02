@@ -284,18 +284,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
     let mut header_info: Option<(String, String)> = None;
     if state.active_view == ActiveView::TrackList && !state.tracks.is_empty() {
-        if is_albums_tab {
-            if state.selected_playlist_index < state.saved_albums.len() {
-                let album = &state.saved_albums[state.selected_playlist_index];
-                header_info = Some((album.name.clone(), album.artists.clone()));
-            }
-        } else {
-            if state.selected_playlist_index < state.library_view.len() {
-                if let crate::models::LibraryNode::Playlist { playlist, .. } = &state.library_view[state.selected_playlist_index] {
-                    header_info = Some((playlist.name.clone(), playlist.owner.clone()));
-                }
-            }
-        }
+        header_info = state.tracklist_context_metadata.clone();
     }
 
     let (header_area, table_area) = if let Some(_) = header_info {
