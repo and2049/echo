@@ -1,7 +1,12 @@
 use crate::app::{ActiveView, AppMode, AppState};
+use crate::tui::render::{
+    DURATION_COLUMN_WIDTH, format_duration_text, format_time, padded_library_list,
+    repair_wide_grapheme_trailing_styles, row_text_width, stabilize_terminal_emoji_width,
+    truncate_to_width_with_ellipsis,
+};
 use ratatui::{
-    buffer::Buffer,
     Frame,
+    buffer::Buffer,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -9,11 +14,6 @@ use ratatui::{
         Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, StatefulWidget, Table,
         TableState,
     },
-};
-use crate::tui::render::{
-    format_duration_text, format_time, padded_library_list, repair_wide_grapheme_trailing_styles,
-    row_text_width, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
-    DURATION_COLUMN_WIDTH,
 };
 
 const ECHO_LOGO: [&str; 6] = [
@@ -44,20 +44,19 @@ fn color_to_rgb(color: Color) -> (f32, f32, f32) {
 fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
     let (r1, g1, b1) = color_to_rgb(c1);
     let (r2, g2, b2) = color_to_rgb(c2);
-    
+
     let r = r1 + (r2 - r1) * t;
     let g = g1 + (g2 - g1) * t;
     let b = b1 + (b2 - b1) * t;
-    
+
     Color::Rgb(r as u8, g as u8, b as u8)
 }
-
 
 pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area: Rect) {
     let is_focused = state.active_view == ActiveView::Library;
     let title_text = match state.active_library_tab {
-        crate::app::LibraryTab::Playlists => "[ Playlists ] Albums ",
-        crate::app::LibraryTab::Albums => " Playlists [ Albums ]",
+        crate::app::LibraryTab::Playlists => "[ Playlists ]  Albums  ",
+        crate::app::LibraryTab::Albums => "  Playlists  [ Albums ]",
     };
 
     let library_border_style = if is_focused {
@@ -93,7 +92,10 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
             };
 
             let style = if is_in_visual {
-                state.active_theme.selected_style().bg(state.active_theme.primary)
+                state
+                    .active_theme
+                    .selected_style()
+                    .bg(state.active_theme.primary)
             } else if i == state.selected_playlist_index {
                 state.active_theme.selected_style()
             } else {
@@ -155,7 +157,10 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                     false
                 };
                 let style = if is_in_visual {
-                    state.active_theme.selected_style().bg(state.active_theme.primary)
+                    state
+                        .active_theme
+                        .selected_style()
+                        .bg(state.active_theme.primary)
                 } else if is_focused && i == state.selected_playlist_index {
                     state.active_theme.selected_style()
                 } else {
@@ -204,23 +209,29 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         .enumerate()
         .map(|(i, t)| {
             let is_match = state.mode == AppMode::Search && state.search_matches.contains(&i);
-            
+
             let is_in_visual = if let Some((start, end)) = visual_range {
                 i >= start && i <= end
             } else {
                 false
             };
-            
+
             let style = if is_in_visual {
-                state.active_theme.selected_style().bg(state.active_theme.primary)
+                state
+                    .active_theme
+                    .selected_style()
+                    .bg(state.active_theme.primary)
             } else if i == state.selected_track_index {
                 state.active_theme.selected_style()
             } else if is_match {
-                state.active_theme.base_style().fg(state.active_theme.secondary)
+                state
+                    .active_theme
+                    .base_style()
+                    .fg(state.active_theme.secondary)
             } else {
                 state.active_theme.base_style()
             };
-            
+
             let prefix = if Some(t.id.clone()) == state.playback.playing_track_id {
                 "▶ "
             } else {
@@ -271,7 +282,11 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     let header_style = track_border_style.add_modifier(Modifier::BOLD);
 
     let table = if is_albums_tab {
-        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
+        let header_str = if state.library_config.track_index_base < 0 {
+            "Track"
+        } else {
+            "  # Track"
+        };
         let header = Row::new(vec![header_str, "Duration "])
             .style(header_style)
             .height(1);
@@ -292,7 +307,11 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         }
         t
     } else {
-        let header_str = if state.library_config.track_index_base < 0 { "Track" } else { "  # Track" };
+        let header_str = if state.library_config.track_index_base < 0 {
+            "Track"
+        } else {
+            "  # Track"
+        };
         let header = Row::new(vec![header_str, "Artist", "Duration "])
             .style(header_style)
             .height(1);
@@ -344,7 +363,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                     ratatui::layout::Constraint::Min(0),
                 ])
                 .split(h_area);
-            
+
             let img_area = Rect {
                 x: chunks[0].x + 2, // 2 left margin
                 y: chunks[0].y + 1, // 1 top margin
@@ -387,12 +406,16 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 ])
                 .split(chunks[1]);
 
-            let title_para = ratatui::widgets::Paragraph::new(title)
-                .style(Style::default().fg(state.active_theme.primary).add_modifier(Modifier::BOLD));
+            let title_para = ratatui::widgets::Paragraph::new(title).style(
+                Style::default()
+                    .fg(state.active_theme.primary)
+                    .add_modifier(Modifier::BOLD),
+            );
             let author_para = ratatui::widgets::Paragraph::new(author)
                 .style(Style::default().fg(state.active_theme.secondary));
-            let count_para = ratatui::widgets::Paragraph::new(format!("{} tracks", state.tracks.len()))
-                .style(Style::default().fg(Color::DarkGray));
+            let count_para =
+                ratatui::widgets::Paragraph::new(format!("{} tracks", state.tracks.len()))
+                    .style(Style::default().fg(Color::DarkGray));
 
             frame.render_widget(title_para, text_chunks[1]);
             frame.render_widget(author_para, text_chunks[2]);
@@ -412,43 +435,50 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     if state.tracks.is_empty() {
         let logo_height = ECHO_LOGO.len() as u16;
         let logo_width = 63; // Width of the longest line in ECHO_LOGO
-        
+
         if track_inner_area.width > logo_width && track_inner_area.height > logo_height {
             let x_offset = (track_inner_area.width - logo_width) / 2;
             let y_offset = (track_inner_area.height - logo_height) / 2;
-            
-            let gradient_lines: Vec<Line> = ECHO_LOGO.iter().map(|&line| {
-                let mut spans = Vec::new();
-                for (i, c) in line.chars().enumerate() {
-                    let t = i as f32 / logo_width as f32;
-                    let base_color = lerp_color(state.active_theme.secondary, state.active_theme.primary, t);
-                    
-                    let style = if c == '█' {
-                        Style::default().fg(base_color)
-                    } else if c != ' ' {
-                        let (r, g, b) = color_to_rgb(base_color);
-                        let (bg_r, bg_g, bg_b) = color_to_rgb(state.active_theme.background);
-                        let alpha = 0.4;
-                        let shadow_color = Color::Rgb(
-                            (r * alpha + bg_r * (1.0 - alpha)) as u8,
-                            (g * alpha + bg_g * (1.0 - alpha)) as u8,
-                            (b * alpha + bg_b * (1.0 - alpha)) as u8,
-                        );
-                        Style::default().fg(shadow_color)
-                    } else {
-                        Style::default()
-                    };
-                    spans.push(Span::styled(c.to_string(), style));
-                }
-                Line::from(spans)
-            }).collect();
+
+            let gradient_lines: Vec<Line> = ECHO_LOGO
+                .iter()
+                .map(|&line| {
+                    let mut spans = Vec::new();
+                    for (i, c) in line.chars().enumerate() {
+                        let t = i as f32 / logo_width as f32;
+                        let base_color =
+                            lerp_color(state.active_theme.secondary, state.active_theme.primary, t);
+
+                        let style = if c == '█' {
+                            Style::default().fg(base_color)
+                        } else if c != ' ' {
+                            let (r, g, b) = color_to_rgb(base_color);
+                            let (bg_r, bg_g, bg_b) = color_to_rgb(state.active_theme.background);
+                            let alpha = 0.4;
+                            let shadow_color = Color::Rgb(
+                                (r * alpha + bg_r * (1.0 - alpha)) as u8,
+                                (g * alpha + bg_g * (1.0 - alpha)) as u8,
+                                (b * alpha + bg_b * (1.0 - alpha)) as u8,
+                            );
+                            Style::default().fg(shadow_color)
+                        } else {
+                            Style::default()
+                        };
+                        spans.push(Span::styled(c.to_string(), style));
+                    }
+                    Line::from(spans)
+                })
+                .collect();
             let gradient_area = Rect {
                 x: track_inner_area.x + x_offset,
                 y: track_inner_area.y + y_offset,
                 width: logo_width,
                 height: logo_height,
             };
-            frame.render_widget(ratatui::widgets::Paragraph::new(gradient_lines), gradient_area);
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(gradient_lines),
+                gradient_area,
+            );
         }
     }
 }

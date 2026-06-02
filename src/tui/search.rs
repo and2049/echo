@@ -1,12 +1,12 @@
 use crate::app::{ActiveView, AppState, SearchTab};
+use crate::tui::render::{
+    DURATION_COLUMN_WIDTH, format_duration_text, truncate_to_width_with_ellipsis,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
     style::Modifier,
     widgets::{Block, Borders, Cell, HighlightSpacing, Row, Table, TableState},
-};
-use crate::tui::render::{
-    format_duration_text, truncate_to_width_with_ellipsis, DURATION_COLUMN_WIDTH,
 };
 
 pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
@@ -17,10 +17,9 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
         state.active_theme.primary_style()
     };
 
-    // Build tab header title
     let tab_title = match state.active_search_tab {
-        SearchTab::Tracks => "[ Tracks ] Albums",
-        SearchTab::Albums => " Tracks [ Albums ]",
+        SearchTab::Tracks => "[ Tracks ]  Albums  ",
+        SearchTab::Albums => "  Tracks  [ Albums ]",
     };
 
     let search_block = Block::default()
@@ -60,9 +59,12 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     } else {
                         false
                     };
-                    
+
                     let style = if is_in_visual {
-                        state.active_theme.selected_style().bg(state.active_theme.primary)
+                        state
+                            .active_theme
+                            .selected_style()
+                            .bg(state.active_theme.primary)
                     } else if i == sel {
                         state.active_theme.selected_style()
                     } else {
