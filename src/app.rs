@@ -189,10 +189,14 @@ impl AppState {
 
         let themes = crate::config::load_themes().unwrap_or_else(|_| {
             let mut fallback = std::collections::HashMap::new();
-            fallback.insert("default".to_string(), crate::config::Theme::default());
+            fallback.insert(
+                "default".to_string(),
+                crate::config::bundled_default_theme(),
+            );
             fallback
         });
 
+        let default_theme = crate::config::bundled_default_theme();
         let active_theme_name = config
             .library
             .active_theme
@@ -200,7 +204,8 @@ impl AppState {
             .unwrap_or_else(|| "default".to_string());
         let active_theme_config = themes
             .get(&active_theme_name)
-            .unwrap_or(&crate::config::Theme::default())
+            .or_else(|| themes.get("default"))
+            .unwrap_or(&default_theme)
             .clone();
 
         let active_theme = ResolvedTheme::from_theme(&active_theme_config);

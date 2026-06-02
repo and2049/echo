@@ -54,4 +54,5 @@ icons = [
     "icons/icon.png",
     "icons/128x128@2x.png"
 ]
+resources = [{ src = "themes", target = "themes" }]
 before-packaging-command = "cargo build --release"
