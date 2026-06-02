@@ -181,9 +181,18 @@ async fn main() -> Result<()> {
                 }
                 WorkerEvent::TracksLoaded(tracks, metadata) => {
                     state.tracks = tracks;
-                    state.tracklist_context_metadata = metadata;
+                    state.tracklist_context_metadata = metadata.clone();
                     state.active_view = app::ActiveView::TrackList;
                     state.selected_track_index = 0;
+                    
+                    if let Some(m) = metadata {
+                        let url = m.3;
+                        if !url.is_empty() {
+                            if let Some(picker) = &state.image_picker {
+                                spawn_header_image_processing(url, picker, worker_tx_clone.clone());
+                            }
+                        }
+                    }
                 }
                 WorkerEvent::PlaybackStarted { item } => {
                     state.playback.is_playing = true;

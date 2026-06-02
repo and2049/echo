@@ -15,7 +15,8 @@ impl SpotifyWorker {
                 let album = t.album.name;
                 let duration_ms = t.duration.num_milliseconds() as u32;
                 let image_url = t.album.images.first().map(|i| i.url.clone());
-                Some(crate::models::SearchTrack { id, name, artist, album, duration_ms, image_url })
+                let album_id = t.album.id.map(|id| id.id().to_string());
+                Some(crate::models::SearchTrack { id, name, artist, album, duration_ms, image_url, album_id })
             }).collect();
         }
 

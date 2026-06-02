@@ -28,6 +28,7 @@ pub struct Track {
     pub artist: String,
     pub duration_ms: u32,
     pub image_url: Option<String>,
+    pub album_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +38,7 @@ pub struct PlaybackItem {
     pub artist: String,
     pub duration_ms: u32,
     pub image_url: Option<String>,
+    pub album_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -47,6 +49,7 @@ pub struct SearchTrack {
     pub album: String,
     pub duration_ms: u32,
     pub image_url: Option<String>,
+    pub album_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]

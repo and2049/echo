@@ -337,7 +337,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     frame.render_widget(track_block, tracks_area);
 
     let mut header_info: Option<(String, String, String, String)> = None;
-    if state.active_view == ActiveView::TrackList && !state.tracks.is_empty() {
+    if !state.tracks.is_empty() {
         header_info = state.tracklist_context_metadata.clone();
     }
 

@@ -12,6 +12,7 @@ pub enum AppEvent {
         artist: String,
         duration_ms: u32,
         image_url: Option<String>,
+        album_id: Option<String>,
     },
     StartAuth,
     Quit,

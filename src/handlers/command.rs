@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis"];
+    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -188,6 +188,36 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             return Some(crate::events::AppEvent::GlobalSearch(query));
                         } else {
                             state.status_message = Some("Usage: search <query>".to_string());
+                            state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        }
+                    }
+                    "album" => {
+                        use crate::app::ActiveView;
+                        let mut album_id_opt = None;
+                        if state.active_view == ActiveView::TrackList {
+                            if state.selected_track_index < state.tracks.len() {
+                                album_id_opt = state.tracks[state.selected_track_index].album_id.clone();
+                            }
+                        } else if state.active_view == ActiveView::Queue {
+                            if state.selected_track_index < state.queue.len() {
+                                album_id_opt = state.queue[state.selected_track_index].album_id.clone();
+                            }
+                        } else if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Tracks {
+                            if state.selected_search_index < state.search_results.tracks.len() {
+                                album_id_opt = state.search_results.tracks[state.selected_search_index].album_id.clone();
+                            }
+                        }
+
+                        if let Some(album_id) = album_id_opt {
+                            state.active_view = ActiveView::TrackList;
+                            state.tracks.clear();
+                            state.selected_track_index = 0;
+                            state.active_library_header_image = None;
+                            state.header_image_cache = None;
+                            state.header_image_dirty = false;
+                            return Some(AppEvent::LoadContextTracks(album_id, true, None, None));
+                        } else {
+                            state.status_message = Some("No album available for this track".to_string());
                             state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }

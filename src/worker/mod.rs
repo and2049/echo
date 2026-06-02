@@ -207,8 +207,8 @@ impl Worker {
                             AppEvent::LoadContextTracks(id, is_album, _, metadata) => {
                                 if let Some(ref sp) = spotify_opt {
                                     if is_album {
-                                        if let Ok(tracks) = sp.fetch_album_tracks(&id).await {
-                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
+                                        if let Ok((tracks, album_metadata)) = sp.fetch_album_tracks(&id).await {
+                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, album_metadata.or(metadata))).await;
                                         }
                                     } else {
                                         if let Ok(tracks) = sp.fetch_tracks(&id).await {
@@ -217,7 +217,7 @@ impl Worker {
                                     }
                                 }
                             }
-                            AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url } => {
+                            AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url, album_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     match sp.play_track(&context_id, &track_id, is_album).await {
                                         Ok(_) => {
@@ -229,6 +229,7 @@ impl Worker {
                                                 artist: artist.clone(),
                                                 duration_ms,
                                                 image_url: image_url.clone(),
+                                                album_id: album_id.clone(),
                                             };
                                             let _ = self.tx.send(WorkerEvent::PlaybackStarted {
                                                 item: item.clone(),

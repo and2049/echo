@@ -82,6 +82,7 @@ impl SpotifyWorker {
                             .join(", "),
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
+                        album_id: track.album.id.map(|id| id.id().to_string()),
                     });
                 }
 
@@ -132,17 +133,27 @@ impl SpotifyWorker {
                         .join(", "),
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
+                    album_id: track.album.id.map(|id| id.id().to_string()),
                 });
             }
         }
         Ok(out)
     }
 
-    pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<Track>> {
+    pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<(Vec<Track>, Option<(String, String, String, String)>)> {
         let id = rspotify::model::AlbumId::from_id(album_id)?;
-        let page = self.client.album_track_manual(id, None, None, None).await?;
+        let album = self.client.album(id, None).await?;
         let mut out = Vec::new();
-        for track in page.items {
+        
+        let image_url = album.images.first().map(|i| i.url.clone());
+        let metadata = Some((
+            album.id.id().to_string(),
+            album.name,
+            album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+            image_url.clone().unwrap_or_default(),
+        ));
+
+        for track in album.tracks.items {
             if track.is_local {
                 continue;
             }
@@ -156,9 +167,10 @@ impl SpotifyWorker {
                     .collect::<Vec<_>>()
                     .join(", "),
                 duration_ms: track.duration.num_milliseconds() as u32,
-                image_url: None, // Simplified tracks don't have images directly, normally it inherits from the album, we can omit it or pass it down later
+                image_url: image_url.clone(), // Set the album's image on every track!
+                album_id: Some(album_id.to_string()),
             });
         }
-        Ok(out)
+        Ok((out, metadata))
     }
 }

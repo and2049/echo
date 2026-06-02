@@ -78,6 +78,7 @@ impl SpotifyWorker {
             artist,
             duration_ms,
             image_url,
+            album_id: value.get("album").and_then(|a| a.get("id")).and_then(|i| i.as_str()).map(str::to_string),
         })
     }
 
@@ -98,6 +99,7 @@ impl SpotifyWorker {
                         .join(", "),
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
+                    album_id: track.album.id.as_ref().map(|id| id.id().to_string()),
                 })
             }
             rspotify::model::PlayableItem::Episode(episode) => Some(PlaybackItem {
@@ -106,6 +108,7 @@ impl SpotifyWorker {
                 artist: episode.show.name.clone(),
                 duration_ms: episode.duration.num_milliseconds() as u32,
                 image_url: episode.images.first().map(|img| img.url.clone()),
+                album_id: None,
             }),
             rspotify::model::PlayableItem::Unknown(value) => {
                 Self::playback_item_from_unknown(value)
@@ -387,6 +390,7 @@ impl SpotifyWorker {
                         artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
+                        album_id: track.album.id.map(|id| id.id().to_string()),
                     });
                 }
                 rspotify::model::PlayableItem::Unknown(val) => {
@@ -417,7 +421,12 @@ impl SpotifyWorker {
                         .and_then(|u| u.as_str())
                         .map(|s| s.to_string());
 
-                    out.push(Track { id, name, artist, duration_ms, image_url });
+                    let album_id = val.get("album")
+                        .and_then(|a| a.get("id"))
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string());
+
+                    out.push(Track { id, name, artist, duration_ms, image_url, album_id });
                 }
                 _ => {}
             }

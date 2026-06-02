@@ -221,6 +221,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             artist: track.artist.clone(),
                             duration_ms: track.duration_ms,
                             image_url: track.image_url.clone(),
+                            album_id: track.album_id.clone(),
                         });
                     }
                 }
@@ -239,6 +240,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 artist: t.artist.clone(),
                                 duration_ms: t.duration_ms,
                                 image_url: t.image_url.clone(),
+                                album_id: t.album_id.clone(),
                             });
                         }
                     }
@@ -364,6 +366,32 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
                     }
                 }
+            }
+        }
+        KeyCode::Char('A') => {
+            let mut album_id_opt = None;
+            if state.active_view == ActiveView::TrackList {
+                if state.selected_track_index < state.tracks.len() {
+                    album_id_opt = state.tracks[state.selected_track_index].album_id.clone();
+                }
+            } else if state.active_view == ActiveView::Queue {
+                if state.selected_track_index < state.queue.len() {
+                    album_id_opt = state.queue[state.selected_track_index].album_id.clone();
+                }
+            } else if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Tracks {
+                if state.selected_search_index < state.search_results.tracks.len() {
+                    album_id_opt = state.search_results.tracks[state.selected_search_index].album_id.clone();
+                }
+            }
+
+            if let Some(album_id) = album_id_opt {
+                state.active_view = ActiveView::TrackList;
+                state.tracks.clear();
+                state.selected_track_index = 0;
+                state.active_library_header_image = None;
+                state.header_image_cache = None;
+                state.header_image_dirty = false;
+                return Some(AppEvent::LoadContextTracks(album_id, true, None, None));
             }
         }
         KeyCode::Char('a') => {
