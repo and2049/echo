@@ -191,6 +191,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }
+                    "newplaylist" => {
+                        let name = args.collect::<Vec<&str>>().join(" ");
+                        if !name.is_empty() {
+                            return Some(AppEvent::CreatePlaylist(name));
+                        }
+                    }
+                    "rename" => {
+                        let name = args.collect::<Vec<&str>>().join(" ");
+                        if !name.is_empty() {
+                            if state.active_view == crate::app::ActiveView::Library {
+                                if let Some(crate::models::LibraryNode::Playlist { playlist, .. }) = state.library_view.get(state.selected_playlist_index) {
+                                    return Some(AppEvent::RenamePlaylist(playlist.id.clone(), name));
+                                }
+                            }
+                        }
+                    }
                     "queue" => {
                         state.active_view = crate::app::ActiveView::Queue;
                         state.selected_queue_index = 0;

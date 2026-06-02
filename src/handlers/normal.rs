@@ -18,6 +18,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         state.folder_delete_prompt = None;
+        state.playlist_delete_prompt = None;
+        return None;
+    }
+
+    if let Some(playlist_id) = state.playlist_delete_prompt.clone() {
+        if key.code == KeyCode::Char('y') {
+            state.playlist_delete_prompt = None;
+            return Some(AppEvent::DeletePlaylist(playlist_id));
+        }
+        state.playlist_delete_prompt = None;
         return None;
     }
 
@@ -285,15 +295,26 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 return None;
                             }
 
-                            // Put in cut register
-                            state.operation_register = vec![playlist.id.clone()];
+                            if key.code == KeyCode::Char('x') {
+                                // Put in cut register
+                                state.operation_register = vec![playlist.id.clone()];
 
-                            // Remove from any folders
-                            for f in &mut state.library_config.folders {
-                                f.playlists.retain(|id| id != &playlist.id);
+                                // Remove from any folders
+                                for f in &mut state.library_config.folders {
+                                    f.playlists.retain(|id| id != &playlist.id);
+                                }
+                                state.save_library_config();
+                                state.compute_library_view();
+                            } else if key.code == KeyCode::Char('d') {
+                                if Some(&playlist.owner_id) == state.user_id.as_ref() {
+                                    if state.pending_d_press {
+                                        state.playlist_delete_prompt = Some(playlist.id.clone());
+                                        state.pending_d_press = false;
+                                    } else {
+                                        state.pending_d_press = true;
+                                    }
+                                }
                             }
-                            state.save_library_config();
-                            state.compute_library_view();
                         }
                         crate::models::LibraryNode::Folder(f) => {
                             if key.code == KeyCode::Char('d') {
@@ -429,6 +450,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char(' ') => {
             state.playback.is_playing = !state.playback.is_playing;
             return Some(AppEvent::TogglePlayback(state.playback.is_playing));
+        }
+        KeyCode::Char('c') => {
+            if state.active_view == ActiveView::Library {
+                state.mode = crate::app::AppMode::Command;
+                state.command_buffer = "newplaylist ".to_string();
+            }
+        }
+        KeyCode::Char('R') => {
+            if state.active_view == ActiveView::Library {
+                if let Some(crate::models::LibraryNode::Playlist { playlist, .. }) = state.library_view.get(state.selected_playlist_index) {
+                    if Some(&playlist.owner_id) == state.user_id.as_ref() {
+                        state.mode = crate::app::AppMode::Command;
+                        state.command_buffer = format!("rename {}", playlist.name);
+                    }
+                }
+            }
         }
         KeyCode::Char('s') => {
             state.playback.is_shuffled = !state.playback.is_shuffled;

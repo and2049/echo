@@ -8,6 +8,7 @@ use crate::events::{AppEvent, WorkerEvent};
 use crate::models::PlaybackItem;
 use api::SpotifyWorker;
 use tokio::sync::mpsc;
+use rspotify::clients::OAuthClient;
 
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
@@ -367,6 +368,56 @@ impl Worker {
                                             }
                                         } else {
                                             let _ = std::fs::write("echo-debug-remove.log", format!("No items parsed! track_ids: {:?}", track_ids));
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::CreatePlaylist(name) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    // The user's Spotify user ID is needed to create a playlist
+                                    // rspotify provides `current_user()` to get the profile, or we can use the ID if we have it
+                                    if let Ok(me) = sp.client.current_user().await {
+                                        let res = sp.client.user_playlist_create(
+                                            me.id,
+                                            &name,
+                                            Some(false), // public = false
+                                            Some(false), // collaborative = false
+                                            Some("Created by echo-rs"),
+                                        ).await;
+                                        if res.is_ok() {
+                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::RenamePlaylist(playlist_id, new_name) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    if let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
+                                        let res = sp.client.playlist_change_detail(
+                                            pid,
+                                            Some(&new_name),
+                                            None,
+                                            None,
+                                            None,
+                                        ).await;
+                                        if res.is_ok() {
+                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::DeletePlaylist(playlist_id) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    if let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
+                                        let res = sp.client.playlist_unfollow(pid).await;
+                                        if res.is_ok() {
+                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                            }
                                         }
                                     }
                                 }

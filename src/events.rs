@@ -31,6 +31,9 @@ pub enum AppEvent {
     FetchQueue,
     AddTracksToPlaylist(String, Vec<String>),
     RemoveTracksFromPlaylist(String, Vec<String>),
+    CreatePlaylist(String),
+    RenamePlaylist(String, String),
+    DeletePlaylist(String),
 }
 
 pub enum WorkerEvent {
