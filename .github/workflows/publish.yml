@@ -35,7 +35,7 @@ jobs:
       - name: Update Version in Cargo.toml
         shell: bash
         run: |
-          sed -i "s/^version = \".*\"/version = \"${{ inputs.version }}\"/" Cargo.toml
+          perl -pi -e "s/^version = \".*\"/version = \"${{ inputs.version }}\"/" Cargo.toml
 
       - uses: dtolnay/rust-toolchain@stable
 
