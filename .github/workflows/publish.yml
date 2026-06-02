@@ -24,7 +24,7 @@ jobs:
             formats: "deb,appimage"
           - os: windows-latest
             target: win
-            formats: "msi"
+            formats: "wix"
           - os: macos-15
             target: mac
             formats: "dmg,app"
@@ -35,7 +35,7 @@ jobs:
       - name: Update Version in Cargo.toml
         shell: bash
         run: |
-          perl -pi -e "s/^version = \".*\"/version = \"${{ inputs.version }}\"/" Cargo.toml
+          perl -0pi -e 's/(^version = ")[^"]+(")/${1}${{ inputs.version }}${2}/m' Cargo.toml
 
       - uses: dtolnay/rust-toolchain@stable
 
