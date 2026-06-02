@@ -256,8 +256,11 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             )
             .highlight_style(state.active_theme.selected_style());
 
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(state.selected_playlist_modal_index));
+
         frame.render_widget(ratatui::widgets::Clear, popup_area);
-        frame.render_widget(list, popup_area);
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
     }
 
     // Check if we are waiting for discovery
