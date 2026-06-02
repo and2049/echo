@@ -1,0 +1,93 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 0.1.3)"
+        required: true
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            formats: "deb,appimage"
+          - os: windows-latest
+            target: win
+            formats: "msi"
+          - os: macos-15
+            target: mac
+            formats: "dmg,app"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update Version in Cargo.toml
+        shell: bash
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ inputs.version }}\"/" Cargo.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev pkg-config libssl-dev
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Build and Package
+        run: cargo packager --release --formats ${{ matrix.formats }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: echo-${{ matrix.target }}
+          path: |
+            target/release/bundles/**/*.msi
+            target/release/bundles/**/*.dmg
+            target/release/bundles/**/*.deb
+            target/release/bundles/**/*.AppImage
+            target/release/bundles/**/*.app
+          if-no-files-found: warn
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release-assets
+          # Flatten artifacts into release-assets dir
+          find artifacts -type f -exec cp -v {} release-assets/ \;
+          
+          gh release create v${{ inputs.version }} \
+            --title "Echo v${{ inputs.version }}" \
+            --generate-notes \
+            --target ${{ github.ref_name }} \
+            release-assets/*

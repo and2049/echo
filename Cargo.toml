@@ -40,3 +40,9 @@ features = [
 	"Win32_System_LibraryLoader",
 	"Win32_UI_WindowsAndMessaging",
 ]
+
+[package.metadata.packager]
+product-name = "Echo"
+identifier = "com.echo.app"
+publisher = "Echo"
+category = "Music"

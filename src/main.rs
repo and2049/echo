@@ -5,6 +5,7 @@ mod handlers;
 mod models;
 mod tui;
 mod worker;
+mod i18n;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
@@ -72,6 +73,8 @@ fn spawn_header_image_processing(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    i18n::init();
+
     let original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
         let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);

@@ -10,14 +10,21 @@ use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
 
 pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let shuffle_str = if state.playback.is_shuffled {
-        "On"
+        crate::i18n::t("ui.on", &state.library_config.language)
     } else {
-        "Off"
+        crate::i18n::t("ui.off", &state.library_config.language)
     };
-    let border_title = format!(
-        " Playing (Shuffle: {:<7} | Repeat: {:<7} | Volume: {:>3}%) ",
-        shuffle_str, state.playback.repeat_mode, state.playback.volume
-    );
+    
+    let repeat_str = if state.playback.repeat_mode == "Off" {
+        crate::i18n::t("ui.off", &state.library_config.language)
+    } else {
+        state.playback.repeat_mode.clone()
+    };
+    
+    let mut border_title = crate::i18n::t("ui.playing", &state.library_config.language);
+    border_title = border_title.replacen("{}", &format!("{:<7}", shuffle_str), 1);
+    border_title = border_title.replacen("{}", &format!("{:<7}", repeat_str), 1);
+    border_title = border_title.replacen("{}", &format!("{:>3}", state.playback.volume), 1);
 
     let playback_block = Block::default()
         .borders(Borders::ALL)

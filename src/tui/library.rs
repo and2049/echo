@@ -54,10 +54,17 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
 
 pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area: Rect) {
     let is_focused = state.active_view == ActiveView::Library;
-    let title_text = match state.active_library_tab {
-        crate::app::LibraryTab::Playlists => "[ Playlists ]  Albums  ",
-        crate::app::LibraryTab::Albums => "  Playlists  [ Albums ]",
+    let p_title = if state.active_library_tab == crate::app::LibraryTab::Playlists {
+        format!("[ {} ]", crate::i18n::t("ui.playlists", &state.library_config.language))
+    } else {
+        format!("  {}  ", crate::i18n::t("ui.playlists", &state.library_config.language))
     };
+    let a_title = if state.active_library_tab == crate::app::LibraryTab::Albums {
+        format!("[ {} ]", crate::i18n::t("ui.albums", &state.library_config.language))
+    } else {
+        format!("  {}  ", crate::i18n::t("ui.albums", &state.library_config.language))
+    };
+    let title_text = format!("{} {}", p_title, a_title);
 
     let library_border_style = if is_focused {
         state.active_theme.secondary_style()
@@ -273,7 +280,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     };
 
     let track_block = Block::default()
-        .title(" Tracks ")
+        .title(crate::i18n::t("ui.tracks", &state.library_config.language))
         .borders(Borders::ALL)
         .style(state.active_theme.base_style())
         .border_style(track_border_style);
@@ -414,7 +421,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             let author_para = ratatui::widgets::Paragraph::new(author)
                 .style(Style::default().fg(state.active_theme.secondary));
             let count_para =
-                ratatui::widgets::Paragraph::new(format!("{} tracks", state.tracks.len()))
+                ratatui::widgets::Paragraph::new(format!("{} {}", state.tracks.len(), crate::i18n::t("ui.tracks", &state.library_config.language)))
                     .style(Style::default().fg(Color::DarkGray));
 
             frame.render_widget(title_para, text_chunks[1]);

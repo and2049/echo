@@ -1,0 +1,45 @@
+{
+    "ui": {
+        "library": "资料库",
+        "search": "搜索",
+        "queue": "播放队列",
+        "playlists": "播放列表",
+        "albums": "专辑",
+        "tracks": "歌曲",
+        "artist": "歌手",
+        "album": "专辑",
+        "duration": "时长",
+        "playing": " 正在播放 (随机: {} | 循环: {} | 音量: {}%) ",
+        "on": "开",
+        "off": "关"
+    },
+    "help": {
+        "press_help": "按 '?' 查看帮助",
+        "no_results": "未找到结果"
+    },
+    "messages": {
+        "visual_block": "批量选择模式",
+        "fetching": "加载中...",
+        "fetching_album": "正在加载专辑...",
+        "fetching_playlist": "正在加载播放列表...",
+        "saved_to_library": "已将 '{}' 保存到资料库",
+        "removed_from_library": "已将 '{}' 从资料库中移除",
+        "created_playlist": "已创建播放列表 '{}'",
+        "deleted_playlists": "已删除 {} 个播放列表",
+        "unfollowed_playlist": "已取消关注播放列表",
+        "renamed_playlist": "已重命名为 '{}'",
+        "added_to_playlist": "已将 {} 首歌曲添加到 '{}'",
+        "removed_from_playlist": "已将 {} 首歌曲从 '{}' 中移除",
+        "added_to_queue": "已将 {} 首歌曲添加到播放队列",
+        "unknown_theme": "未知主题: {}",
+        "unknown_language": "未知语言: {}",
+        "language_set": "语言已设置为 {}"
+    },
+    "prompts": {
+        "search": "搜索: ",
+        "create_playlist": "新播放列表名称: ",
+        "rename_playlist": "重命名播放列表: ",
+        "theme": "主题: ",
+        "lang": "语言: "
+    }
+}

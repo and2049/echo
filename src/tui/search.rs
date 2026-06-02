@@ -17,17 +17,25 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
         state.active_theme.primary_style()
     };
 
-    let tab_title = match state.active_search_tab {
-        SearchTab::Tracks => "[ Tracks ]  Albums  ",
-        SearchTab::Albums => "  Tracks  [ Albums ]",
+    let t_title = if state.active_search_tab == SearchTab::Tracks {
+        format!("[ {} ]", crate::i18n::t("ui.tracks", &state.library_config.language))
+    } else {
+        format!("  {}  ", crate::i18n::t("ui.tracks", &state.library_config.language))
     };
+    let a_title = if state.active_search_tab == SearchTab::Albums {
+        format!("[ {} ]", crate::i18n::t("ui.albums", &state.library_config.language))
+    } else {
+        format!("  {}  ", crate::i18n::t("ui.albums", &state.library_config.language))
+    };
+    let tab_title = format!("{} {}", t_title, a_title);
 
     let search_block = Block::default()
         .borders(Borders::ALL)
         .style(state.active_theme.base_style())
         .border_style(border_style)
         .title(format!(
-            " Search: {} — {} ",
+            " {}: {} — {} ",
+            crate::i18n::t("ui.search", &state.library_config.language),
             state.search_context_query, tab_title
         ));
 
@@ -39,7 +47,12 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
 
     match state.active_search_tab {
         SearchTab::Tracks => {
-            let header = Row::new(vec!["Track", "Artist", "Album", "Duration "])
+            let header = Row::new(vec![
+                crate::i18n::t("ui.tracks", &state.library_config.language),
+                crate::i18n::t("ui.artist", &state.library_config.language),
+                crate::i18n::t("ui.album", &state.library_config.language),
+                crate::i18n::t("ui.duration", &state.library_config.language)
+            ])
                 .style(header_style)
                 .height(1);
             let visual_range = if state.active_view == ActiveView::SearchResults {

@@ -10,7 +10,7 @@ use crate::tui::render::{
 
 pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     let header_style = state.active_theme.muted_style();
-    let title = format!(" Queue ({} upcoming) ", state.queue.len());
+    let title = format!(" {} ({} upcoming) ", crate::i18n::t("ui.queue", &state.library_config.language), state.queue.len());
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -29,7 +29,11 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     let w_track = inner.width.saturating_sub(11) * 60 / 100;
     let w_artist = inner.width.saturating_sub(11).saturating_sub(w_track);
 
-    let header = Row::new(vec!["Track", "Artist", "Duration"])
+    let header = Row::new(vec![
+        crate::i18n::t("ui.tracks", &state.library_config.language),
+        crate::i18n::t("ui.artist", &state.library_config.language),
+        crate::i18n::t("ui.duration", &state.library_config.language)
+    ])
         .style(header_style)
         .height(1);
 

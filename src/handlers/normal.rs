@@ -391,7 +391,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             if state.active_view == ActiveView::SearchResults && state.active_search_tab == crate::app::SearchTab::Albums {
                 if state.selected_search_index < state.search_results.albums.len() {
                     let album = &state.search_results.albums[state.selected_search_index];
-                    state.status_message = Some(format!("Saved '{}' to library", album.name));
+                    state.status_message = Some(crate::i18n::t("messages.saved_to_library", &state.library_config.language).replace("{}", &album.name));
                     state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     return Some(AppEvent::SaveAlbums(vec![album.id.clone()]));
                 }
@@ -538,7 +538,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 ActiveView::Library => state.selected_playlist_index,
             };
             state.visual_selection_start = Some(current_idx);
-            state.status_message = Some("VISUAL BLOCK".to_string());
+            state.status_message = Some(crate::i18n::t("messages.visual_block", &state.library_config.language));
         }
         KeyCode::Char(']') | KeyCode::Char('>') => {
             state.playback.progress_ms = 0;

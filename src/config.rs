@@ -28,6 +28,10 @@ fn default_track_index_base() -> isize {
     1
 }
 
+fn default_language() -> String {
+    "en".to_string()
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LibraryConfig {
     #[serde(default)]
@@ -40,6 +44,8 @@ pub struct LibraryConfig {
     pub active_theme: Option<String>,
     #[serde(default = "default_track_index_base")]
     pub track_index_base: isize,
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 impl Default for LibraryConfig {
@@ -50,6 +56,7 @@ impl Default for LibraryConfig {
             sort_mode: SortMode::default(),
             active_theme: None,
             track_index_base: 1,
+            language: "en".to_string(),
         }
     }
 }

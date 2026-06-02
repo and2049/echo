@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album"];
+    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album", "lang", "newplaylist", "rename"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -17,6 +17,10 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
             }
             "sort" => {
                 let options = vec!["alpha".to_string(), "creator".to_string()];
+                options.into_iter().filter(|o| o.starts_with(arg_str)).collect()
+            }
+            "lang" => {
+                let options = vec!["en".to_string(), "zh".to_string(), "zh-CN".to_string()];
                 options.into_iter().filter(|o| o.starts_with(arg_str)).collect()
             }
             _ => vec![],
@@ -66,6 +70,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Esc => {
             state.mode = AppMode::Normal;
             state.command_buffer.clear();
+            state.needs_terminal_clear = true;
         }
         KeyCode::Backspace => {
             state.command_buffer.pop();
@@ -77,6 +82,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             let cmd = state.command_buffer.clone();
             state.command_buffer.clear();
             state.mode = AppMode::Normal;
+            state.needs_terminal_clear = true;
 
             let mut args = cmd.split_whitespace();
             if let Some(cmd_name) = args.next() {
@@ -159,25 +165,28 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     "Unknown theme '{}'. Available: {}",
                                     theme_name,
                                     theme_names
-                                        .into_iter()
-                                        .map(String::as_str)
-                                        .collect::<Vec<&str>>()
+                                        .iter()
+                                        .map(|s| s.as_str())
+                                        .collect::<Vec<_>>()
                                         .join(", ")
                                 ));
                             }
                         } else {
-                            let mut theme_names: Vec<&String> = state.themes.keys().collect();
-                            theme_names.sort();
-                            state.status_message = Some(format!(
-                                "Themes: {}",
-                                theme_names
-                                    .into_iter()
-                                    .map(String::as_str)
-                                    .collect::<Vec<&str>>()
-                                    .join(", ")
-                            ));
                         }
-                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
+                    }
+                    "lang" => {
+                        if let Some(lang_code) = args.next() {
+                            if lang_code == "en" || lang_code == "zh" || lang_code == "zh-CN" {
+                                state.library_config.language = lang_code.to_string();
+                                state.save_library_config();
+                                state.status_message = Some(crate::i18n::t("messages.language_set", &state.library_config.language).replace("{}", lang_code));
+                            } else {
+                                state.status_message = Some(crate::i18n::t("messages.unknown_language", &state.library_config.language).replace("{}", lang_code));
+                            }
+                        } else {
+                        }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");
