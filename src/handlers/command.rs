@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "folder", "delfolder", "sort", "index", "theme", "search", "queue", "vis"];
+    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -84,7 +84,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "q" | "qa" | "wq" => {
                         state.is_running = false;
                     }
-                    "folder" => {
+                    "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
                             state.library_config.folders.push(crate::config::Folder {
@@ -201,8 +201,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
                             if state.active_view == crate::app::ActiveView::Library {
-                                if let Some(crate::models::LibraryNode::Playlist { playlist, .. }) = state.library_view.get(state.selected_playlist_index) {
-                                    return Some(AppEvent::RenamePlaylist(playlist.id.clone(), name));
+                                if let Some(node) = state.library_view.get(state.selected_playlist_index) {
+                                    match node {
+                                        crate::models::LibraryNode::Playlist { playlist, .. } => {
+                                            return Some(AppEvent::RenamePlaylist(playlist.id.clone(), name));
+                                        }
+                                        crate::models::LibraryNode::Folder(f) => {
+                                            let old_name = f.name.clone();
+                                            if let Some(idx) = state.library_config.folders.iter().position(|fd| fd.name == old_name) {
+                                                state.library_config.folders[idx].name = name.clone();
+                                            }
+                                            state.save_library_config();
+                                            state.compute_library_view();
+                                            state.status_message = Some(format!("Renamed folder to '{}'", name));
+                                            state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                                        }
+                                    }
                                 }
                             }
                         }

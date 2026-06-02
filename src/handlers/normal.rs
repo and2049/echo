@@ -459,10 +459,19 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('R') => {
             if state.active_view == ActiveView::Library {
-                if let Some(crate::models::LibraryNode::Playlist { playlist, .. }) = state.library_view.get(state.selected_playlist_index) {
-                    if Some(&playlist.owner_id) == state.user_id.as_ref() {
-                        state.mode = crate::app::AppMode::Command;
-                        state.command_buffer = format!("rename {}", playlist.name);
+                if let Some(node) = state.library_view.get(state.selected_playlist_index) {
+                    match node {
+                        crate::models::LibraryNode::Playlist { playlist, .. }
+                            if Some(&playlist.owner_id) == state.user_id.as_ref() =>
+                        {
+                            state.mode = crate::app::AppMode::Command;
+                            state.command_buffer = format!("rename {}", playlist.name);
+                        }
+                        crate::models::LibraryNode::Folder(f) => {
+                            state.mode = crate::app::AppMode::Command;
+                            state.command_buffer = format!("rename {}", f.name);
+                        }
+                        _ => {}
                     }
                 }
             }
