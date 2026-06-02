@@ -212,6 +212,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.selected_queue_index = 0;
                         return Some(crate::events::AppEvent::FetchQueue);
                     }
+                    "vis" => {
+                        if let Some(flag) = &state.playback.enable_visualizer {
+                            let current = flag.load(std::sync::atomic::Ordering::Relaxed);
+                            flag.store(!current, std::sync::atomic::Ordering::Relaxed);
+                            state.status_message = Some(if current { "Visualizer: off".to_string() } else { "Visualizer: on".to_string() });
+                        } else {
+                            state.status_message = Some("No audio playback active".to_string());
+                        }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    }
                     _ => {}
                 }
             }
