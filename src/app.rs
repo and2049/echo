@@ -150,7 +150,7 @@ pub struct AppState {
     pub recent_queue_count: usize,
     pub pending_d_press: bool,
     pub folder_delete_prompt: Option<String>,
-    pub playlist_delete_prompt: Option<String>,
+    pub playlist_delete_prompt: Option<Vec<String>>,
     pub track_delete_prompt: Option<(String, Vec<String>)>,
     pub playlist_add_modal_open: bool,
     pub selected_playlist_modal_index: usize,
@@ -266,7 +266,7 @@ impl AppState {
                 ActiveView::TrackList => self.selected_track_index,
                 ActiveView::SearchResults => self.selected_search_index,
                 ActiveView::Queue => self.selected_queue_index,
-                _ => return None,
+                ActiveView::Library => self.selected_playlist_index,
             };
             Some((std::cmp::min(start, current), std::cmp::max(start, current)))
         } else {

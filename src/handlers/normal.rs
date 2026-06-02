@@ -22,10 +22,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
-    if let Some(playlist_id) = state.playlist_delete_prompt.clone() {
+    if let Some(playlist_ids) = state.playlist_delete_prompt.clone() {
         if key.code == KeyCode::Char('y') {
             state.playlist_delete_prompt = None;
-            return Some(AppEvent::DeletePlaylist(playlist_id));
+            return Some(AppEvent::DeletePlaylists(playlist_ids));
         }
         state.playlist_delete_prompt = None;
         return None;
@@ -308,7 +308,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             } else if key.code == KeyCode::Char('d') {
                                 if Some(&playlist.owner_id) == state.user_id.as_ref() {
                                     if state.pending_d_press {
-                                        state.playlist_delete_prompt = Some(playlist.id.clone());
+                                        state.playlist_delete_prompt = Some(vec![playlist.id.clone()]);
                                         state.pending_d_press = false;
                                     } else {
                                         state.pending_d_press = true;
@@ -477,7 +477,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 ActiveView::TrackList => state.selected_track_index,
                 ActiveView::SearchResults => state.selected_search_index,
                 ActiveView::Queue => state.selected_queue_index,
-                _ => 0,
+                ActiveView::Library => state.selected_playlist_index,
             };
             state.visual_selection_start = Some(current_idx);
             state.status_message = Some("VISUAL BLOCK".to_string());

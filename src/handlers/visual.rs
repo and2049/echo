@@ -14,6 +14,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if let Some(playlist_ids) = state.playlist_delete_prompt.clone() {
+        if key.code == KeyCode::Char('y') {
+            state.playlist_delete_prompt = None;
+            state.mode = AppMode::Normal;
+            state.visual_selection_start = None;
+            return Some(AppEvent::DeletePlaylists(playlist_ids));
+        }
+        state.playlist_delete_prompt = None;
+        return None;
+    }
+
     if state.playlist_add_modal_open {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -87,7 +98,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.selected_queue_index += 1;
                     }
                 }
-                _ => {}
+                ActiveView::Library => {
+                    let max_len = if state.active_library_tab == crate::app::LibraryTab::Albums {
+                        state.saved_albums.len()
+                    } else {
+                        state.library_view.len()
+                    };
+                    if max_len > 0 && state.selected_playlist_index < max_len.saturating_sub(1) {
+                        state.selected_playlist_index += 1;
+                    }
+                }
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
@@ -109,7 +129,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.selected_queue_index -= 1;
                     }
                 }
-                _ => {}
+                ActiveView::Library => {
+                    if state.selected_playlist_index > 0 {
+                        state.selected_playlist_index -= 1;
+                    }
+                }
             }
         }
         KeyCode::Char('q') => {
@@ -144,6 +168,42 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.status_message = None;
             }
         }
+        KeyCode::Char('x') => {
+            if state.active_view == ActiveView::Library
+                && state.active_library_tab != crate::app::LibraryTab::Albums
+            {
+                if let Some((start, end)) = state.get_visual_selection_range() {
+                    let selected_ids: Vec<String> = state.library_view[start..=end]
+                        .iter()
+                        .filter_map(|node| match node {
+                            crate::models::LibraryNode::Playlist { playlist, .. } => {
+                                if playlist.id != "LIKED_SONGS" {
+                                    Some(playlist.id.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect();
+
+                    if !selected_ids.is_empty() {
+                        state.operation_register = selected_ids;
+
+                        for f in &mut state.library_config.folders {
+                            f.playlists
+                                .retain(|id| !state.operation_register.contains(id));
+                        }
+                        state.save_library_config();
+                        state.compute_library_view();
+
+                        state.mode = AppMode::Normal;
+                        state.visual_selection_start = None;
+                        state.status_message = Some("Cut playlists".to_string());
+                    }
+                }
+            }
+        }
         KeyCode::Char('d') => {
             if state.active_view == ActiveView::TrackList {
                 if let Some((start, end)) = state.get_visual_selection_range() {
@@ -157,6 +217,36 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 state.pending_d_press = true;
                             }
                         }
+                    }
+                }
+            }
+            if state.active_view == ActiveView::Library
+                && state.active_library_tab != crate::app::LibraryTab::Albums
+            {
+                if let Some((start, end)) = state.get_visual_selection_range() {
+                    if state.pending_d_press {
+                        let selected_ids: Vec<String> = state.library_view[start..=end]
+                            .iter()
+                            .filter_map(|node| match node {
+                                crate::models::LibraryNode::Playlist { playlist, .. } => {
+                                    if playlist.id != "LIKED_SONGS"
+                                        && Some(&playlist.owner_id) == state.user_id.as_ref()
+                                    {
+                                        Some(playlist.id.clone())
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            })
+                            .collect();
+
+                        if !selected_ids.is_empty() {
+                            state.playlist_delete_prompt = Some(selected_ids);
+                            state.pending_d_press = false;
+                        }
+                    } else {
+                        state.pending_d_press = true;
                     }
                 }
             }

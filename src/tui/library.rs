@@ -75,13 +75,27 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
     let library_text_width = row_text_width(library_list_area);
     frame.render_widget(library_block, library_area);
 
+    let visual_range = if is_focused && state.mode == AppMode::Visual {
+        state.get_visual_selection_range()
+    } else {
+        None
+    };
+
     let library_items: Vec<ListItem> = state
         .library_view
         .iter()
         .enumerate()
         .map(|(i, node)| {
+            let is_in_visual = if let Some((start, end)) = visual_range {
+                i >= start && i <= end
+            } else {
+                false
+            };
+
             let style = if i == state.selected_playlist_index {
                 state.active_theme.selected_style()
+            } else if is_in_visual {
+                state.active_theme.selected_style().bg(state.active_theme.primary)
             } else {
                 state.active_theme.base_style()
             };

@@ -103,11 +103,16 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(list, popup_area);
     }
 
-    if let Some(_playlist_id) = &state.playlist_delete_prompt {
+    if let Some(playlist_ids) = &state.playlist_delete_prompt {
+        let count = playlist_ids.len();
         let popup_area = centered_rect(60, 20, frame.area());
         let popup = Paragraph::new(vec![
             Line::from(Span::styled(
-                "Are you sure you want to delete this playlist?",
+                if count == 1 {
+                    "Are you sure you want to delete this playlist?".to_string()
+                } else {
+                    format!("Are you sure you want to delete these {} playlists?", count)
+                },
                 state.active_theme.error_style(),
             )),
             Line::from(""),

@@ -33,7 +33,7 @@ pub enum AppEvent {
     RemoveTracksFromPlaylist(String, Vec<String>),
     CreatePlaylist(String),
     RenamePlaylist(String, String),
-    DeletePlaylist(String),
+    DeletePlaylists(Vec<String>),
 }
 
 pub enum WorkerEvent {

@@ -410,15 +410,15 @@ impl Worker {
                                     }
                                 }
                             }
-                            AppEvent::DeletePlaylist(playlist_id) => {
+                            AppEvent::DeletePlaylists(playlist_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    if let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
-                                        let res = sp.client.playlist_unfollow(pid).await;
-                                        if res.is_ok() {
-                                            if let Ok(playlists) = sp.fetch_playlists().await {
-                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
-                                            }
+                                    for id_str in &playlist_ids {
+                                        if let Ok(pid) = rspotify::model::PlaylistId::from_id(id_str) {
+                                            let _ = sp.client.playlist_unfollow(pid).await;
                                         }
+                                    }
+                                    if let Ok(playlists) = sp.fetch_playlists().await {
+                                        let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                     }
                                 }
                             }
