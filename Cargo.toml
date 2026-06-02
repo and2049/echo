@@ -46,4 +46,12 @@ product-name = "Echo"
 identifier = "com.echo.app"
 publisher = "Echo"
 category = "Music"
+icons = [
+    "icons/icon.icns",
+    "icons/icon.ico",
+    "icons/32x32.png",
+    "icons/128x128.png",
+    "icons/icon.png",
+    "icons/128x128@2x.png"
+]
 before-packaging-command = "cargo build --release"
