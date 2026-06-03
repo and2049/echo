@@ -48,7 +48,17 @@ jobs:
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
+      - name: Clean up macOS resources
+        if: runner.os == 'macOS'
+        run: |
+          # Kill any lingering processes that might hold file locks
+          pkill -f hdiutil || true
+          pkill -f create-dmg || true
+          # Clear temporary files
+          rm -rf /tmp/*.dmg /var/tmp/*.dmg
 
+      - name: Build and Package
+        run: cargo packager --release --formats ${{ matrix.formats }}
       - name: Install cargo-packager
         run: cargo install cargo-packager --locked
 
@@ -72,7 +82,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -85,7 +95,7 @@ jobs:
           test -d artifacts
           find artifacts -type f -exec cp -v {} release-assets/ \;
           test "$(find release-assets -type f | wc -l)" -gt 0
-          
+
           gh release create v${{ inputs.version }} \
             --title "v${{ inputs.version }}" \
             --generate-notes \
