@@ -60,11 +60,23 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     let pb_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
+            Constraint::Length(2), // left padding (aligns with track cover)
+            Constraint::Length(2), // play/pause icon
             Constraint::Length(6), // current time
             Constraint::Min(0),    // gauge
             Constraint::Length(6), // duration
         ])
         .split(playback_chunks[1]);
+
+    let play_icon = if state.playback.is_playing {
+        "▌▌" // Use two half-blocks to avoid emoji rendering with a background
+    } else {
+        "▶ "
+    };
+
+    let play_icon_p = Paragraph::new(play_icon)
+        .alignment(Alignment::Left)
+        .style(state.active_theme.primary_style());
 
     let current_time_p = Paragraph::new(progress_str)
         .alignment(Alignment::Right)
@@ -78,16 +90,17 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         .ratio(ratio)
         .label(""); // hide inner text
 
-    frame.render_widget(current_time_p, pb_chunks[0]);
+    frame.render_widget(play_icon_p, pb_chunks[1]);
+    frame.render_widget(current_time_p, pb_chunks[2]);
 
     // Add a tiny margin around the gauge to separate it from the text
-    let mut gauge_area = pb_chunks[1];
+    let mut gauge_area = pb_chunks[3];
     if gauge_area.width > 2 {
         gauge_area.x += 1;
         gauge_area.width -= 2;
     }
     frame.render_widget(gauge, gauge_area);
-    frame.render_widget(total_time_p, pb_chunks[2]);
+    frame.render_widget(total_time_p, pb_chunks[4]);
 
     // Render Track Info
     let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
