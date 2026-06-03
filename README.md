@@ -74,7 +74,7 @@ Echo is heavily keyboard-driven.
 - `Q` (Shift + q): Open Queue view
 - `m`: Pin / Unpin a playlist
 - `c`: Quick shortcut to create a new playlist
-- `R` (Shift + r): Quick shortcut to rename a playlist or folder
+- `e`: Quick shortcut to rename a playlist or folder
 - `v`: Enter Visual mode for multi-selection
 - `d` (double press): Delete playlist/folder, or remove a track from your custom playlist
 - `x`: Cut playlist (to move into a folder)
