@@ -22,6 +22,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     };
     
     let mut border_title = crate::i18n::t("ui.playing", &state.library_config.language);
+    border_title = border_title.replacen("{}", &state.playback.device_name, 1);
     border_title = border_title.replacen("{}", &format!("{:<7}", shuffle_str), 1);
     border_title = border_title.replacen("{}", &format!("{:<7}", repeat_str), 1);
     border_title = border_title.replacen("{}", &format!("{:>3}", state.playback.volume), 1);

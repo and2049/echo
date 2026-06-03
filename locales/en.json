@@ -9,7 +9,7 @@
         "artist": "Artist",
         "album": "Album",
         "duration": "Duration",
-        "playing": " Playing (Shuffle: {} | Repeat: {} | Volume: {}%) ",
+        "playing": " Playing (Device: {} | Shuffle: {} | Repeat: {} | Volume: {}%) ",
         "on": "On",
         "off": "Off"
     },

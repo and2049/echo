@@ -40,6 +40,8 @@ pub enum AppEvent {
     RemoveAlbums(Vec<String>),
     ToggleTrackLike(String, bool),
     ReloadHeaderImage,
+    FetchDevices,
+    TransferPlayback(String),
 }
 
 pub enum WorkerEvent {
@@ -79,4 +81,5 @@ pub enum WorkerEvent {
     TracksQueued(usize),
     HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
+    DevicesLoaded(Vec<crate::models::Device>),
 }

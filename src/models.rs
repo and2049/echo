@@ -65,3 +65,12 @@ pub struct SearchResults {
     pub tracks: Vec<SearchTrack>,
     pub albums: Vec<SearchAlbum>,
 }
+
+#[derive(Clone, Debug)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub is_active: bool,
+    pub device_type: String,
+    pub volume_percent: u32,
+}

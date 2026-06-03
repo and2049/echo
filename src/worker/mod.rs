@@ -546,6 +546,20 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::FetchDevices => {
+                                if let Some(ref sp) = spotify_opt {
+                                    if let Ok(devices) = sp.fetch_devices().await {
+                                        let _ = self.tx.send(WorkerEvent::DevicesLoaded(devices)).await;
+                                    }
+                                }
+                            }
+                            AppEvent::TransferPlayback(device_id) => {
+                                if let Some(ref sp) = spotify_opt {
+                                    let _ = sp.transfer_playback(&device_id).await;
+                                    // Trigger a full context sync so UI updates its active device quickly
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), current_track_id.clone(), true);
+                                }
+                            }
                             AppEvent::ToggleTrackLike(track_id, like) => {
                                 if let Some(ref sp) = spotify_opt {
                                     use rspotify::model::{TrackId, LibraryId};

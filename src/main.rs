@@ -350,6 +350,12 @@ async fn main() -> Result<()> {
                     state.queue = tracks;
                     state.selected_queue_index = 0;
                 }
+                WorkerEvent::DevicesLoaded(devices) => {
+                    state.devices = devices;
+                    if state.selected_device_index >= state.devices.len() {
+                        state.selected_device_index = state.devices.len().saturating_sub(1);
+                    }
+                }
                 WorkerEvent::TracksQueued(count) => {
                     state.recent_queue_count += count;
                     state.status_message = Some(crate::i18n::t("messages.added_to_queue", &state.library_config.language).replace("{}", &count.to_string()));

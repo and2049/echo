@@ -434,4 +434,25 @@ impl SpotifyWorker {
         Ok(out)
     }
 
+    pub async fn fetch_devices(&self) -> anyhow::Result<Vec<crate::models::Device>> {
+        let mut out = Vec::new();
+        if let Ok(devices) = self.client.device().await {
+            for d in devices {
+                out.push(crate::models::Device {
+                    id: d.id.unwrap_or_default(),
+                    name: d.name,
+                    is_active: d.is_active,
+                    device_type: format!("{:?}", d._type),
+                    volume_percent: d.volume_percent.unwrap_or_default(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn transfer_playback(&self, device_id: &str) -> anyhow::Result<()> {
+        self.client.transfer_playback(device_id, Some(true)).await?;
+        Ok(())
+    }
+
 }

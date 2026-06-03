@@ -104,6 +104,35 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if state.device_modal_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                state.device_modal_open = false;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if state.selected_device_index + 1 < state.devices.len() {
+                    state.selected_device_index += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if state.selected_device_index > 0 {
+                    state.selected_device_index -= 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(device) = state.devices.get(state.selected_device_index) {
+                    state.device_modal_open = false;
+                    let id = device.id.clone();
+                    if !id.is_empty() {
+                        return Some(AppEvent::TransferPlayback(id));
+                    }
+                }
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     if key.code != KeyCode::Char('d') {
         state.pending_d_press = false;
     }
@@ -561,6 +590,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.active_view = ActiveView::Queue;
             state.selected_queue_index = 0;
             return Some(AppEvent::FetchQueue);
+        }
+        KeyCode::Char('D') => {
+            state.device_modal_open = true;
+            state.selected_device_index = 0;
+            return Some(AppEvent::FetchDevices);
         }
         KeyCode::Char(' ') => {
             state.playback.is_playing = !state.playback.is_playing;

@@ -184,6 +184,9 @@ pub struct AppState {
     pub tracklist_image_url: Option<String>,
     pub visual_selection_start: Option<usize>,
     pub liked_tracks: std::collections::HashSet<String>,
+    pub device_modal_open: bool,
+    pub devices: Vec<crate::models::Device>,
+    pub selected_device_index: usize,
 }
 
 impl AppState {
@@ -266,6 +269,9 @@ impl AppState {
             tracklist_image_url: None,
             visual_selection_start: None,
             liked_tracks: std::collections::HashSet::new(),
+            device_modal_open: false,
+            devices: Vec::new(),
+            selected_device_index: 0,
         }
     }
 

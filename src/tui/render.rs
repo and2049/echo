@@ -286,6 +286,47 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_stateful_widget(list, popup_area, &mut list_state);
     }
 
+    if state.device_modal_open {
+        let popup_area = centered_rect(50, 60, frame.area());
+        
+        let items: Vec<ratatui::widgets::ListItem> = state.devices
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                let mut style = if i == state.selected_device_index {
+                    state.active_theme.selected_style()
+                } else {
+                    state.active_theme.base_style()
+                };
+                
+                let active_marker = if d.is_active { " [Active]" } else { "" };
+                let text = format!("{} ({}%){}", d.name, d.volume_percent, active_marker);
+                
+                if d.is_active && i != state.selected_device_index {
+                    style = style.fg(state.active_theme.primary);
+                }
+                
+                ratatui::widgets::ListItem::new(text).style(style)
+            })
+            .collect();
+
+        let list = ratatui::widgets::List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Switch Device ")
+                    .style(state.active_theme.base_style())
+                    .border_style(state.active_theme.primary_style()),
+            )
+            .highlight_style(state.active_theme.selected_style());
+
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(state.selected_device_index));
+
+        frame.render_widget(ratatui::widgets::Clear, popup_area);
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
+    }
+
     // Check if we are waiting for discovery
     if std::path::Path::new("echo-librespot-status.log").exists() {
         let popup_area = centered_rect(60, 30, frame.area());
