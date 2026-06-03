@@ -28,7 +28,7 @@ Or
 Clone the repository and build using Cargo:
 
 ```bash
-git clone https://github.com/sun/echo.git
+git clone https://github.com/and2049/echo.git
 cd echo
 cargo build --release
 ```
