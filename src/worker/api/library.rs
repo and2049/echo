@@ -57,9 +57,6 @@ impl SpotifyWorker {
                     return Err(e.into());
                 }
             }
-            if out.len() >= 100 {
-                break;
-            }
         }
         Ok(out)
     }
