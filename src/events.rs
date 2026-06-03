@@ -45,6 +45,7 @@ pub enum AppEvent {
     ToggleLyricsModal,
     ToggleCondensedLyrics,
     FetchLyrics(String, String, String, u32),
+    ForcePlaybackSync,
 }
 
 pub enum WorkerEvent {

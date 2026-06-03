@@ -32,10 +32,11 @@ impl Worker {
         tokio::spawn(async move {
             let mut log = String::from("=== spawn_playback_sync started ===\n");
 
-            for attempt in 0..5u32 {
-                let wait_secs = attempt + 1;
-                log.push_str(&format!("Attempt {}: waiting {}s...\n", attempt, wait_secs));
-                tokio::time::sleep(std::time::Duration::from_secs(wait_secs as u64)).await;
+            for attempt in 0..10u32 {
+                if attempt > 0 {
+                    log.push_str(&format!("Attempt {}: waiting 500ms...\n", attempt));
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
 
                 let result = SpotifyWorker::playback_snapshot_from_client(&client).await;
 
@@ -97,7 +98,7 @@ impl Worker {
                 }
             }
 
-            log.push_str("All 5 attempts exhausted without a valid duration_ms. Giving up.\n");
+            log.push_str("All 10 attempts exhausted without a valid duration_ms. Giving up.\n");
             let _ = std::fs::write("echo-debug-sync.log", &log);
         });
     }
@@ -581,6 +582,11 @@ impl Worker {
                                             let _ = sp.client.library_remove([lib_id]).await;
                                         }
                                     }
+                                }
+                            }
+                            AppEvent::ForcePlaybackSync => {
+                                if let Some(ref sp) = spotify_opt {
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), current_track_id.clone(), true);
                                 }
                             }
                             _ => {}

@@ -248,6 +248,7 @@ async fn main() -> Result<()> {
                             && state.playback.progress_ms >= state.playback.duration_ms
                         {
                             state.playback.is_playing = false; // song ended
+                            let _ = app_tx.try_send(AppEvent::ForcePlaybackSync);
                         }
                     }
                 }
