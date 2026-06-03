@@ -160,18 +160,25 @@ impl Worker {
                                             let tx = self.tx.clone();
                                             tokio::spawn(async move {
                                                 use futures_util::stream::StreamExt;
-                                                let mut tracks = std::collections::HashSet::new();
+                                                let mut cache = crate::config::AppConfig::load_cache();
+                                                let mut tracks = cache.liked_tracks.clone();
+                                                
                                                 let mut stream = client.current_user_saved_tracks(None);
+                                                let mut fetched_count = 0;
+                                                
                                                 while let Some(item) = stream.next().await {
                                                     if let Ok(saved_track) = item {
                                                         if let Some(id) = saved_track.track.id {
                                                             tracks.insert(id.id().to_string());
                                                         }
                                                     }
+                                                    fetched_count += 1;
+                                                    if fetched_count >= 100 {
+                                                        break; // Only fetch the 100 most recent liked songs on startup to avoid rate limits
+                                                    }
                                                 }
                                                 
                                                 if !tracks.is_empty() {
-                                                    let mut cache = crate::config::AppConfig::load_cache();
                                                     cache.liked_tracks = tracks.clone();
                                                     let _ = crate::config::AppConfig::save_cache(&cache);
                                                     
@@ -404,21 +411,74 @@ impl Worker {
                             }
                             AppEvent::CreatePlaylist(name) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    // The user's Spotify user ID is needed to create a playlist
-                                    // rspotify provides `current_user()` to get the profile, or we can use the ID if we have it
-                                    if let Ok(me) = sp.client.current_user().await {
-                                        let res = sp.client.user_playlist_create(
-                                            me.id,
-                                            &name,
-                                            Some(false), // public = false
-                                            Some(false), // collaborative = false
-                                            Some("Created by echo-rs"),
-                                        ).await;
-                                        if res.is_ok()
-                                            && let Ok(playlists) = sp.fetch_playlists().await {
-                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                    let client = sp.client.clone();
+                                    let tx = self.tx.clone();
+                                    tokio::spawn(async move {
+                                        use rspotify::prelude::Id;
+                                        
+                                        let mut created = false;
+                                        
+                                        // 1. Try standard current_user approach first
+                                        if let Ok(me) = client.current_user().await {
+                                            if client.user_playlist_create(
+                                                me.id.clone(),
+                                                &name,
+                                                Some(false),
+                                                Some(false),
+                                                Some("Created by echo-rs"),
+                                            ).await.is_ok() {
+                                                created = true;
                                             }
-                                    }
+                                        }
+                                        
+                                        // 2. Workaround: If current_user failed (e.g. 429 rate limit on /me), 
+                                        // fetch playlists and try creating with the owner ID of existing playlists.
+                                        // current_user_playlists_manual is on /me/playlists which often escapes the /me block.
+                                        if !created {
+                                            if let Ok(page) = client.current_user_playlists_manual(None, None).await {
+                                                // Collect unique owner IDs from playlists
+                                                let mut owner_ids = std::collections::HashSet::new();
+                                                for p in &page.items {
+                                                    owner_ids.insert(p.owner.id.clone());
+                                                }
+                                                
+                                                // Try creating the playlist with each unique owner ID. 
+                                                // Only the actual user's ID will succeed (others will 403 Forbidden).
+                                                for uid in owner_ids {
+                                                    if client.user_playlist_create(
+                                                        uid,
+                                                        &name,
+                                                        Some(false),
+                                                        Some(false),
+                                                        Some("Created by echo-rs"),
+                                                    ).await.is_ok() {
+                                                        created = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        if created {
+                                            // Refresh playlists
+                                            let page_res = client.current_user_playlists_manual(None, None).await;
+                                            if let Ok(page) = page_res {
+                                                let mut out = Vec::new();
+                                                for p in page.items {
+                                                    let owner = p.owner.display_name.clone().unwrap_or_else(|| p.owner.id.id().to_string());
+                                                    let owner_id = p.owner.id.id().to_string();
+                                                    out.push(crate::models::Playlist {
+                                                        id: p.id.id().to_string(),
+                                                        name: p.name,
+                                                        owner,
+                                                        owner_id,
+                                                        image_url: p.images.first().map(|i| i.url.clone()),
+                                                    });
+                                                }
+                                                let _ = tx.send(WorkerEvent::PlaylistsLoaded(out)).await;
+                                            }
+                                        }
+                                    });
                                 }
                             }
                             AppEvent::RenamePlaylist(playlist_id, new_name) => {

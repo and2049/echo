@@ -155,7 +155,8 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
             let mut bars = Vec::with_capacity(32);
             for i in 0..32 {
                 let val = bands[i];
-                let color = if val > 60.0 { state.active_theme.primary } else { state.active_theme.secondary };
+                let ratio = (val / 100.0).clamp(0.0, 1.0);
+                let color = interpolate_color(state.active_theme.secondary, state.active_theme.primary, ratio);
                 let bar = Bar::default().value(val as u64).style(ratatui::style::Style::default().fg(color));
                 bars.push(bar);
             }
@@ -173,4 +174,38 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
                 .max(100);
             frame.render_widget(barchart, vis_area);
         }
+}
+
+fn color_to_rgb(c: ratatui::style::Color) -> (u8, u8, u8) {
+    match c {
+        ratatui::style::Color::Rgb(r, g, b) => (r, g, b),
+        ratatui::style::Color::Black => (0, 0, 0),
+        ratatui::style::Color::Red => (255, 0, 0),
+        ratatui::style::Color::Green => (0, 255, 0),
+        ratatui::style::Color::Yellow => (255, 255, 0),
+        ratatui::style::Color::Blue => (0, 0, 255),
+        ratatui::style::Color::Magenta => (255, 0, 255),
+        ratatui::style::Color::Cyan => (0, 255, 255),
+        ratatui::style::Color::Gray => (128, 128, 128),
+        ratatui::style::Color::DarkGray => (64, 64, 64),
+        ratatui::style::Color::LightRed => (255, 128, 128),
+        ratatui::style::Color::LightGreen => (128, 255, 128),
+        ratatui::style::Color::LightYellow => (255, 255, 128),
+        ratatui::style::Color::LightBlue => (128, 128, 255),
+        ratatui::style::Color::LightMagenta => (255, 128, 255),
+        ratatui::style::Color::LightCyan => (128, 255, 255),
+        ratatui::style::Color::White => (255, 255, 255),
+        _ => (255, 255, 255),
+    }
+}
+
+fn interpolate_color(c1: ratatui::style::Color, c2: ratatui::style::Color, ratio: f32) -> ratatui::style::Color {
+    let rgb1 = color_to_rgb(c1);
+    let rgb2 = color_to_rgb(c2);
+    
+    let r = (rgb1.0 as f32 + (rgb2.0 as f32 - rgb1.0 as f32) * ratio) as u8;
+    let g = (rgb1.1 as f32 + (rgb2.1 as f32 - rgb1.1 as f32) * ratio) as u8;
+    let b = (rgb1.2 as f32 + (rgb2.2 as f32 - rgb1.2 as f32) * ratio) as u8;
+    
+    ratatui::style::Color::Rgb(r, g, b)
 }

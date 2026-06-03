@@ -42,14 +42,20 @@ impl SpotifyWorker {
 
         let mut stream = Box::pin(stream);
         while let Some(item) = stream.next().await {
-            if let Ok(saved_album) = item {
-                let album = saved_album.album;
-                out.push(crate::models::Album {
-                    id: album.id.id().to_string(),
-                    name: album.name,
-                    artists: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
-                    image_url: album.images.first().map(|i| i.url.clone()),
-                });
+            match item {
+                Ok(saved_album) => {
+                    let album = saved_album.album;
+                    out.push(crate::models::Album {
+                        id: album.id.id().to_string(),
+                        name: album.name,
+                        artists: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        image_url: album.images.first().map(|i| i.url.clone()),
+                    });
+                }
+                Err(e) => {
+                    let _ = std::fs::write("echo-debug-albums.log", format!("Albums fetch error: {:?}", e));
+                    return Err(e.into());
+                }
             }
             if out.len() >= 100 {
                 break;

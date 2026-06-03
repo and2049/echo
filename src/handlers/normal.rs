@@ -571,13 +571,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.mode = crate::app::AppMode::Command;
                 state.command_buffer = "newplaylist ".to_string();
             }
-        KeyCode::Char('R') => {
+        KeyCode::Char('e') => {
             if state.active_view == ActiveView::Library
                 && let Some(node) = state.library_view.get(state.selected_playlist_index) {
                     match node {
-                        crate::models::LibraryNode::Playlist { playlist, .. }
-                            if Some(&playlist.owner_id) == state.user_id.as_ref() =>
-                        {
+                        crate::models::LibraryNode::Playlist { playlist, .. } => {
                             state.mode = crate::app::AppMode::Command;
                             state.command_buffer = format!("rename {}", playlist.name);
                         }
@@ -585,7 +583,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.mode = crate::app::AppMode::Command;
                             state.command_buffer = format!("rename {}", f.name);
                         }
-                        _ => {}
                     }
                 }
         }

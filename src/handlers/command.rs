@@ -254,6 +254,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "newplaylist" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
+                            state.status_message = Some(format!("Creating playlist '{}'...", name));
+                            state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(AppEvent::CreatePlaylist(name));
                         }
                     }
