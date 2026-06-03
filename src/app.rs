@@ -181,6 +181,7 @@ pub struct AppState {
     pub queue: Vec<crate::models::Track>,
     pub selected_queue_index: usize,
     pub tracklist_context_metadata: Option<(String, String, String, String)>,
+    pub tracklist_image_url: Option<String>,
     pub visual_selection_start: Option<usize>,
     pub liked_tracks: std::collections::HashSet<String>,
 }
@@ -262,6 +263,7 @@ impl AppState {
             queue: Vec::new(),
             selected_queue_index: 0,
             tracklist_context_metadata: None,
+            tracklist_image_url: None,
             visual_selection_start: None,
             liked_tracks: std::collections::HashSet::new(),
         }

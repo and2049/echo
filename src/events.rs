@@ -39,6 +39,7 @@ pub enum AppEvent {
     SaveAlbums(Vec<String>),
     RemoveAlbums(Vec<String>),
     ToggleTrackLike(String, bool),
+    ReloadHeaderImage,
 }
 
 pub enum WorkerEvent {

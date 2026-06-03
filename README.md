@@ -92,6 +92,7 @@ While in Command Mode (`:`), you can use the following:
 - `:album`: Jump to the album of the currently selected track.
 - `:queue`: Open the Queue view.
 - `:vis`: Toggle the audio visualizer.
+- `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
 

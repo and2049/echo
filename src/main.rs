@@ -23,6 +23,7 @@ fn spawn_track_image_processing(
     url: String,
     picker: &ratatui_image::picker::Picker,
     tx: mpsc::Sender<WorkerEvent>,
+    pixels: u32,
 ) {
     let picker_clone = picker.clone();
 
@@ -30,7 +31,11 @@ fn spawn_track_image_processing(
         if let Ok(resp) = reqwest::get(&url).await
             && let Ok(bytes) = resp.bytes().await
                 && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
-                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                    if let Ok(mut dyn_img) = image::load_from_memory(&bytes) {
+                        if pixels > 0 {
+                            let pixelated = dyn_img.resize(pixels, pixels, image::imageops::FilterType::Nearest);
+                            dyn_img = pixelated.resize(dyn_img.width(), dyn_img.height(), image::imageops::FilterType::Nearest);
+                        }
                         let protocol = picker_clone.new_resize_protocol(dyn_img);
                         return Some(protocol);
                     }
@@ -49,6 +54,7 @@ fn spawn_header_image_processing(
     url: String,
     picker: &ratatui_image::picker::Picker,
     tx: mpsc::Sender<WorkerEvent>,
+    pixels: u32,
 ) {
     let picker_clone = picker.clone();
 
@@ -56,7 +62,11 @@ fn spawn_header_image_processing(
         if let Ok(resp) = reqwest::get(&url).await
             && let Ok(bytes) = resp.bytes().await
                 && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
-                    if let Ok(dyn_img) = image::load_from_memory(&bytes) {
+                    if let Ok(mut dyn_img) = image::load_from_memory(&bytes) {
+                        if pixels > 0 {
+                            let pixelated = dyn_img.resize(pixels, pixels, image::imageops::FilterType::Nearest);
+                            dyn_img = pixelated.resize(dyn_img.width(), dyn_img.height(), image::imageops::FilterType::Nearest);
+                        }
                         let protocol = picker_clone.new_resize_protocol(dyn_img);
                         return Some(protocol);
                     }
@@ -147,11 +157,20 @@ async fn main() -> Result<()> {
 
                         if let Some(ev) = outgoing_event {
                             if let AppEvent::LoadContextTracks(_, _, ref img_url, _) = ev {
-                                if let Some(url) = img_url
-                                    && let Some(picker) = &state.image_picker {
-                                        spawn_header_image_processing(url.clone(), picker, worker_tx_clone.clone());
-                                }
+                                    if let Some(url) = img_url {
+                                        state.tracklist_image_url = Some(url.clone());
+                                        if let Some(picker) = &state.image_picker {
+                                            spawn_header_image_processing(url.clone(), picker, worker_tx_clone.clone(), state.library_config.cover_img_pixels);
+                                        }
+                                    }
                                 let _ = app_tx.send(ev).await;
+                            } else if let AppEvent::ReloadHeaderImage = ev {
+                                if let Some(url) = &state.tracklist_image_url {
+                                    if !url.is_empty()
+                                        && let Some(picker) = &state.image_picker {
+                                            spawn_header_image_processing(url.clone(), picker, worker_tx_clone.clone(), state.library_config.cover_img_pixels);
+                                        }
+                                }
                             } else {
                                 let _ = app_tx.send(ev).await;
                             }
@@ -188,14 +207,6 @@ async fn main() -> Result<()> {
                     state.tracklist_context_metadata = metadata.clone();
                     state.active_view = app::ActiveView::TrackList;
                     state.selected_track_index = 0;
-                    
-                    if let Some(m) = metadata {
-                        let url = m.3;
-                        if !url.is_empty()
-                            && let Some(picker) = &state.image_picker {
-                                spawn_header_image_processing(url, picker, worker_tx_clone.clone());
-                            }
-                    }
                 }
                 WorkerEvent::PlaybackStarted { item } => {
                     state.playback.is_playing = true;
@@ -213,6 +224,7 @@ async fn main() -> Result<()> {
                                 url,
                                 picker,
                                 worker_tx_clone.clone(),
+                                state.library_config.cover_img_pixels,
                             );
                         }
                     } else {
@@ -275,6 +287,7 @@ async fn main() -> Result<()> {
                                         url,
                                         picker,
                                         worker_tx_clone.clone(),
+                                        state.library_config.cover_img_pixels,
                                     );
                                 }
                             }
@@ -303,6 +316,7 @@ async fn main() -> Result<()> {
                                 url,
                                 picker,
                                 worker_tx_clone.clone(),
+                                state.library_config.cover_img_pixels,
                             );
                         }
                 }

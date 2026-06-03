@@ -53,6 +53,8 @@ pub struct LibraryConfig {
     pub track_index_base: isize,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default)]
+    pub cover_img_pixels: u32,
 }
 
 impl Default for LibraryConfig {
@@ -64,6 +66,7 @@ impl Default for LibraryConfig {
             active_theme: None,
             track_index_base: 1,
             language: "en".to_string(),
+            cover_img_pixels: 0,
         }
     }
 }

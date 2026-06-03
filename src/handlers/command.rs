@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album", "lang", "newplaylist", "rename"];
+    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album", "lang", "newplaylist", "rename", "pixelate"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -187,6 +187,28 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         } else {
                         }
                         state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
+                    }
+                    "pixelate" => {
+                        if let Some(pixel_str) = args.next() {
+                            if let Ok(pixels) = pixel_str.parse::<u32>() {
+                                state.library_config.cover_img_pixels = pixels;
+                                state.save_library_config();
+                                state.status_message = Some(format!("Pixelate effect set to {}", pixels));
+                                
+                                // Transfer current track image to previous to prevent blanking during re-fetch
+                                state.playback.previous_track_image = state.playback.playing_track_image.take();
+                                state.playback.fetching_track_id = None;
+                                
+                                if state.active_view == crate::app::ActiveView::TrackList {
+                                    return Some(crate::events::AppEvent::ReloadHeaderImage);
+                                }
+                            } else {
+                                state.status_message = Some("Invalid pixel value, must be a number".to_string());
+                            }
+                        } else {
+                            state.status_message = Some(format!("Current pixelate value: {}", state.library_config.cover_img_pixels));
+                        }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");
