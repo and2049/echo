@@ -66,7 +66,6 @@ Echo is heavily keyboard-driven.
 - `D` (Shift + d): Open Device Selection menu
 - `L` (Shift + l): Toggle full-screen Synced Lyrics modal
 - `Ctrl + Shift + L`: Toggle condensed Synced Lyrics view
-- `vis`: (Command) Toggle audio visualizer
 
 ### Track & Library Actions
 - `l`: Like / Unlike the selected track
