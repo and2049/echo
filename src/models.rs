@@ -74,3 +74,15 @@ pub struct Device {
     pub device_type: String,
     pub volume_percent: u32,
 }
+
+#[derive(Clone, Debug)]
+pub struct LyricLine {
+    pub start_ms: u32,
+    pub text: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct Lyrics {
+    pub lines: Vec<LyricLine>,
+}
+

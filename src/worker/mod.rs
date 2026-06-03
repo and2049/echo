@@ -546,6 +546,16 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::FetchLyrics(_track_id, title, artist, duration_ms) => {
+                                match api::lyrics::fetch_lyrics(&title, &artist, duration_ms).await {
+                                    Ok(lyrics) => {
+                                        let _ = self.tx.send(WorkerEvent::LyricsLoaded(lyrics)).await;
+                                    }
+                                    Err(_) => {
+                                        let _ = self.tx.send(WorkerEvent::LyricsLoaded(None)).await;
+                                    }
+                                }
+                            }
                             AppEvent::FetchDevices => {
                                 if let Some(ref sp) = spotify_opt {
                                     if let Ok(devices) = sp.fetch_devices().await {

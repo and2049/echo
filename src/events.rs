@@ -42,6 +42,9 @@ pub enum AppEvent {
     ReloadHeaderImage,
     FetchDevices,
     TransferPlayback(String),
+    ToggleLyricsModal,
+    ToggleCondensedLyrics,
+    FetchLyrics(String, String, String, u32),
 }
 
 pub enum WorkerEvent {
@@ -82,4 +85,5 @@ pub enum WorkerEvent {
     HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
     DevicesLoaded(Vec<crate::models::Device>),
+    LyricsLoaded(Option<crate::models::Lyrics>),
 }

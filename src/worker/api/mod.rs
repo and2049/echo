@@ -1,6 +1,7 @@
 pub mod library;
 pub mod playback;
 pub mod search;
+pub mod lyrics;
 
 use crate::config::AppConfig;
 use anyhow::Result;

@@ -105,21 +105,38 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     // Render Track Info
     let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+    
     let mut constraints = vec![
-        Constraint::Length(2),  // Left padding
-        Constraint::Length(10), // Image width
-        Constraint::Length(2),  // Middle gap to text
-        Constraint::Min(0),     // Text width
+        Constraint::Length(2),  // 0: Left padding
+        Constraint::Length(10), // 1: Image width
+        Constraint::Length(2),  // 2: Middle gap to text
+        Constraint::Length(35), // 3: Text width
+        Constraint::Min(0),     // 4: Gap to visualizer
     ];
+    
+    let text_idx = 3;
+    let mut vis_idx = None;
+
     if is_vis_enabled {
-        constraints.push(Constraint::Length(4));  // Gap to visualizer
+        let v_idx = constraints.len();
         constraints.push(Constraint::Length(32)); // Visualizer width
         constraints.push(Constraint::Length(2));  // Right padding
+        vis_idx = Some(v_idx);
     }
-    
+
     let track_info_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
+        .split(playback_chunks[0]);
+
+    // Independent Layout for perfectly centered lyrics
+    let lyrics_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(25),
+            Constraint::Percentage(50),
+            Constraint::Percentage(25),
+        ])
         .split(playback_chunks[0]);
 
     let protocol = state
@@ -160,33 +177,95 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         .style(state.active_theme.base_style())
         // Add top padding to vertically align with the center of the image
         .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
-    frame.render_widget(track_text_p, track_info_chunks[3]);
+    frame.render_widget(track_text_p, track_info_chunks[text_idx]);
+
+    // Render Condensed Lyrics perfectly centered
+    if state.condensed_lyrics_enabled {
+        if let Some(lyrics) = &state.current_lyrics {
+            let mut current_lyric_idx = 0;
+            let current_progress = state.playback.progress_ms;
+            for (i, line) in lyrics.lines.iter().enumerate() {
+                if line.start_ms <= current_progress {
+                    current_lyric_idx = i;
+                } else {
+                    break;
+                }
+            }
+            
+            let current_line = lyrics.lines.get(current_lyric_idx).map(|l| l.text.as_str()).unwrap_or("");
+            let next_line = lyrics.lines.get(current_lyric_idx + 1).map(|l| l.text.as_str()).unwrap_or("");
+
+            let lyrics_lines = vec![
+                Line::from(Span::styled(current_line, state.active_theme.primary_style().add_modifier(Modifier::BOLD))),
+                Line::from(Span::styled(next_line, state.active_theme.muted_style())),
+            ];
+            
+            let lyrics_p = Paragraph::new(lyrics_lines)
+                .alignment(Alignment::Center)
+                .style(state.active_theme.base_style())
+                .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
+            frame.render_widget(lyrics_p, lyrics_layout[1]);
+        }
+    }
 
     if is_vis_enabled
         && let Some(shared_bands) = &state.playback.audio_visualization
         && let Some(bands) = shared_bands.try_lock() {
             use ratatui::widgets::{BarChart, BarGroup, Bar};
-            let mut bars = Vec::with_capacity(32);
-            for i in 0..32 {
-                let val = bands[i];
+            let c_primary = state.active_theme.primary;
+            let c_secondary = state.active_theme.secondary;
+            let c_mid_low = interpolate_color(c_secondary, c_primary, 0.33);
+            let c_mid_high = interpolate_color(c_secondary, c_primary, 0.66);
+
+            let num_bins = state.vis_bins.clamp(5, 32);
+            let mut bars = Vec::with_capacity(num_bins);
+            let chunk_size = 32.0 / num_bins as f32;
+
+            for i in 0..num_bins {
+                let start_idx = (i as f32 * chunk_size).floor() as usize;
+                let mut end_idx = ((i + 1) as f32 * chunk_size).floor() as usize;
+                if i == num_bins - 1 {
+                    end_idx = 32;
+                }
+                
+                let mut sum = 0.0;
+                let mut count = 0;
+                for j in start_idx..end_idx {
+                    sum += bands[j];
+                    count += 1;
+                }
+                let val = if count > 0 { sum / count as f32 } else { 0.0 };
+                
                 let ratio = (val / 100.0).clamp(0.0, 1.0);
-                let color = interpolate_color(state.active_theme.secondary, state.active_theme.primary, ratio);
-                let bar = Bar::default().value(val as u64).style(ratatui::style::Style::default().fg(color));
+                
+                let color = if ratio < 0.25 {
+                    c_secondary
+                } else if ratio < 0.50 {
+                    c_mid_low
+                } else if ratio < 0.75 {
+                    c_mid_high
+                } else {
+                    c_primary
+                };
+                
+                let bar = Bar::default().value(val as u64).text_value("").style(ratatui::style::Style::default().fg(color));
                 bars.push(bar);
             }
             
-            let mut vis_area = track_info_chunks[5];
-            if vis_area.height >= 7 {
-                vis_area.y += 2;
-                vis_area.height = 4;
-            }
-            
+            let bw = (32 / num_bins).max(1) as u16;
             let barchart = BarChart::default()
                 .data(BarGroup::default().bars(&bars))
-                .bar_width(1)
+                .bar_width(bw)
                 .bar_gap(0)
                 .max(100);
-            frame.render_widget(barchart, vis_area);
+            if let Some(idx) = vis_idx {
+                let mut vis_area = track_info_chunks[idx];
+                if vis_area.height >= 7 {
+                    vis_area.y += 2;
+                    vis_area.height = 4;
+                }
+                frame.render_widget(barchart, vis_area);
+            }
         }
 }
 

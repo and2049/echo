@@ -63,6 +63,9 @@ Echo is heavily keyboard-driven.
 - `r`: Toggle Repeat Mode (Off → Track → Context)
 - `=` / `-`: Volume Up / Down (by 1%)
 - `+` / `_`: Volume Up / Down (by 5%)
+- `D` (Shift + d): Open Device Selection menu
+- `L` (Shift + l): Toggle full-screen Synced Lyrics modal
+- `Ctrl + Shift + L`: Toggle condensed Synced Lyrics view
 - `vis`: (Command) Toggle audio visualizer
 
 ### Track & Library Actions
@@ -92,6 +95,7 @@ While in Command Mode (`:`), you can use the following:
 - `:album`: Jump to the album of the currently selected track.
 - `:queue`: Open the Queue view.
 - `:vis`: Toggle the audio visualizer.
+- `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.

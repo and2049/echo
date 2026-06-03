@@ -57,6 +57,14 @@ pub struct LibraryConfig {
     pub language: String,
     #[serde(default)]
     pub cover_img_pixels: u32,
+    #[serde(default)]
+    pub condensed_lyrics_enabled: bool,
+    #[serde(default = "default_vis_bins")]
+    pub vis_bins: usize,
+}
+
+fn default_vis_bins() -> usize {
+    9
 }
 
 impl Default for LibraryConfig {
@@ -69,6 +77,8 @@ impl Default for LibraryConfig {
             track_index_base: 1,
             language: "en".to_string(),
             cover_img_pixels: 0,
+            condensed_lyrics_enabled: false,
+            vis_bins: 7,
         }
     }
 }

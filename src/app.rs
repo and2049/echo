@@ -187,11 +187,19 @@ pub struct AppState {
     pub device_modal_open: bool,
     pub devices: Vec<crate::models::Device>,
     pub selected_device_index: usize,
+    pub lyrics_modal_open: bool,
+    pub condensed_lyrics_enabled: bool,
+    pub current_lyrics: Option<crate::models::Lyrics>,
+    pub current_lyric_track_id: Option<String>,
+    pub is_fetching_lyrics: bool,
+    pub vis_bins: usize,
 }
 
 impl AppState {
     pub fn new() -> Self {
         let config = crate::config::AppConfig::load();
+        let condensed_lyrics_enabled = config.library.condensed_lyrics_enabled;
+        let vis_bins = config.library.vis_bins;
 
         let themes = crate::config::load_themes().unwrap_or_else(|_| {
             let mut fallback = std::collections::HashMap::new();
@@ -272,6 +280,12 @@ impl AppState {
             device_modal_open: false,
             devices: Vec::new(),
             selected_device_index: 0,
+            lyrics_modal_open: false,
+            condensed_lyrics_enabled,
+            current_lyrics: None,
+            current_lyric_track_id: None,
+            is_fetching_lyrics: false,
+            vis_bins,
         }
     }
 

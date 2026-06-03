@@ -133,6 +133,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    if state.lyrics_modal_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('L') => {
+                state.lyrics_modal_open = false;
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     if key.code != KeyCode::Char('d') {
         state.pending_d_press = false;
     }
@@ -235,6 +245,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         return Some(AppEvent::ToggleTrackLike(track_id, true));
                     }
                 }
+            }
+        }
+        KeyCode::Char('L') => {
+            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                state.condensed_lyrics_enabled = !state.condensed_lyrics_enabled;
+                let mut app_config = crate::config::AppConfig::load();
+                app_config.library.condensed_lyrics_enabled = state.condensed_lyrics_enabled;
+                let _ = app_config.save();
+            } else {
+                state.lyrics_modal_open = !state.lyrics_modal_open;
             }
         }
         KeyCode::Enter | KeyCode::Char('z') => {

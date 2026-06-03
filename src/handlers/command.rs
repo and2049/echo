@@ -3,7 +3,7 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "album", "lang", "newplaylist", "rename", "pixelate"];
+    let commands = vec!["q", "qa", "wq", "newfolder", "delfolder", "sort", "index", "theme", "search", "queue", "vis", "visbins", "album", "lang", "newplaylist", "rename", "pixelate"];
     let mut parts = state.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -293,6 +293,25 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.status_message = Some(if current { "Visualizer: off".to_string() } else { "Visualizer: on".to_string() });
                         } else {
                             state.status_message = Some("No audio playback active".to_string());
+                        }
+                        state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    }
+                    "visbins" => {
+                        if let Some(bins_str) = args.next() {
+                            if let Ok(bins) = bins_str.parse::<usize>() {
+                                if bins >= 5 && bins <= 32 {
+                                    state.vis_bins = bins;
+                                    state.library_config.vis_bins = bins;
+                                    state.save_library_config();
+                                    state.status_message = Some(format!("Visualizer bins set to {}", bins));
+                                } else {
+                                    state.status_message = Some("Bins must be between 5 and 32".to_string());
+                                }
+                            } else {
+                                state.status_message = Some("Invalid number".to_string());
+                            }
+                        } else {
+                            state.status_message = Some(format!("Current visbins: {}", state.vis_bins));
                         }
                         state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }

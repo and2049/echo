@@ -38,6 +38,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         ])
         .split(frame.area());
 
+    let main_content_area = chunks[0];
+    let playback_bar_area = chunks[1];
+    let command_bar_area = chunks[2];
+
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -45,7 +49,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Constraint::Length(1),
             Constraint::Percentage(70),
         ])
-        .split(chunks[0]);
+        .split(main_content_area);
     let library_area = main_chunks[0];
     let tracks_area = main_chunks[2];
 
@@ -59,7 +63,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         crate::tui::library::render_track_list(frame, state, tracks_area);
     }
 
-    crate::tui::playback::render_playback_bar(frame, state, chunks[1]);
+    crate::tui::playback::render_playback_bar(frame, state, playback_bar_area);
 
     // Render Command Bar
     let (cmd_text, cmd_style) = match state.mode {
@@ -77,14 +81,14 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         ),
     };
     let cmd_bar = Paragraph::new(cmd_text).style(cmd_style);
-    frame.render_widget(cmd_bar, chunks[2]);
+    frame.render_widget(cmd_bar, command_bar_area);
 
     if state.mode == AppMode::Command && !state.command_suggestions.is_empty() {
         let max_len = state.command_suggestions.iter().map(|s| s.len()).max().unwrap_or(10) as u16;
         let width = max_len + 4;
         let height = state.command_suggestions.len() as u16 + 2; 
         let x = 2; 
-        let y = chunks[2].y.saturating_sub(height);
+        let y = command_bar_area.y.saturating_sub(height);
         let popup_area = Rect { x, y, width, height }; 
         
         let items: Vec<ratatui::widgets::ListItem> = state.command_suggestions.iter().enumerate().map(|(i, s)| {
@@ -353,6 +357,72 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
+    }
+    
+    render_lyrics_modal(frame, state);
+}
+
+pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
+    if !state.lyrics_modal_open { return; }
+
+    let popup_area = centered_rect(60, 80, frame.area());
+    
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Lyrics ")
+        .style(state.active_theme.base_style())
+        .border_style(state.active_theme.primary_style());
+        
+    frame.render_widget(ratatui::widgets::Clear, popup_area);
+
+    if state.is_fetching_lyrics {
+        let p = Paragraph::new("Loading lyrics...").alignment(Alignment::Center).block(block).style(state.active_theme.base_style());
+        frame.render_widget(p, popup_area);
+        return;
+    }
+
+    if let Some(lyrics) = &state.current_lyrics {
+        let pb = &state.playback;
+        let mut current_idx = 0;
+        
+        for (i, line) in lyrics.lines.iter().enumerate() {
+            if line.start_ms <= pb.progress_ms {
+                current_idx = i;
+            } else {
+                break;
+            }
+        }
+        
+        let mut items = Vec::new();
+        for (i, line) in lyrics.lines.iter().enumerate() {
+            let style = if i == current_idx {
+                state.active_theme.primary_style().add_modifier(Modifier::BOLD)
+            } else if i > current_idx {
+                state.active_theme.muted_style()
+            } else {
+                state.active_theme.base_style()
+            };
+            items.push(ratatui::widgets::ListItem::new(line.text.clone()).style(style));
+        }
+
+        let list = ratatui::widgets::List::new(items)
+            .block(block)
+            .highlight_style(state.active_theme.primary_style().add_modifier(Modifier::BOLD));
+
+        let mut list_state = ratatui::widgets::ListState::default();
+        
+        // Center the active item
+        let height = popup_area.height.saturating_sub(2) as usize; 
+        let offset = height / 2;
+        let start = current_idx.saturating_sub(offset);
+        
+        *list_state.offset_mut() = start;
+        list_state.select(Some(current_idx));
+
+        frame.render_stateful_widget(list, popup_area, &mut list_state);
+    } else {
+        let p = Paragraph::new("No lyrics found.").alignment(Alignment::Center).block(block).style(state.active_theme.base_style());
+        frame.render_widget(p, popup_area);
     }
 }
 

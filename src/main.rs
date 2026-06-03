@@ -217,6 +217,13 @@ async fn main() -> Result<()> {
                     state.playback.duration_ms = item.duration_ms;
                     state.playback.progress_ms = 0;
 
+                    if state.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
+                        state.current_lyric_track_id = Some(item.id.clone());
+                        state.is_fetching_lyrics = true;
+                        state.current_lyrics = None;
+                        let _ = app_tx.send(AppEvent::FetchLyrics(item.id.clone(), item.title.clone(), item.artist.clone(), item.duration_ms)).await;
+                    }
+
                     if let Some(url) = item.image_url {
                         if let Some(ref picker) = state.image_picker {
                             spawn_track_image_processing(
@@ -272,6 +279,13 @@ async fn main() -> Result<()> {
 
                         if track_changed {
                             state.playback.previous_track_image = state.playback.playing_track_image.take();
+
+                            if state.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
+                                state.current_lyric_track_id = Some(item.id.clone());
+                                state.is_fetching_lyrics = true;
+                                state.current_lyrics = None;
+                                let _ = app_tx.send(AppEvent::FetchLyrics(item.id.clone(), item.title.clone(), item.artist.clone(), item.duration_ms)).await;
+                            }
                         }
 
                         if let Some(url) = item.image_url {
@@ -355,6 +369,10 @@ async fn main() -> Result<()> {
                     if state.selected_device_index >= state.devices.len() {
                         state.selected_device_index = state.devices.len().saturating_sub(1);
                     }
+                }
+                WorkerEvent::LyricsLoaded(lyrics) => {
+                    state.current_lyrics = lyrics;
+                    state.is_fetching_lyrics = false;
                 }
                 WorkerEvent::TracksQueued(count) => {
                     state.recent_queue_count += count;
