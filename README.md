@@ -1,6 +1,6 @@
-# Echo
+# echo
 
-Echo is a terminal-based Spotify client written in Rust. Echo brings your entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
+echo is a terminal-based Spotify client written in Rust. echo brings your entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
 
 ## Features
 
@@ -39,11 +39,11 @@ Run the binary:
 ./target/release/echo
 ```
 
-On first run, Echo will prompt you to enter your `Client ID` and `Client Secret`, then open your browser to authenticate with Spotify.
+On first run, echo will prompt you to enter your `Client ID` and `Client Secret`, then open your browser to authenticate with Spotify.
 
 ## Navigation & Keybindings
 
-Echo is heavily keyboard-driven. 
+echo is heavily keyboard-driven. 
 
 ### Global Navigation
 - `j` / `k` or `Down` / `Up`: Move down / up
@@ -101,6 +101,6 @@ While in Command Mode (`:`), you can use the following:
 
 ## Troubleshooting
 
-- **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). Echo will fall back to block rendering if neither is supported.
-- **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart Echo. It eagerly syncs your library in the background on startup.
+- **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). echo will fall back to block rendering if neither is supported.
+- **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
 - **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences) and `~/.config/echo/cache.json` (holds liked tracks).
