@@ -29,6 +29,8 @@ pub struct AppConfig {
 pub struct CacheData {
     #[serde(default)]
     pub liked_tracks: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub last_liked_sync_time: Option<u64>,
 }
 
 fn default_track_index_base() -> isize {

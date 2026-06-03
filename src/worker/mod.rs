@@ -162,32 +162,35 @@ impl Worker {
                                                 use futures_util::stream::StreamExt;
                                                 let mut cache = crate::config::AppConfig::load_cache();
                                                 let mut tracks = cache.liked_tracks.clone();
+                                                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                                                let should_fetch = cache.last_liked_sync_time.map(|t| now > t + 3600).unwrap_or(true);
                                                 
-                                                let mut stream = client.current_user_saved_tracks(None);
-                                                let mut fetched_count = 0;
-                                                
-                                                while let Some(item) = stream.next().await {
-                                                    if let Ok(saved_track) = item {
-                                                        if let Some(id) = saved_track.track.id {
-                                                            tracks.insert(id.id().to_string());
+                                                if should_fetch {
+                                                    let mut stream = client.current_user_saved_tracks(None);
+                                                    let mut fetched_count = 0;
+                                                    
+                                                    while let Some(item) = stream.next().await {
+                                                        if let Ok(saved_track) = item {
+                                                            if let Some(id) = saved_track.track.id {
+                                                                tracks.insert(id.id().to_string());
+                                                            }
+                                                        }
+                                                        fetched_count += 1;
+                                                        if fetched_count >= 100 {
+                                                            break; // Only fetch the 100 most recent liked songs on startup to avoid rate limits
                                                         }
                                                     }
-                                                    fetched_count += 1;
-                                                    if fetched_count >= 100 {
-                                                        break; // Only fetch the 100 most recent liked songs on startup to avoid rate limits
-                                                    }
-                                                }
-                                                
-                                                if !tracks.is_empty() {
+                                                    
+                                                    cache.last_liked_sync_time = Some(now);
                                                     cache.liked_tracks = tracks.clone();
                                                     let _ = crate::config::AppConfig::save_cache(&cache);
+                                                }
                                                     
                                                     let mut results = std::collections::HashMap::new();
                                                     for tid in tracks {
                                                         results.insert(tid, true);
                                                     }
                                                     let _ = tx.send(WorkerEvent::LikedStatusUpdate(results)).await;
-                                                }
                                             });
 
                                             if let Ok(user) = sp.client.current_user().await {
