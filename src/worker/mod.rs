@@ -247,11 +247,11 @@ impl Worker {
                                 if let Some(ref sp) = spotify_opt {
                                     if is_album {
                                         if let Ok((tracks, album_metadata)) = sp.fetch_album_tracks(&id).await {
-                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, album_metadata.or(metadata))).await;
+                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, album_metadata.or(metadata), true)).await;
                                         }
                                     } else {
                                         if let Ok(tracks) = sp.fetch_tracks(&id).await {
-                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata)).await;
+                                            let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, metadata, false)).await;
                                         }
                                     }
                                 }

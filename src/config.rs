@@ -61,6 +61,12 @@ pub struct LibraryConfig {
     pub condensed_lyrics_enabled: bool,
     #[serde(default = "default_vis_bins")]
     pub vis_bins: usize,
+    #[serde(default = "default_enable_visualizer")]
+    pub enable_visualizer: bool,
+}
+
+fn default_enable_visualizer() -> bool {
+    false
 }
 
 fn default_vis_bins() -> usize {
@@ -79,6 +85,7 @@ impl Default for LibraryConfig {
             cover_img_pixels: 0,
             condensed_lyrics_enabled: false,
             vis_bins: 7,
+            enable_visualizer: false,
         }
     }
 }

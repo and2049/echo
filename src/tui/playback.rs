@@ -104,40 +104,47 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     frame.render_widget(total_time_p, pb_chunks[4]);
 
     // Render Track Info
-    let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(false);
+    let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(state.library_config.enable_visualizer);
     
-    let mut constraints = vec![
-        Constraint::Length(2),  // 0: Left padding
-        Constraint::Length(10), // 1: Image width
-        Constraint::Length(2),  // 2: Middle gap to text
-        Constraint::Length(35), // 3: Text width
-        Constraint::Min(0),     // 4: Gap to visualizer
+    let mut main_constraints = vec![
+        Constraint::Length(38),
+        Constraint::Min(0),
     ];
-    
-    let text_idx = 3;
-    let mut vis_idx = None;
-
     if is_vis_enabled {
-        let v_idx = constraints.len();
-        constraints.push(Constraint::Length(32)); // Visualizer width
-        constraints.push(Constraint::Length(2));  // Right padding
-        vis_idx = Some(v_idx);
+        main_constraints.push(Constraint::Length(38));
     }
+
+    let main_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(main_constraints)
+        .split(playback_chunks[0]);
 
     let track_info_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(constraints)
-        .split(playback_chunks[0]);
-
-    // Independent Layout for perfectly centered lyrics
-    let lyrics_layout = Layout::default()
-        .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(25),
-            Constraint::Percentage(50),
-            Constraint::Percentage(25),
+            Constraint::Length(2),  // Left padding
+            Constraint::Length(10), // Image width
+            Constraint::Length(2),  // Middle gap to text
+            Constraint::Min(0),     // Text width takes up rest of the 38
         ])
-        .split(playback_chunks[0]);
+        .split(main_layout[0]);
+    
+    let text_idx = 3;
+    let mut vis_idx = None;
+    let mut vis_area = ratatui::layout::Rect::default();
+
+    if is_vis_enabled {
+        let vis_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(32),
+                Constraint::Length(2),
+            ])
+            .split(main_layout[2]);
+        vis_idx = Some(1);
+        vis_area = vis_chunks[1];
+    }
 
     let protocol = state
         .playback
@@ -157,13 +164,21 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     }
 
     // Create Title & Artist Text
+    let track_text_width = track_info_chunks[text_idx].width as usize;
+
     let track_title = if state.playback.playing_track_title.is_empty() {
         String::new()
     } else {
-        stabilize_terminal_emoji_width(&state.playback.playing_track_title)
+        crate::tui::render::truncate_to_width_with_ellipsis(
+            &stabilize_terminal_emoji_width(&state.playback.playing_track_title),
+            track_text_width as u16
+        )
     };
 
-    let track_artist = stabilize_terminal_emoji_width(&state.playback.playing_track_artist);
+    let track_artist = crate::tui::render::truncate_to_width_with_ellipsis(
+        &stabilize_terminal_emoji_width(&state.playback.playing_track_artist),
+        track_text_width as u16
+    );
 
     let text_lines = vec![
         Line::from(Span::styled(
@@ -194,17 +209,40 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
             
             let current_line = lyrics.lines.get(current_lyric_idx).map(|l| l.text.as_str()).unwrap_or("");
             let next_line = lyrics.lines.get(current_lyric_idx + 1).map(|l| l.text.as_str()).unwrap_or("");
+            
+            let center_width = main_layout[1].width;
+            let total_width = playback_chunks[0].width;
+            let center_x = main_layout[1].x;
+            
+            let mut format_lyric = |line: &str, style: ratatui::style::Style| -> Line {
+                let stabilized = stabilize_terminal_emoji_width(line);
+                let line_width = unicode_width::UnicodeWidthStr::width(stabilized.as_str()) as u16;
+                
+                // Ideal start x to be perfectly centered on the entire screen
+                let ideal_start_x = (total_width / 2).saturating_sub(line_width / 2);
+                
+                let pad_len = ideal_start_x.saturating_sub(center_x);
+                let pad_str = " ".repeat(pad_len as usize);
+                
+                let available_w = center_width.saturating_sub(pad_len);
+                let trunc_line = crate::tui::render::truncate_to_width_with_ellipsis(&stabilized, available_w);
+                
+                Line::from(vec![
+                    Span::raw(pad_str),
+                    Span::styled(trunc_line, style)
+                ])
+            };
 
             let lyrics_lines = vec![
-                Line::from(Span::styled(current_line, state.active_theme.primary_style().add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled(next_line, state.active_theme.muted_style())),
+                format_lyric(current_line, state.active_theme.primary_style().add_modifier(Modifier::BOLD)),
+                format_lyric(next_line, state.active_theme.muted_style()),
             ];
             
             let lyrics_p = Paragraph::new(lyrics_lines)
-                .alignment(Alignment::Center)
+                .alignment(Alignment::Left)
                 .style(state.active_theme.base_style())
                 .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
-            frame.render_widget(lyrics_p, lyrics_layout[1]);
+            frame.render_widget(lyrics_p, main_layout[1]);
         }
     }
 
@@ -258,8 +296,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
                 .bar_width(bw)
                 .bar_gap(0)
                 .max(100);
-            if let Some(idx) = vis_idx {
-                let mut vis_area = track_info_chunks[idx];
+            if vis_idx.is_some() {
                 if vis_area.height >= 7 {
                     vis_area.y += 2;
                     vis_area.height = 4;

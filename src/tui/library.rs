@@ -202,7 +202,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
 }
 
 pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
-    let is_albums_tab = state.active_library_tab == crate::app::LibraryTab::Albums;
+    let is_album_context = state.is_album_context;
 
     let visual_range = if state.active_view == ActiveView::TrackList {
         state.get_visual_selection_range()
@@ -271,7 +271,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
             let duration_cell = Cell::from(format_duration_text(format_time(t.duration_ms / 1000)));
 
-            let row = if is_albums_tab {
+            let row = if is_album_context {
                 Row::new(vec![number_cell, liked_cell, title_cell, duration_cell])
             } else {
                 let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
@@ -300,7 +300,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
     let liked_width = if is_liked_songs { 0 } else { 2 };
 
-    let table = if is_albums_tab {
+    let table = if is_album_context {
         let number_header = if state.library_config.track_index_base < 0 { "" } else { "  #" };
         let header = Row::new(vec![number_header, "", "Track", "Duration "])
             .style(header_style)

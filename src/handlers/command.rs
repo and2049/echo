@@ -287,13 +287,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         return Some(crate::events::AppEvent::FetchQueue);
                     }
                     "vis" => {
+                        let mut next_val = !state.library_config.enable_visualizer;
                         if let Some(flag) = &state.playback.enable_visualizer {
                             let current = flag.load(std::sync::atomic::Ordering::Relaxed);
-                            flag.store(!current, std::sync::atomic::Ordering::Relaxed);
-                            state.status_message = Some(if current { "Visualizer: off".to_string() } else { "Visualizer: on".to_string() });
-                        } else {
-                            state.status_message = Some("No audio playback active".to_string());
+                            next_val = !current;
+                            flag.store(next_val, std::sync::atomic::Ordering::Relaxed);
                         }
+                        state.library_config.enable_visualizer = next_val;
+                        state.save_library_config();
+                        state.status_message = Some(if next_val { "Visualizer: on".to_string() } else { "Visualizer: off".to_string() });
                         state.status_message_expiry = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "visbins" => {

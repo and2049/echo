@@ -202,9 +202,10 @@ async fn main() -> Result<()> {
                 WorkerEvent::AlbumsLoaded(albums) => {
                     state.saved_albums = albums;
                 }
-                WorkerEvent::TracksLoaded(tracks, metadata) => {
+                WorkerEvent::TracksLoaded(tracks, metadata, is_album) => {
                     state.tracks = tracks;
                     state.tracklist_context_metadata = metadata.clone();
+                    state.is_album_context = is_album;
                     state.active_view = app::ActiveView::TrackList;
                     state.selected_track_index = 0;
                 }
@@ -351,6 +352,7 @@ async fn main() -> Result<()> {
                     let _ = tui.terminal.clear();
                 }
                 WorkerEvent::AudioVisualizationReady(shared_bands, flag) => {
+                    flag.store(state.library_config.enable_visualizer, std::sync::atomic::Ordering::Relaxed);
                     state.playback.audio_visualization = Some(shared_bands);
                     state.playback.enable_visualizer = Some(flag);
                 }
