@@ -103,9 +103,10 @@ jobs:
           test "$(find release-assets -type f | wc -l)" -gt 0
 
           if [ -n "$CHANGELOG" ]; then
+            printf '%b\n' "$CHANGELOG" > release_notes.txt
             gh release create v${{ inputs.version }} \
               --title "v${{ inputs.version }}" \
-              --notes "$CHANGELOG" \
+              --notes-file release_notes.txt \
               --target ${{ github.ref_name }} \
               release-assets/*
           else
