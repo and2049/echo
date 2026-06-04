@@ -16,7 +16,8 @@ echo is a terminal-based Spotify client written in Rust. echo brings your entire
 2. **Spotify Developer App**: 
    - Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/).
    - Create an app and get your `Client ID` and `Client Secret`.
-   - Add `http://127.0.0.1:8989/login` to your app's Redirect URIs.
+   - Add `http://127.0.0.1:8888/callback` to your app's Redirect URIs.
+   - Echo also uses `http://127.0.0.1:8989/login` for its internal first-party Spotify session.
 
 ### Installation
 

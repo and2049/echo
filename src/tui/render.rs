@@ -616,7 +616,7 @@ pub fn render_authenticating(frame: &mut Frame, state: &AppState) {
     let text = vec![
         Line::from("Waiting for Spotify authentication..."),
         Line::from(
-            "Please check your browser. A local server is listening on port 8888 for the redirect.",
+            "Please check your browser. The Web API redirect URI is http://127.0.0.1:8888/callback.",
         ),
     ];
     let paragraph = Paragraph::new(text)
