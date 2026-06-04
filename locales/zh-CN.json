@@ -19,7 +19,7 @@
         "no_results": "未找到结果"
     },
     "messages": {
-        "visual_block": "批量选择模式",
+        "visual_block": "可视块选择模式",
         "fetching": "加载中...",
         "fetching_album": "正在加载专辑...",
         "fetching_playlist": "正在加载播放列表...",
