@@ -95,3 +95,32 @@ pub fn spawn_load_artist_page(
         }
     });
 }
+
+pub fn spawn_load_artist_albums(
+    api_client: Option<&EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    artist_id: String,
+) {
+    let Some(api) = api_client.cloned() else {
+        return;
+    };
+
+    tokio::spawn(async move {
+        match api.artist_albums(&artist_id).await {
+            Ok(Some(albums)) => {
+                let _ = tx
+                    .send(WorkerEvent::ArtistAlbumsLoaded { artist_id, albums })
+                    .await;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = tx
+                    .send(WorkerEvent::ArtistAlbumsLoadFailed {
+                        artist_id,
+                        message: e.to_string(),
+                    })
+                    .await;
+            }
+        }
+    });
+}

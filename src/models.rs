@@ -1,4 +1,6 @@
-#[derive(Clone, Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Playlist {
     pub id: String,
     pub name: String,
@@ -7,7 +9,7 @@ pub struct Playlist {
     pub image_url: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Album {
     pub id: String,
     pub name: String,
@@ -16,20 +18,20 @@ pub struct Album {
     pub release_year: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LibraryNode {
     Playlist { playlist: Playlist, indent: usize },
     Folder(crate::config::Folder),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BrowseNode {
     TopTracks,
     RecentlyPlayed,
     FollowedArtists,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
     pub name: String,
@@ -39,14 +41,14 @@ pub struct Track {
     pub album_id: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TrackListContextKind {
     Playlist,
     Album,
     Generated,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TrackListContext {
     pub id: String,
     pub title: String,
@@ -117,7 +119,7 @@ impl TrackListContext {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PlaybackItem {
     pub id: String,
     pub title: String,
@@ -127,7 +129,7 @@ pub struct PlaybackItem {
     pub album_id: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchTrack {
     pub id: String,
     pub name: String,
@@ -138,7 +140,7 @@ pub struct SearchTrack {
     pub album_id: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchAlbum {
     pub id: String,
     pub name: String,
@@ -146,13 +148,13 @@ pub struct SearchAlbum {
     pub image_url: Option<String>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SearchResults {
     pub tracks: Vec<SearchTrack>,
     pub albums: Vec<SearchAlbum>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Device {
     pub id: String,
     pub name: String,
@@ -161,18 +163,18 @@ pub struct Device {
     pub volume_percent: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LyricLine {
     pub start_ms: u32,
     pub text: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Lyrics {
     pub lines: Vec<LyricLine>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArtistPageData {
     pub artist_id: String,
     pub artist_name: String,
@@ -180,7 +182,7 @@ pub struct ArtistPageData {
     pub albums: Vec<Album>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Artist {
     pub id: String,
     pub name: String,

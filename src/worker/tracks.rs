@@ -1,6 +1,7 @@
 use tokio::sync::mpsc;
 
 use crate::{
+    config::AppConfig,
     events::WorkerEvent,
     models::{TrackListContext, TrackListContextKind},
 };
@@ -32,6 +33,13 @@ async fn load_album_tracks(
     mut context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
 ) {
+    if let Some(cached) = AppConfig::load_cache().get_context_tracks(&context) {
+        let _ = tx
+            .send(WorkerEvent::TracksLoaded(cached.tracks, cached.context))
+            .await;
+        return;
+    }
+
     let id = context.id.clone();
     match sp.fetch_album_tracks(&id).await {
         Ok((tracks, album_metadata)) => {
@@ -43,6 +51,7 @@ async fn load_album_tracks(
                     context.image_url = Some(image_url);
                 }
             }
+            update_context_cache(context.clone(), tracks.clone());
             let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
         }
         Err(e) => {
@@ -65,9 +74,17 @@ async fn load_playlist_tracks(
     context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
 ) {
+    if let Some(cached) = AppConfig::load_cache().get_context_tracks(&context) {
+        let _ = tx
+            .send(WorkerEvent::TracksLoaded(cached.tracks, cached.context))
+            .await;
+        return;
+    }
+
     let id = context.id.clone();
     match sp.fetch_tracks(&id).await {
         Ok(tracks) => {
+            update_context_cache(context.clone(), tracks.clone());
             let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
         }
         Err(e) => {
@@ -83,6 +100,12 @@ async fn load_playlist_tracks(
                 .await;
         }
     }
+}
+
+fn update_context_cache(context: TrackListContext, tracks: Vec<crate::models::Track>) {
+    let mut cache = AppConfig::load_cache();
+    cache.set_context_tracks(context, tracks);
+    let _ = AppConfig::save_cache(&cache);
 }
 
 #[cfg(test)]

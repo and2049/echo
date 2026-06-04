@@ -54,6 +54,9 @@ pub enum AppEvent {
         artist_id: String,
         artist_name: Option<String>,
     },
+    LoadArtistAlbums {
+        artist_id: String,
+    },
 }
 
 pub enum WorkerEvent {
@@ -122,5 +125,13 @@ pub enum WorkerEvent {
     ArtistPageRateLimited {
         artist_id: String,
         retry_after_secs: u64,
+    },
+    ArtistAlbumsLoaded {
+        artist_id: String,
+        albums: Vec<crate::models::Album>,
+    },
+    ArtistAlbumsLoadFailed {
+        artist_id: String,
+        message: String,
     },
 }

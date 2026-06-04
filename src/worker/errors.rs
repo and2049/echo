@@ -9,6 +9,9 @@ pub(crate) fn api_request_error_message(err: &anyhow::Error) -> String {
             super::api::client::format_retry_after(rate_limit.cooldown())
         );
     }
+    if super::api::rate_limit::is_probable_rate_limit(err) {
+        return "rate limited. Try again in 1m.".to_string();
+    }
 
     err.to_string()
 }

@@ -845,7 +845,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 };
                 state.selected_search_index = 0;
             } else if state.active_view == ActiveView::ArtistPage {
-                artist_page::toggle_tab(state);
+                return artist_page::toggle_tab(state);
             }
         }
         _ => {}

@@ -4,17 +4,8 @@ use crate::{
     models::{BrowseNode, TrackListContext},
 };
 
-pub fn load_event_if_needed(state: &AppState) -> Option<AppEvent> {
-    match state.active_browse_node {
-        BrowseNode::TopTracks if state.top_tracks.is_empty() => Some(AppEvent::FetchTopTracks),
-        BrowseNode::RecentlyPlayed if state.recently_played.is_empty() => {
-            Some(AppEvent::FetchRecentlyPlayed)
-        }
-        BrowseNode::FollowedArtists if state.followed_artists.is_empty() => {
-            Some(AppEvent::FetchFollowedArtists)
-        }
-        _ => None,
-    }
+pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
+    None
 }
 
 pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
@@ -61,12 +52,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn top_tracks_empty_requests_fetch() {
+    fn top_tracks_selection_does_not_request_fetch() {
+        let mut state = AppState::new();
+        state.active_browse_node = BrowseNode::TopTracks;
+
+        assert!(load_event_if_needed(&state).is_none());
+    }
+
+    #[test]
+    fn entering_empty_top_tracks_requests_fetch() {
         let mut state = AppState::new();
         state.active_browse_node = BrowseNode::TopTracks;
 
         assert!(matches!(
-            load_event_if_needed(&state),
+            enter_active_node(&mut state),
             Some(AppEvent::FetchTopTracks)
         ));
     }

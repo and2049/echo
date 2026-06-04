@@ -252,6 +252,25 @@ pub async fn apply_worker_event(
             state.artist_page_album_index = 0;
             state.artist_page_loading = false;
         }
+        WorkerEvent::ArtistAlbumsLoaded { artist_id, albums } => {
+            if let Some(data) = state.artist_page_data.as_mut()
+                && data.artist_id == artist_id
+            {
+                data.albums = albums;
+                state.artist_page_album_index = 0;
+                state.artist_page_loading = false;
+            }
+        }
+        WorkerEvent::ArtistAlbumsLoadFailed { artist_id, message } => {
+            if state
+                .artist_page_data
+                .as_ref()
+                .is_some_and(|data| data.artist_id == artist_id)
+            {
+                state.artist_page_loading = false;
+                set_timed_status(state, format!("Artist albums failed: {message}"), 5);
+            }
+        }
         WorkerEvent::ArtistPageLoadFailed { artist_id, message } => {
             if state.pending_artist_page_id.as_deref() == Some(artist_id.as_str()) {
                 state.artist_page_loading = false;

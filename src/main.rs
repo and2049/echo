@@ -43,7 +43,23 @@ async fn main() -> Result<()> {
     let config = config::AppConfig::load();
     let mut state = AppState::new();
     let cache = config::AppConfig::load_cache();
-    state.liked_tracks = cache.liked_tracks;
+    state.liked_tracks = cache.liked_tracks.clone();
+    if let Some(playlists) = cache.get_playlists() {
+        state.playlists = playlists;
+        state.compute_library_view();
+    }
+    if let Some(albums) = cache.get_saved_albums() {
+        state.saved_albums = albums;
+    }
+    if let Some(tracks) = cache.get_top_tracks() {
+        state.top_tracks = tracks;
+    }
+    if let Some(tracks) = cache.get_recently_played() {
+        state.recently_played = tracks;
+    }
+    if let Some(artists) = cache.get_followed_artists() {
+        state.followed_artists = artists;
+    }
     state.library_config = config.library.clone();
 
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)

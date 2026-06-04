@@ -36,6 +36,18 @@ pub fn rate_limit_error(err: &anyhow::Error) -> Option<&SpotifyRateLimitError> {
         .find_map(|cause| cause.downcast_ref::<SpotifyRateLimitError>())
 }
 
+pub fn is_probable_rate_limit(err: &anyhow::Error) -> bool {
+    if rate_limit_error(err).is_some() {
+        return true;
+    }
+
+    let message = format!("{err:#}").to_ascii_lowercase();
+    message.contains("429")
+        || message.contains("too many requests")
+        || message.contains("rate limit")
+        || message.contains("rate-limit")
+}
+
 pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
     value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }

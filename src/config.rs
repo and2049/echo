@@ -1,9 +1,14 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::models::{
+    Album, Artist, ArtistPageData, Playlist, Track, TrackListContext, TrackListContextKind,
+};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuthTokens {
@@ -25,12 +30,203 @@ pub struct AppConfig {
     pub library: LibraryConfig,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct CacheData {
     #[serde(default)]
-    pub liked_tracks: std::collections::HashSet<String>,
+    pub liked_tracks: HashSet<String>,
     #[serde(default)]
     pub last_liked_sync_time: Option<u64>,
+    #[serde(default)]
+    pub playlists: Option<CachedEntry<Vec<Playlist>>>,
+    #[serde(default)]
+    pub saved_albums: Option<CachedEntry<Vec<Album>>>,
+    #[serde(default)]
+    pub followed_artists: Option<CachedEntry<Vec<Artist>>>,
+    #[serde(default)]
+    pub top_tracks: Option<CachedEntry<Vec<Track>>>,
+    #[serde(default)]
+    pub recently_played: Option<CachedEntry<Vec<Track>>>,
+    #[serde(default)]
+    pub context_tracks: HashMap<String, CachedEntry<ContextTracksCacheEntry>>,
+    #[serde(default)]
+    pub artist_pages: HashMap<String, CachedEntry<ArtistPageData>>,
+    #[serde(default)]
+    pub cooldowns: HashMap<String, u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CachedEntry<T> {
+    pub fetched_at: u64,
+    pub value: T,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ContextTracksCacheEntry {
+    pub context: TrackListContext,
+    pub tracks: Vec<Track>,
+}
+
+pub const FOLLOWED_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+pub const TOP_TRACKS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+pub const RECENTLY_PLAYED_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+pub const ARTIST_PAGE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+pub const ALBUM_TRACKS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+pub const PLAYLIST_TRACKS_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+pub const LIBRARY_LIST_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+
+impl<T> CachedEntry<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            fetched_at: now_epoch_secs(),
+            value,
+        }
+    }
+}
+
+impl<T: Clone> CachedEntry<T> {
+    pub fn fresh_value(&self, ttl: Duration) -> Option<T> {
+        is_fresh(self.fetched_at, ttl).then(|| self.value.clone())
+    }
+}
+
+impl CacheData {
+    pub fn get_playlists(&self) -> Option<Vec<Playlist>> {
+        self.playlists
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(LIBRARY_LIST_CACHE_TTL))
+    }
+
+    pub fn set_playlists(&mut self, playlists: Vec<Playlist>) {
+        self.playlists = Some(CachedEntry::new(playlists));
+    }
+
+    pub fn get_saved_albums(&self) -> Option<Vec<Album>> {
+        self.saved_albums
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(LIBRARY_LIST_CACHE_TTL))
+    }
+
+    pub fn set_saved_albums(&mut self, albums: Vec<Album>) {
+        self.saved_albums = Some(CachedEntry::new(albums));
+    }
+
+    pub fn get_followed_artists(&self) -> Option<Vec<Artist>> {
+        self.followed_artists
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(FOLLOWED_ARTISTS_CACHE_TTL))
+    }
+
+    pub fn set_followed_artists(&mut self, artists: Vec<Artist>) {
+        self.clear_cooldown("followed_artists");
+        self.followed_artists = Some(CachedEntry::new(artists));
+    }
+
+    pub fn get_top_tracks(&self) -> Option<Vec<Track>> {
+        self.top_tracks
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(TOP_TRACKS_CACHE_TTL))
+    }
+
+    pub fn set_top_tracks(&mut self, tracks: Vec<Track>) {
+        self.clear_cooldown("top_tracks");
+        self.top_tracks = Some(CachedEntry::new(tracks));
+    }
+
+    pub fn get_recently_played(&self) -> Option<Vec<Track>> {
+        self.recently_played
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(RECENTLY_PLAYED_CACHE_TTL))
+    }
+
+    pub fn set_recently_played(&mut self, tracks: Vec<Track>) {
+        self.clear_cooldown("recently_played");
+        self.recently_played = Some(CachedEntry::new(tracks));
+    }
+
+    pub fn get_context_tracks(
+        &self,
+        context: &TrackListContext,
+    ) -> Option<ContextTracksCacheEntry> {
+        let ttl = context_cache_ttl(context)?;
+        self.context_tracks
+            .get(&context_cache_key(context)?)
+            .and_then(|entry| entry.fresh_value(ttl))
+    }
+
+    pub fn set_context_tracks(&mut self, context: TrackListContext, tracks: Vec<Track>) {
+        let Some(key) = context_cache_key(&context) else {
+            return;
+        };
+        self.context_tracks.insert(
+            key,
+            CachedEntry::new(ContextTracksCacheEntry { context, tracks }),
+        );
+    }
+
+    pub fn invalidate_playlist_context(&mut self, playlist_id: &str) {
+        self.context_tracks
+            .remove(&format!("playlist:{playlist_id}"));
+    }
+
+    pub fn get_artist_page(&self, artist_id: &str) -> Option<ArtistPageData> {
+        self.artist_pages
+            .get(artist_id)
+            .and_then(|entry| entry.fresh_value(ARTIST_PAGE_CACHE_TTL))
+    }
+
+    pub fn set_artist_page(&mut self, artist_id: String, page: ArtistPageData) {
+        self.clear_cooldown(&format!("artist_page:{artist_id}"));
+        self.artist_pages.insert(artist_id, CachedEntry::new(page));
+    }
+
+    pub fn set_cooldown(&mut self, key: impl Into<String>, retry_after: Duration) {
+        self.cooldowns.insert(
+            key.into(),
+            now_epoch_secs().saturating_add(retry_after.as_secs().max(1)),
+        );
+    }
+
+    pub fn cooldown_remaining(&mut self, key: &str) -> Option<Duration> {
+        let until = *self.cooldowns.get(key)?;
+        let now = now_epoch_secs();
+        if until > now {
+            Some(Duration::from_secs(until - now))
+        } else {
+            self.cooldowns.remove(key);
+            None
+        }
+    }
+
+    pub fn clear_cooldown(&mut self, key: &str) {
+        self.cooldowns.remove(key);
+    }
+}
+
+pub fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn is_fresh(fetched_at: u64, ttl: Duration) -> bool {
+    now_epoch_secs().saturating_sub(fetched_at) <= ttl.as_secs()
+}
+
+pub fn context_cache_key(context: &TrackListContext) -> Option<String> {
+    match context.kind {
+        TrackListContextKind::Playlist => Some(format!("playlist:{}", context.id)),
+        TrackListContextKind::Album => Some(format!("album:{}", context.id)),
+        TrackListContextKind::Generated => None,
+    }
+}
+
+fn context_cache_ttl(context: &TrackListContext) -> Option<Duration> {
+    match context.kind {
+        TrackListContextKind::Playlist => Some(PLAYLIST_TRACKS_CACHE_TTL),
+        TrackListContextKind::Album => Some(ALBUM_TRACKS_CACHE_TTL),
+        TrackListContextKind::Generated => None,
+    }
 }
 
 fn default_track_index_base() -> isize {
@@ -375,5 +571,42 @@ error = "Red"
         assert_eq!(themes["default"].background, "#121114");
         assert_eq!(themes["user/default"].background, "#040506");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_entry_respects_ttl() {
+        let mut entry = CachedEntry::new(vec!["track".to_string()]);
+        assert_eq!(
+            entry.fresh_value(Duration::from_secs(60)),
+            Some(vec!["track".to_string()])
+        );
+
+        entry.fetched_at = now_epoch_secs().saturating_sub(120);
+        assert_eq!(entry.fresh_value(Duration::from_secs(60)), None);
+    }
+
+    #[test]
+    fn generated_contexts_are_not_persisted_as_track_contexts() {
+        let mut cache = CacheData::default();
+        let context = TrackListContext::generated("TOP_TRACKS", "Top Tracks");
+
+        cache.set_context_tracks(context.clone(), Vec::new());
+
+        assert!(cache.get_context_tracks(&context).is_none());
+        assert!(cache.context_tracks.is_empty());
+    }
+
+    #[test]
+    fn persistent_cooldown_reports_remaining_then_expires() {
+        let mut cache = CacheData::default();
+        cache.set_cooldown("top_tracks", Duration::from_secs(30));
+
+        assert!(cache.cooldown_remaining("top_tracks").is_some());
+
+        cache
+            .cooldowns
+            .insert("top_tracks".to_string(), now_epoch_secs().saturating_sub(1));
+        assert!(cache.cooldown_remaining("top_tracks").is_none());
+        assert!(!cache.cooldowns.contains_key("top_tracks"));
     }
 }

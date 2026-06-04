@@ -49,13 +49,25 @@ pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     AppEvent::CancelArtistPageLoad
 }
 
-pub fn toggle_tab(state: &mut AppState) {
+pub fn toggle_tab(state: &mut AppState) -> Option<AppEvent> {
     state.artist_page_tab = match state.artist_page_tab {
         ArtistPageTab::TopTracks => ArtistPageTab::Albums,
         ArtistPageTab::Albums => ArtistPageTab::TopTracks,
     };
     state.artist_page_track_index = 0;
     state.artist_page_album_index = 0;
+
+    if state.artist_page_tab == ArtistPageTab::Albums
+        && let Some(data) = state.artist_page_data.as_ref()
+        && data.albums.is_empty()
+    {
+        state.artist_page_loading = true;
+        return Some(AppEvent::LoadArtistAlbums {
+            artist_id: data.artist_id.clone(),
+        });
+    }
+
+    None
 }
 
 #[cfg(test)]

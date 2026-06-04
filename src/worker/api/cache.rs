@@ -6,6 +6,7 @@ use crate::models::{Album, Artist, Track};
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum CacheKey {
     ArtistPage(String),
+    ArtistAlbums(String),
     TopTracks,
     RecentlyPlayed,
     FollowedArtists,
@@ -49,6 +50,7 @@ pub struct SpotifyApiCache {
     recently_played: Option<Timed<Vec<Track>>>,
     followed_artists: Option<Timed<Vec<Artist>>>,
     artist_pages: HashMap<String, Timed<(String, Vec<Track>, Vec<Album>)>>,
+    artist_albums: HashMap<String, Timed<Vec<Album>>>,
     inflight: HashSet<CacheKey>,
     cooldowns: HashMap<CacheKey, Instant>,
 }
@@ -60,7 +62,7 @@ impl SpotifyApiCache {
 
     pub fn set_top_tracks(&mut self, tracks: Vec<Track>) {
         self.clear_cooldown(&CacheKey::TopTracks);
-        self.top_tracks = Some(Timed::new(tracks, Duration::from_secs(10 * 60)));
+        self.top_tracks = Some(Timed::new(tracks, Duration::from_secs(6 * 60 * 60)));
     }
 
     pub fn recently_played(&self) -> Option<Vec<Track>> {
@@ -69,7 +71,7 @@ impl SpotifyApiCache {
 
     pub fn set_recently_played(&mut self, tracks: Vec<Track>) {
         self.clear_cooldown(&CacheKey::RecentlyPlayed);
-        self.recently_played = Some(Timed::new(tracks, Duration::from_secs(2 * 60)));
+        self.recently_played = Some(Timed::new(tracks, Duration::from_secs(5 * 60)));
     }
 
     pub fn followed_artists(&self) -> Option<Vec<Artist>> {
@@ -78,7 +80,7 @@ impl SpotifyApiCache {
 
     pub fn set_followed_artists(&mut self, artists: Vec<Artist>) {
         self.clear_cooldown(&CacheKey::FollowedArtists);
-        self.followed_artists = Some(Timed::new(artists, Duration::from_secs(15 * 60)));
+        self.followed_artists = Some(Timed::new(artists, Duration::from_secs(24 * 60 * 60)));
     }
 
     pub fn artist_page(&self, artist_id: &str) -> Option<(String, Vec<Track>, Vec<Album>)> {
@@ -87,8 +89,22 @@ impl SpotifyApiCache {
 
     pub fn set_artist_page(&mut self, artist_id: String, value: (String, Vec<Track>, Vec<Album>)) {
         self.clear_cooldown(&CacheKey::ArtistPage(artist_id.clone()));
-        self.artist_pages
-            .insert(artist_id, Timed::new(value, Duration::from_secs(30 * 60)));
+        self.artist_pages.insert(
+            artist_id,
+            Timed::new(value, Duration::from_secs(24 * 60 * 60)),
+        );
+    }
+
+    pub fn artist_albums(&self, artist_id: &str) -> Option<Vec<Album>> {
+        self.artist_albums.get(artist_id).and_then(Timed::get)
+    }
+
+    pub fn set_artist_albums(&mut self, artist_id: String, albums: Vec<Album>) {
+        self.clear_cooldown(&CacheKey::ArtistAlbums(artist_id.clone()));
+        self.artist_albums.insert(
+            artist_id,
+            Timed::new(albums, Duration::from_secs(24 * 60 * 60)),
+        );
     }
 
     pub fn begin(&mut self, key: CacheKey) -> FetchGate {

@@ -12,7 +12,10 @@ use crate::events::{AppEvent, WorkerEvent};
 use crate::models::PlaybackItem;
 use api::SpotifyWorker;
 use rspotify::clients::OAuthClient;
-use std::sync::{Arc, atomic::AtomicU64};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
 use tokio::sync::mpsc;
 
 pub struct Worker {
@@ -21,6 +24,24 @@ pub struct Worker {
     media_tx: mpsc::Sender<media::MediaUpdate>,
     first_party: Option<api::first_party::SpotifyWebApi>,
     artist_page_generation: Arc<AtomicU64>,
+}
+
+fn save_playlists_cache(playlists: Vec<crate::models::Playlist>) {
+    let mut cache = AppConfig::load_cache();
+    cache.set_playlists(playlists);
+    let _ = AppConfig::save_cache(&cache);
+}
+
+fn save_saved_albums_cache(albums: Vec<crate::models::Album>) {
+    let mut cache = AppConfig::load_cache();
+    cache.set_saved_albums(albums);
+    let _ = AppConfig::save_cache(&cache);
+}
+
+fn invalidate_playlist_context_cache(playlist_id: &str) {
+    let mut cache = AppConfig::load_cache();
+    cache.invalidate_playlist_context(playlist_id);
+    let _ = AppConfig::save_cache(&cache);
 }
 
 impl Worker {
@@ -46,13 +67,18 @@ impl Worker {
     fn spawn_playback_sync(
         client: rspotify::AuthCodeSpotify,
         tx: mpsc::Sender<WorkerEvent>,
+        sync_inflight: Arc<AtomicBool>,
         previous_track_id: Option<String>,
         allow_same_track_reset: bool,
     ) {
+        if sync_inflight.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
         tokio::spawn(async move {
             let mut log = String::from("=== spawn_playback_sync started ===\n");
 
-            for attempt in 0..10u32 {
+            for attempt in 0..3u32 {
                 if attempt > 0 {
                     log.push_str(&format!("Attempt {}: waiting 500ms...\n", attempt));
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -92,6 +118,7 @@ impl Worker {
                                 item_id
                             ));
                             let _ = std::fs::write("echo-debug-sync.log", &log);
+                            sync_inflight.store(false, Ordering::SeqCst);
                             let _ = tx
                                 .send(WorkerEvent::SyncPlaybackState {
                                     is_playing,
@@ -118,8 +145,9 @@ impl Worker {
                 }
             }
 
-            log.push_str("All 10 attempts exhausted without a valid duration_ms. Giving up.\n");
+            log.push_str("All 3 attempts exhausted without a valid duration_ms. Giving up.\n");
             let _ = std::fs::write("echo-debug-sync.log", &log);
+            sync_inflight.store(false, Ordering::SeqCst);
         });
     }
 
@@ -127,18 +155,21 @@ impl Worker {
         let mut spotify_opt: Option<SpotifyWorker> = None;
         let mut api_client: Option<api::client::EchoSpotifyClient> = None;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-        let mut sync_interval = tokio::time::interval(std::time::Duration::from_secs(10));
-        let is_playing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut sync_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let is_playing = Arc::new(AtomicBool::new(false));
+        let sync_inflight = Arc::new(AtomicBool::new(false));
         let mut current_track_id: Option<String> = None;
 
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
-                    if let Some(ref sp) = spotify_opt {
+                    if let Some(ref sp) = spotify_opt
+                        && !sync_inflight.swap(true, Ordering::SeqCst) {
                         let client = sp.client.clone();
                         let tx = self.tx.clone();
                         let media_tx = self.media_tx.clone();
                         let is_playing_clone = is_playing.clone();
+                        let sync_inflight_clone = sync_inflight.clone();
                         tokio::spawn(async move {
                             if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = SpotifyWorker::playback_snapshot_from_client(&client).await {
                                 is_playing_clone.store(playing, std::sync::atomic::Ordering::SeqCst);
@@ -154,6 +185,7 @@ impl Worker {
                                 }
                                 let _ = tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
                             }
+                            sync_inflight_clone.store(false, Ordering::SeqCst);
                         });
                     }
                 }
@@ -228,10 +260,20 @@ impl Worker {
 
                                         // Fetch playlists initially
                                         if let Some(ref mut sp) = spotify_opt {
-                                            if let Ok(playlists) = sp.fetch_playlists().await {
+                                            let mut cache = AppConfig::load_cache();
+                                            if let Some(playlists) = cache.get_playlists() {
+                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+                                            } else if let Ok(playlists) = sp.fetch_playlists().await {
+                                                cache.set_playlists(playlists.clone());
+                                                let _ = AppConfig::save_cache(&cache);
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
-                                            if let Ok(albums) = sp.fetch_albums().await {
+                                            let mut cache = AppConfig::load_cache();
+                                            if let Some(albums) = cache.get_saved_albums() {
+                                                let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+                                            } else if let Ok(albums) = sp.fetch_albums().await {
+                                                cache.set_saved_albums(albums.clone());
+                                                let _ = AppConfig::save_cache(&cache);
                                                 let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                             }
                                             // Initial State Sync (Seamless Handoff)
@@ -334,7 +376,7 @@ impl Worker {
                                     let _ = sp.next_track().await;
                                     is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, false);
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), previous_track_id, false);
                                 }
                             }
                             AppEvent::PreviousTrack { current_track_id: ui_current_track_id } => {
@@ -342,7 +384,7 @@ impl Worker {
                                     let _ = sp.previous_track().await;
                                     is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), previous_track_id, true);
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), previous_track_id, true);
                                 }
                             }
                             AppEvent::LoadTrackMetadata(tid) => {
@@ -387,8 +429,10 @@ impl Worker {
                                             if let Err(e) = res {
                                                 let _ = std::fs::write("echo-debug-add.log", format!("Add error: {:?}", e));
                                             } else {
+                                                invalidate_playlist_context_cache(&playlist_id);
                                                 // Trigger a refresh of the playlists to show the new tracks count
                                                 if let Ok(playlists) = sp.fetch_playlists().await {
+                                                    save_playlists_cache(playlists.clone());
                                                     let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                                 }
                                                 let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
@@ -415,7 +459,9 @@ impl Worker {
 
                                             if let Ok(_) = res {
                                                 let _ = std::fs::write("echo-debug-remove-success.log", "Remove succeeded API call");
+                                                invalidate_playlist_context_cache(&playlist_id);
                                                 if let Ok(playlists) = sp.fetch_playlists().await {
+                                                    save_playlists_cache(playlists.clone());
                                                     let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                                 }
                                                 let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
@@ -494,6 +540,7 @@ impl Worker {
                                                         image_url: p.images.first().map(|i| i.url.clone()),
                                                     });
                                                 }
+                                                save_playlists_cache(out.clone());
                                                 let _ = tx.send(WorkerEvent::PlaylistsLoaded(out)).await;
                                             }
                                         }
@@ -512,6 +559,7 @@ impl Worker {
                                         ).await;
                                         if res.is_ok()
                                             && let Ok(playlists) = sp.fetch_playlists().await {
+                                                save_playlists_cache(playlists.clone());
                                                 let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                             }
                                     }
@@ -521,9 +569,11 @@ impl Worker {
                                     for id_str in &playlist_ids {
                                         if let Ok(pid) = rspotify::model::PlaylistId::from_id(id_str) {
                                             let _ = sp.client.library_remove([rspotify::model::LibraryId::Playlist(pid)]).await;
+                                            invalidate_playlist_context_cache(id_str);
                                         }
                                     }
                                     if let Ok(playlists) = sp.fetch_playlists().await {
+                                        save_playlists_cache(playlists.clone());
                                         let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
                                     }
                                 }
@@ -534,6 +584,7 @@ impl Worker {
                                     if !ids.is_empty() {
                                         let _ = sp.client.library_add(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
+                                            save_saved_albums_cache(albums.clone());
                                             let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                         }
                                     }
@@ -545,6 +596,7 @@ impl Worker {
                                     if !ids.is_empty() {
                                         let _ = sp.client.library_remove(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
+                                            save_saved_albums_cache(albums.clone());
                                             let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                         }
                                     }
@@ -583,7 +635,7 @@ impl Worker {
                                 if let Some(ref sp) = spotify_opt {
                                     let _ = sp.transfer_playback(&device_id).await;
                                     // Trigger a full context sync so UI updates its active device quickly
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), current_track_id.clone(), true);
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), current_track_id.clone(), true);
                                 }
                             }
                             AppEvent::ToggleTrackLike(track_id, like) => {
@@ -601,7 +653,7 @@ impl Worker {
                             }
                             AppEvent::ForcePlaybackSync => {
                                 if let Some(ref sp) = spotify_opt {
-                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), current_track_id.clone(), true);
+                                    Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), current_track_id.clone(), true);
                                 }
                             }
                             AppEvent::CancelArtistPageLoad => {
@@ -626,6 +678,13 @@ impl Worker {
                                     self.tx.clone(),
                                     artist_id,
                                     artist_name,
+                                );
+                            }
+                            AppEvent::LoadArtistAlbums { artist_id } => {
+                                artist_page::spawn_load_artist_albums(
+                                    api_client.as_ref(),
+                                    self.tx.clone(),
+                                    artist_id,
                                 );
                             }
                             _ => {}
