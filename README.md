@@ -2,6 +2,8 @@
 
 echo is a terminal-based Spotify client written in Rust. echo brings your entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
 
+![demo](demo.png)
+
 ## Features
 
 - **Terminal Image Support**: Renders high-quality album art and playlist covers directly in your terminal (supports Kitty, Sixel, and block fallbacks).
