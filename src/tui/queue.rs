@@ -1,16 +1,21 @@
 use crate::app::AppState;
+use crate::tui::render::{
+    format_duration_text, format_time, stabilize_terminal_emoji_width,
+    truncate_to_width_with_ellipsis,
+};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Rect},
     widgets::{Block, Borders, Cell, HighlightSpacing, Paragraph, Row, Table, TableState},
 };
-use crate::tui::render::{
-    format_duration_text, format_time, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
-};
 
 pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     let header_style = state.active_theme.muted_style();
-    let title = format!(" {} ({} upcoming) ", crate::i18n::t("ui.queue", &state.library_config.language), state.queue.len());
+    let title = format!(
+        " {} ({} upcoming) ",
+        crate::i18n::t("ui.queue", &state.library_config.language),
+        state.queue.len()
+    );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -33,10 +38,10 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
         "".to_string(), // liked col
         crate::i18n::t("ui.tracks", &state.library_config.language),
         crate::i18n::t("ui.artist", &state.library_config.language),
-        crate::i18n::t("ui.duration", &state.library_config.language)
+        crate::i18n::t("ui.duration", &state.library_config.language),
     ])
-        .style(header_style)
-        .height(1);
+    .style(header_style)
+    .height(1);
 
     let visual_range = if state.active_view == crate::app::ActiveView::Queue {
         state.get_visual_selection_range()
@@ -55,9 +60,12 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
             } else {
                 false
             };
-            
+
             let style = if is_in_visual {
-                state.active_theme.selected_style().bg(state.active_theme.primary)
+                state
+                    .active_theme
+                    .selected_style()
+                    .bg(state.active_theme.primary)
             } else if i == sel {
                 state.active_theme.selected_style()
             } else {

@@ -1,4 +1,4 @@
-use crate::app::{AppMode, AppState, ActiveView};
+use crate::app::{ActiveView, AppMode, AppState};
 use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -35,12 +35,13 @@ fn update_search_matches(state: &mut AppState) {
     }
 
     let query = state.search_query.to_lowercase();
-    
+
     // We only search tracks if we are in TrackList view
     if state.active_view == ActiveView::TrackList {
         for (i, track) in state.tracks.iter().enumerate() {
-            if track.name.to_lowercase().contains(&query) 
-                || track.artist.to_lowercase().contains(&query) {
+            if track.name.to_lowercase().contains(&query)
+                || track.artist.to_lowercase().contains(&query)
+            {
                 state.search_matches.push(i);
             }
         }

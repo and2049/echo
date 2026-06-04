@@ -55,16 +55,39 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
 pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area: Rect) {
     let is_focused = state.active_view == ActiveView::Library;
     let p_title = if state.active_library_tab == crate::app::LibraryTab::Playlists {
-        format!("[ {} ]", crate::i18n::t("ui.playlists", &state.library_config.language))
+        format!(
+            "[{}]",
+            crate::i18n::t("ui.playlists", &state.library_config.language)
+        )
     } else {
-        format!("  {}  ", crate::i18n::t("ui.playlists", &state.library_config.language))
+        format!(
+            " {} ",
+            crate::i18n::t("ui.playlists", &state.library_config.language)
+        )
     };
     let a_title = if state.active_library_tab == crate::app::LibraryTab::Albums {
-        format!("[ {} ]", crate::i18n::t("ui.albums", &state.library_config.language))
+        format!(
+            "[{}]",
+            crate::i18n::t("ui.albums", &state.library_config.language)
+        )
     } else {
-        format!("  {}  ", crate::i18n::t("ui.albums", &state.library_config.language))
+        format!(
+            " {} ",
+            crate::i18n::t("ui.albums", &state.library_config.language)
+        )
     };
-    let title_text = format!("{} {}", p_title, a_title);
+    let b_title = if state.active_library_tab == crate::app::LibraryTab::Browse {
+        format!(
+            "[{}]",
+            crate::i18n::t("ui.browse", &state.library_config.language)
+        )
+    } else {
+        format!(
+            " {} ",
+            crate::i18n::t("ui.browse", &state.library_config.language)
+        )
+    };
+    let title_text = format!("{}{}{}", p_title, a_title, b_title);
 
     let library_border_style = if is_focused {
         state.active_theme.secondary_style()
@@ -192,6 +215,44 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         list_state.select(Some(state.selected_playlist_index));
         frame.render_stateful_widget(list, library_list_area, &mut list_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
+    } else if state.active_library_tab == crate::app::LibraryTab::Browse {
+        let items: Vec<ListItem> =
+            vec!["📈 Top Tracks", "🕒 Recently Played", "👤 Followed Artists"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let is_in_visual = if let Some((start, end)) = visual_range {
+                        i >= start && i <= end
+                    } else {
+                        false
+                    };
+                    let style = if is_in_visual {
+                        state
+                            .active_theme
+                            .selected_style()
+                            .bg(state.active_theme.primary)
+                    } else if is_focused && i == state.selected_playlist_index {
+                        state.active_theme.selected_style()
+                    } else {
+                        state.active_theme.base_style()
+                    };
+                    let text = stabilize_terminal_emoji_width(name);
+                    ListItem::new(truncate_to_width_with_ellipsis(&text, library_text_width))
+                        .style(style)
+                })
+                .collect();
+
+        let list = padded_library_list(items).highlight_style(
+            state
+                .active_theme
+                .selected_style()
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(state.selected_playlist_index));
+        frame.render_stateful_widget(list, library_list_area, &mut list_state);
+        repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else {
         let playlist_list = padded_library_list(library_items);
         let mut playlist_state = ListState::default();
@@ -202,7 +263,11 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
 }
 
 pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
-    let is_album_context = state.is_album_context;
+    let is_album_context = state
+        .active_tracklist_context
+        .as_ref()
+        .map(|context| context.is_album())
+        .unwrap_or(false);
 
     let visual_range = if state.active_view == ActiveView::TrackList {
         state.get_visual_selection_range()
@@ -210,7 +275,10 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         None
     };
 
-    let is_liked_songs = state.tracklist_context_metadata.as_ref().map_or(false, |m| m.0 == "LIKED_SONGS");
+    let is_liked_songs = state
+        .active_tracklist_context
+        .as_ref()
+        .map_or(false, |context| context.id == "LIKED_SONGS");
 
     let track_rows: Vec<Row> = state
         .tracks
@@ -250,7 +318,10 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             let number_cell = if state.library_config.track_index_base < 0 {
                 Cell::from("")
             } else {
-                Cell::from(format!("{:>3}", (i as isize) + state.library_config.track_index_base))
+                Cell::from(format!(
+                    "{:>3}",
+                    (i as isize) + state.library_config.track_index_base
+                ))
             };
 
             let liked_str = if is_liked_songs {
@@ -260,8 +331,13 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             } else {
                 " "
             };
-            // Use secondary style or a specific color for the heart
-            let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+
+            let is_selected = is_in_visual || i == state.selected_track_index;
+            let liked_cell = if is_selected {
+                Cell::from(liked_str)
+            } else {
+                Cell::from(liked_str).style(Style::default().fg(state.active_theme.secondary))
+            };
 
             let title_cell = Cell::from(format!(
                 "{}{}",
@@ -275,7 +351,13 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 Row::new(vec![number_cell, liked_cell, title_cell, duration_cell])
             } else {
                 let artist_cell = Cell::from(stabilize_terminal_emoji_width(&t.artist));
-                Row::new(vec![number_cell, liked_cell, title_cell, artist_cell, duration_cell])
+                Row::new(vec![
+                    number_cell,
+                    liked_cell,
+                    title_cell,
+                    artist_cell,
+                    duration_cell,
+                ])
             };
 
             row.style(style)
@@ -301,11 +383,19 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     let liked_width = if is_liked_songs { 0 } else { 2 };
 
     let table = if is_album_context {
-        let number_header = if state.library_config.track_index_base < 0 { "" } else { "  #" };
+        let number_header = if state.library_config.track_index_base < 0 {
+            ""
+        } else {
+            "  #"
+        };
         let header = Row::new(vec![number_header, "", "Track", "Duration "])
             .style(header_style)
             .height(1);
-        let number_width = if state.library_config.track_index_base < 0 { 0 } else { 4 };
+        let number_width = if state.library_config.track_index_base < 0 {
+            0
+        } else {
+            4
+        };
         let mut t = Table::new(
             track_rows,
             [
@@ -325,11 +415,19 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         }
         t
     } else {
-        let number_header = if state.library_config.track_index_base < 0 { "" } else { "  #" };
+        let number_header = if state.library_config.track_index_base < 0 {
+            ""
+        } else {
+            "  #"
+        };
         let header = Row::new(vec![number_header, "", "Track", "Artist", "Duration "])
             .style(header_style)
             .height(1);
-        let number_width = if state.library_config.track_index_base < 0 { 0 } else { 4 };
+        let number_width = if state.library_config.track_index_base < 0 {
+            0
+        } else {
+            4
+        };
         let mut t = Table::new(
             track_rows,
             [
@@ -353,9 +451,12 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
     frame.render_widget(track_block, tracks_area);
 
-    let mut header_info: Option<(String, String, String, String)> = None;
+    let mut header_info: Option<(String, String)> = None;
     if !state.tracks.is_empty() {
-        header_info = state.tracklist_context_metadata.clone();
+        header_info = state
+            .active_tracklist_context
+            .as_ref()
+            .map(|context| (context.title.clone(), context.subtitle.clone()));
     }
 
     let (header_area, table_area) = if header_info.is_some() {
@@ -372,72 +473,80 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     };
 
     if let Some(h_area) = header_area
-        && let Some((_, title, author, _)) = header_info {
-            let chunks = ratatui::layout::Layout::default()
-                .direction(ratatui::layout::Direction::Horizontal)
-                .constraints([
-                    ratatui::layout::Constraint::Length(14), // 10 for image + 4 margin
-                    ratatui::layout::Constraint::Min(0),
-                ])
-                .split(h_area);
+        && let Some((title, author)) = header_info
+    {
+        let has_image =
+            state.active_library_header_image.is_some() || state.header_image_cache.is_some();
+        let image_width = if has_image { 14 } else { 2 };
 
-            let img_area = Rect {
-                x: chunks[0].x + 2, // 2 left margin
-                y: chunks[0].y + 1, // 1 top margin
-                width: 10,
-                height: 5,
-            };
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([
+                ratatui::layout::Constraint::Length(image_width),
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(h_area);
 
-            if state.header_image_dirty {
-                if let Some(ref mut protocol) = state.active_library_header_image {
-                    let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
-                    let mut cached = Buffer::empty(cache_area);
-                    let image = ratatui_image::StatefulImage::default();
-                    StatefulWidget::render(image, cache_area, &mut cached, protocol);
-                    state.header_image_cache = Some(cached);
-                }
-                state.header_image_dirty = false;
+        let img_area = Rect {
+            x: chunks[0].x + if has_image { 2 } else { 0 },
+            y: chunks[0].y + 1, // 1 top margin
+            width: if has_image { 10 } else { 0 },
+            height: if has_image { 5 } else { 0 },
+        };
+
+        if state.header_image_dirty {
+            if let Some(ref mut protocol) = state.active_library_header_image {
+                let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
+                let mut cached = Buffer::empty(cache_area);
+                let image = ratatui_image::StatefulImage::default();
+                StatefulWidget::render(image, cache_area, &mut cached, protocol);
+                state.header_image_cache = Some(cached);
             }
-
-            if let Some(ref cached) = state.header_image_cache {
-                let buf = frame.buffer_mut();
-                for y in 0..cached.area.height.min(img_area.height) {
-                    for x in 0..cached.area.width.min(img_area.width) {
-                        let src = &cached[(x, y)];
-                        let dst = &mut buf[(img_area.x + x, img_area.y + y)];
-                        dst.set_style(src.style());
-                        dst.set_symbol(src.symbol());
-                        dst.set_skip(src.skip);
-                    }
-                }
-            }
-
-            let text_chunks = ratatui::layout::Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([
-                    ratatui::layout::Constraint::Min(0),
-                    ratatui::layout::Constraint::Length(1),
-                    ratatui::layout::Constraint::Length(1),
-                    ratatui::layout::Constraint::Length(1),
-                    ratatui::layout::Constraint::Min(0),
-                ])
-                .split(chunks[1]);
-
-            let title_para = ratatui::widgets::Paragraph::new(title).style(
-                Style::default()
-                    .fg(state.active_theme.primary)
-                    .add_modifier(Modifier::BOLD),
-            );
-            let author_para = ratatui::widgets::Paragraph::new(author)
-                .style(Style::default().fg(state.active_theme.secondary));
-            let count_para =
-                ratatui::widgets::Paragraph::new(format!("{} {}", state.tracks.len(), crate::i18n::t("ui.tracks", &state.library_config.language)))
-                    .style(Style::default().fg(Color::DarkGray));
-
-            frame.render_widget(title_para, text_chunks[1]);
-            frame.render_widget(author_para, text_chunks[2]);
-            frame.render_widget(count_para, text_chunks[3]);
+            state.header_image_dirty = false;
         }
+
+        if let Some(ref cached) = state.header_image_cache {
+            let buf = frame.buffer_mut();
+            for y in 0..cached.area.height.min(img_area.height) {
+                for x in 0..cached.area.width.min(img_area.width) {
+                    let src = &cached[(x, y)];
+                    let dst = &mut buf[(img_area.x + x, img_area.y + y)];
+                    dst.set_style(src.style());
+                    dst.set_symbol(src.symbol());
+                    dst.set_skip(src.skip);
+                }
+            }
+        }
+
+        let text_chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Min(0),
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(chunks[1]);
+
+        let title_para = ratatui::widgets::Paragraph::new(title).style(
+            Style::default()
+                .fg(state.active_theme.primary)
+                .add_modifier(Modifier::BOLD),
+        );
+        let author_para = ratatui::widgets::Paragraph::new(author)
+            .style(Style::default().fg(state.active_theme.secondary));
+        let count_para = ratatui::widgets::Paragraph::new(format!(
+            "{} {}",
+            state.tracks.len(),
+            crate::i18n::t("ui.tracks", &state.library_config.language)
+        ))
+        .style(Style::default().fg(Color::DarkGray));
+
+        frame.render_widget(title_para, text_chunks[1]);
+        frame.render_widget(author_para, text_chunks[2]);
+        frame.render_widget(count_para, text_chunks[3]);
+    }
 
     let mut ts = TableState::default();
     let sel = if state.tracks.is_empty() {
@@ -496,5 +605,227 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 gradient_area,
             );
         }
+    }
+}
+
+pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("  Followed Artists  ")
+        .style(state.active_theme.base_style())
+        .border_style(if state.active_view == ActiveView::ArtistList {
+            state.active_theme.secondary_style()
+        } else {
+            state.active_theme.primary_style()
+        });
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let items: Vec<ListItem> = state
+        .followed_artists
+        .iter()
+        .enumerate()
+        .map(|(i, artist)| {
+            let style = if i == state.selected_artist_index
+                && state.active_view == ActiveView::ArtistList
+            {
+                state.active_theme.selected_style()
+            } else {
+                state.active_theme.base_style()
+            };
+
+            let text = format!(" {} ", stabilize_terminal_emoji_width(&artist.name));
+            ListItem::new(truncate_to_width_with_ellipsis(&text, inner_area.width)).style(style)
+        })
+        .collect();
+
+    let list = padded_library_list(items).highlight_style(
+        state
+            .active_theme
+            .selected_style()
+            .add_modifier(Modifier::BOLD),
+    );
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(state.selected_artist_index));
+    frame.render_stateful_widget(list, inner_area, &mut list_state);
+}
+
+pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    use crate::app::ArtistPageTab;
+    use crate::tui::render::format_time;
+
+    // Build tab bar title
+    let artist_name = state
+        .artist_page_data
+        .as_ref()
+        .map(|d| d.artist_name.clone())
+        .unwrap_or_default();
+
+    let is_active = state.active_view == crate::app::ActiveView::ArtistPage;
+    let on_tracks = state.artist_page_tab == ArtistPageTab::TopTracks;
+
+    let tab_tracks = if on_tracks {
+        " [Top Tracks] "
+    } else {
+        "  Top Tracks  "
+    };
+    let tab_albums = if !on_tracks {
+        " [Albums] "
+    } else {
+        "  Albums  "
+    };
+    let title = format!("  {}  {}|{}", artist_name, tab_tracks, tab_albums);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(state.active_theme.base_style())
+        .border_style(if is_active {
+            state.active_theme.secondary_style()
+        } else {
+            state.active_theme.primary_style()
+        });
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    if state.artist_page_loading {
+        let p =
+            ratatui::widgets::Paragraph::new("  Loading…").style(state.active_theme.muted_style());
+        frame.render_widget(p, inner_area);
+        return;
+    }
+
+    let Some(data) = state.artist_page_data.as_ref() else {
+        let p = ratatui::widgets::Paragraph::new("  Artist page unavailable.")
+            .style(state.active_theme.muted_style());
+        frame.render_widget(p, inner_area);
+        return;
+    };
+
+    if on_tracks {
+        // ── Top Tracks tab ──────────────────────────────────────────────────
+        if data.top_tracks.is_empty() {
+            let p = ratatui::widgets::Paragraph::new("  No top tracks found.")
+                .style(state.active_theme.muted_style());
+            frame.render_widget(p, inner_area);
+            return;
+        }
+
+        // Column widths: # (3) | title (flex) | duration (9)
+        let duration_w = DURATION_COLUMN_WIDTH;
+        let num_w: u16 = 3;
+        let available = inner_area.width.saturating_sub(num_w + duration_w + 2);
+        // Split title/artist 60/40
+        let title_w = available * 6 / 10;
+        let artist_w = available.saturating_sub(title_w);
+
+        let selected_idx = state.artist_page_track_index;
+        let rows: Vec<Row> = data
+            .top_tracks
+            .iter()
+            .enumerate()
+            .map(|(i, track)| {
+                let is_playing = state
+                    .playback
+                    .playing_track_id
+                    .as_deref()
+                    .map(|pid| pid == track.id.as_str())
+                    .unwrap_or(false);
+
+                let num_str = if is_playing {
+                    "▶".to_string()
+                } else {
+                    format!("{}", i + 1)
+                };
+
+                let style = if i == selected_idx && is_active {
+                    state.active_theme.selected_style()
+                } else if is_playing {
+                    state.active_theme.primary_style()
+                } else {
+                    state.active_theme.base_style()
+                };
+
+                let duration_str = format_duration_text(format_time(track.duration_ms / 1000));
+                let title_cell =
+                    truncate_to_width_with_ellipsis(&format!(" {}", track.name), title_w);
+                let artist_cell = truncate_to_width_with_ellipsis(&track.artist, artist_w);
+
+                Row::new(vec![
+                    Cell::from(num_str).style(state.active_theme.muted_style()),
+                    Cell::from(title_cell),
+                    Cell::from(artist_cell).style(state.active_theme.muted_style()),
+                    Cell::from(duration_str).style(state.active_theme.muted_style()),
+                ])
+                .style(style)
+            })
+            .collect();
+
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(num_w),
+                Constraint::Length(title_w),
+                Constraint::Length(artist_w),
+                Constraint::Length(duration_w),
+            ],
+        )
+        .highlight_style(
+            state
+                .active_theme
+                .selected_style()
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_spacing(HighlightSpacing::Always);
+
+        let mut table_state = TableState::default();
+        table_state.select(Some(selected_idx));
+        StatefulWidget::render(table, inner_area, frame.buffer_mut(), &mut table_state);
+    } else {
+        // ── Albums tab ──────────────────────────────────────────────────────
+        if data.albums.is_empty() {
+            let p = ratatui::widgets::Paragraph::new("  No albums found.")
+                .style(state.active_theme.muted_style());
+            frame.render_widget(p, inner_area);
+            return;
+        }
+
+        let selected_idx = state.artist_page_album_index;
+        let items: Vec<ListItem> = data
+            .albums
+            .iter()
+            .enumerate()
+            .map(|(i, album)| {
+                let style = if i == selected_idx && is_active {
+                    state.active_theme.selected_style()
+                } else {
+                    state.active_theme.base_style()
+                };
+                // Format: " Album Name  (2024)"
+                let year_part = if album.release_year.is_empty() {
+                    String::new()
+                } else {
+                    format!("  ({})", album.release_year)
+                };
+                let text = format!(" {}{}", album.name, year_part);
+                let display =
+                    truncate_to_width_with_ellipsis(&text, inner_area.width.saturating_sub(1));
+                ListItem::new(display).style(style)
+            })
+            .collect();
+
+        let list = padded_library_list(items).highlight_style(
+            state
+                .active_theme
+                .selected_style()
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(selected_idx));
+        frame.render_stateful_widget(list, inner_area, &mut list_state);
     }
 }

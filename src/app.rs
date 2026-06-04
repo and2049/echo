@@ -1,4 +1,4 @@
-use crate::models::{Playlist, SearchResults, Track};
+use crate::models::{ArtistPageData, Playlist, SearchResults, Track, TrackListContext};
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 
@@ -107,6 +107,16 @@ pub enum ActiveView {
     TrackList,
     SearchResults,
     Queue,
+    Devices,
+    ArtistList,
+    ArtistPage,
+}
+
+#[derive(PartialEq, Clone, Copy, Debug, Default)]
+pub enum ArtistPageTab {
+    #[default]
+    TopTracks,
+    Albums,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -129,6 +139,7 @@ pub enum AppMode {
 pub enum LibraryTab {
     Playlists,
     Albums,
+    Browse,
 }
 
 pub struct AppState {
@@ -139,6 +150,10 @@ pub struct AppState {
     pub library_config: crate::config::LibraryConfig,
     pub library_view: Vec<crate::models::LibraryNode>,
     pub saved_albums: Vec<crate::models::Album>,
+    pub top_tracks: Vec<crate::models::Track>,
+    pub recently_played: Vec<crate::models::Track>,
+    pub followed_artists: Vec<crate::models::Artist>,
+    pub active_browse_node: crate::models::BrowseNode,
     pub active_library_tab: LibraryTab,
     pub operation_register: Vec<String>,
     pub command_buffer: String,
@@ -158,6 +173,7 @@ pub struct AppState {
     pub selected_playlist_modal_index: usize,
     pub user_id: Option<String>,
     pub selected_playlist_index: usize,
+    pub selected_artist_index: usize,
     pub tracks: Vec<Track>,
     pub selected_track_index: usize,
     pub setup_client_id: String,
@@ -180,8 +196,7 @@ pub struct AppState {
     pub prev_view: Option<ActiveView>,
     pub queue: Vec<crate::models::Track>,
     pub selected_queue_index: usize,
-    pub tracklist_context_metadata: Option<(String, String, String, String)>,
-    pub is_album_context: bool,
+    pub active_tracklist_context: Option<TrackListContext>,
     pub tracklist_image_url: Option<String>,
     pub visual_selection_start: Option<usize>,
     pub liked_tracks: std::collections::HashSet<String>,
@@ -194,6 +209,13 @@ pub struct AppState {
     pub current_lyric_track_id: Option<String>,
     pub is_fetching_lyrics: bool,
     pub vis_bins: usize,
+    // Artist page
+    pub artist_page_data: Option<ArtistPageData>,
+    pub pending_artist_page_id: Option<String>,
+    pub artist_page_tab: ArtistPageTab,
+    pub artist_page_track_index: usize,
+    pub artist_page_album_index: usize,
+    pub artist_page_loading: bool,
 }
 
 impl AppState {
@@ -231,8 +253,12 @@ impl AppState {
             is_running: true,
             playlists: vec![],
             library_config: config.library,
-            library_view: vec![],
-            saved_albums: vec![],
+            library_view: Vec::new(),
+            saved_albums: Vec::new(),
+            top_tracks: Vec::new(),
+            recently_played: Vec::new(),
+            followed_artists: Vec::new(),
+            active_browse_node: crate::models::BrowseNode::TopTracks,
             active_library_tab: LibraryTab::Playlists,
             operation_register: vec![],
             command_buffer: String::new(),
@@ -252,6 +278,7 @@ impl AppState {
             selected_playlist_modal_index: 0,
             user_id: None,
             selected_playlist_index: 0,
+            selected_artist_index: 0,
             tracks: Vec::new(),
             selected_track_index: 0,
             setup_client_id: String::new(),
@@ -274,8 +301,7 @@ impl AppState {
             prev_view: None,
             queue: Vec::new(),
             selected_queue_index: 0,
-            tracklist_context_metadata: None,
-            is_album_context: false,
+            active_tracklist_context: None,
             tracklist_image_url: None,
             visual_selection_start: None,
             liked_tracks: std::collections::HashSet::new(),
@@ -288,6 +314,12 @@ impl AppState {
             current_lyric_track_id: None,
             is_fetching_lyrics: false,
             vis_bins,
+            artist_page_data: None,
+            pending_artist_page_id: None,
+            artist_page_tab: ArtistPageTab::TopTracks,
+            artist_page_track_index: 0,
+            artist_page_album_index: 0,
+            artist_page_loading: false,
         }
     }
 
@@ -295,13 +327,16 @@ impl AppState {
         if self.mode != AppMode::Visual {
             return None;
         }
-        
+
         if let Some(start) = self.visual_selection_start {
             let current = match self.active_view {
                 ActiveView::TrackList => self.selected_track_index,
                 ActiveView::SearchResults => self.selected_search_index,
                 ActiveView::Queue => self.selected_queue_index,
                 ActiveView::Library => self.selected_playlist_index,
+                ActiveView::Devices => self.selected_device_index,
+                ActiveView::ArtistList => self.selected_artist_index,
+                ActiveView::ArtistPage => self.artist_page_track_index,
             };
             Some((std::cmp::min(start, current), std::cmp::max(start, current)))
         } else {
@@ -323,7 +358,7 @@ impl AppState {
             playlist: crate::models::Playlist {
                 id: "LIKED_SONGS".to_string(),
                 name: "♥️ Liked Songs".to_string(),
-                owner: "Spotify".to_string(),
+                owner: String::new(),
                 owner_id: "spotify".to_string(),
                 image_url: None,
             },
@@ -370,12 +405,8 @@ impl AppState {
             .collect();
 
         match self.library_config.sort_mode {
-            SortMode::Alphabetical => {
-                loose.sort_by_key(|a| a.name.to_lowercase())
-            }
-            SortMode::Creator => {
-                loose.sort_by_key(|a| a.owner.to_lowercase())
-            }
+            SortMode::Alphabetical => loose.sort_by_key(|a| a.name.to_lowercase()),
+            SortMode::Creator => loose.sort_by_key(|a| a.owner.to_lowercase()),
             SortMode::Default => {}
         }
 
@@ -393,5 +424,104 @@ impl AppState {
         let mut config = crate::config::AppConfig::load();
         config.library = self.library_config.clone();
         let _ = config.save();
+    }
+
+    pub fn begin_tracklist_load(&mut self, context: TrackListContext) {
+        self.active_view = ActiveView::TrackList;
+        self.tracks.clear();
+        self.selected_track_index = 0;
+        self.active_tracklist_context = Some(context.clone());
+        self.tracklist_image_url = context.image_url.clone();
+        self.clear_header_image();
+        self.clear_pending_artist_page();
+    }
+
+    pub fn show_generated_tracks(&mut self, tracks: Vec<Track>, context: TrackListContext) {
+        self.active_view = ActiveView::TrackList;
+        self.tracks = tracks;
+        self.selected_track_index = 0;
+        self.active_tracklist_context = Some(context);
+        self.tracklist_image_url = None;
+        self.clear_header_image();
+        self.clear_pending_artist_page();
+    }
+
+    pub fn begin_artist_page_load(&mut self, artist_id: String, artist_name: String) {
+        self.artist_page_data = Some(ArtistPageData {
+            artist_id: artist_id.clone(),
+            artist_name,
+            top_tracks: Vec::new(),
+            albums: Vec::new(),
+        });
+        self.pending_artist_page_id = Some(artist_id);
+        self.artist_page_loading = true;
+        self.active_view = ActiveView::ArtistPage;
+    }
+
+    pub fn clear_pending_artist_page(&mut self) {
+        self.pending_artist_page_id = None;
+        self.artist_page_loading = false;
+    }
+
+    fn clear_header_image(&mut self) {
+        self.active_library_header_image = None;
+        self.header_image_cache = None;
+        self.header_image_dirty = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::TrackListContextKind;
+
+    #[test]
+    fn begin_tracklist_load_preserves_album_context() {
+        let mut state = AppState::new();
+        let context = TrackListContext::album(
+            "album-id".to_string(),
+            "Album".to_string(),
+            "Artist".to_string(),
+            Some("cover".to_string()),
+        );
+
+        state.begin_tracklist_load(context.clone());
+
+        assert_eq!(state.active_tracklist_context, Some(context));
+        assert_eq!(
+            state.active_tracklist_context.as_ref().map(|ctx| ctx.kind),
+            Some(TrackListContextKind::Album)
+        );
+        assert_eq!(state.tracklist_image_url.as_deref(), Some("cover"));
+    }
+
+    #[test]
+    fn generated_tracklists_do_not_look_like_playlists() {
+        let mut state = AppState::new();
+        state.show_generated_tracks(
+            Vec::new(),
+            TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
+        );
+
+        let context = state.active_tracklist_context.as_ref().unwrap();
+        assert_eq!(context.kind, TrackListContextKind::Generated);
+        assert!(!context.can_modify_playlist(Some(&"user".to_string())));
+    }
+
+    #[test]
+    fn beginning_tracklist_load_clears_pending_artist() {
+        let mut state = AppState::new();
+        state.begin_artist_page_load("artist-id".to_string(), "Artist".to_string());
+
+        state.begin_tracklist_load(TrackListContext::playlist(
+            "playlist-id".to_string(),
+            "Playlist".to_string(),
+            "Owner".to_string(),
+            "owner-id".to_string(),
+            None,
+        ));
+
+        assert_eq!(state.pending_artist_page_id, None);
+        assert!(!state.artist_page_loading);
     }
 }

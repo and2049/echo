@@ -4,7 +4,7 @@ use anyhow::Result;
 pub async fn fetch_lyrics(title: &str, artist: &str, duration_ms: u32) -> Result<Option<Lyrics>> {
     let client = reqwest::Client::new();
     let duration_sec = duration_ms / 1000;
-    
+
     let url = format!(
         "https://lrclib.net/api/get?track_name={}&artist_name={}&duration={}",
         urlencoding::encode(title),
@@ -12,9 +12,7 @@ pub async fn fetch_lyrics(title: &str, artist: &str, duration_ms: u32) -> Result
         duration_sec
     );
 
-    let resp = client.get(&url)
-        .send()
-        .await?;
+    let resp = client.get(&url).send().await?;
 
     if !resp.status().is_success() {
         return Ok(None);
@@ -45,7 +43,7 @@ fn parse_lrc(lrc: &str) -> Vec<LyricLine> {
             if let Some(close_bracket) = line.find(']') {
                 let time_str = &line[1..close_bracket];
                 let text = line[close_bracket + 1..].trim();
-                
+
                 if let Some(ms) = parse_time(time_str) {
                     lines.push(LyricLine {
                         start_ms: ms,
@@ -55,7 +53,7 @@ fn parse_lrc(lrc: &str) -> Vec<LyricLine> {
             }
         }
     }
-    
+
     // Sort by timestamp
     lines.sort_by_key(|l| l.start_ms);
     lines
@@ -68,10 +66,10 @@ fn parse_time(time_str: &str) -> Option<u32> {
     }
 
     let minutes: u32 = parts[0].parse().ok()?;
-    
+
     let sec_parts: Vec<&str> = parts[1].split('.').collect();
     let seconds: u32 = sec_parts[0].parse().ok()?;
-    
+
     let ms: u32 = if sec_parts.len() > 1 {
         let frac_str = sec_parts[1];
         if frac_str.len() == 2 {

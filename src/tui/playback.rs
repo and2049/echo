@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -6,7 +7,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph},
 };
-use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
 
 pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let shuffle_str = if state.playback.is_shuffled {
@@ -14,13 +14,13 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     } else {
         crate::i18n::t("ui.off", &state.library_config.language)
     };
-    
+
     let repeat_str = if state.playback.repeat_mode == "Off" {
         crate::i18n::t("ui.off", &state.library_config.language)
     } else {
         state.playback.repeat_mode.clone()
     };
-    
+
     let mut border_title = crate::i18n::t("ui.playing", &state.library_config.language);
     border_title = border_title.replacen("{}", &state.playback.device_name, 1);
     border_title = border_title.replacen("{}", &format!("{:<7}", shuffle_str), 1);
@@ -104,12 +104,14 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     frame.render_widget(total_time_p, pb_chunks[4]);
 
     // Render Track Info
-    let is_vis_enabled = state.playback.enable_visualizer.as_ref().map(|f| f.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(state.library_config.enable_visualizer);
-    
-    let mut main_constraints = vec![
-        Constraint::Length(38),
-        Constraint::Min(0),
-    ];
+    let is_vis_enabled = state
+        .playback
+        .enable_visualizer
+        .as_ref()
+        .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(state.library_config.enable_visualizer);
+
+    let mut main_constraints = vec![Constraint::Length(38), Constraint::Min(0)];
     if is_vis_enabled {
         main_constraints.push(Constraint::Length(38));
     }
@@ -128,7 +130,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
             Constraint::Min(0),     // Text width takes up rest of the 38
         ])
         .split(main_layout[0]);
-    
+
     let text_idx = 3;
     let mut vis_idx = None;
     let mut vis_area = ratatui::layout::Rect::default();
@@ -171,13 +173,13 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     } else {
         crate::tui::render::truncate_to_width_with_ellipsis(
             &stabilize_terminal_emoji_width(&state.playback.playing_track_title),
-            track_text_width as u16
+            track_text_width as u16,
         )
     };
 
     let track_artist = crate::tui::render::truncate_to_width_with_ellipsis(
         &stabilize_terminal_emoji_width(&state.playback.playing_track_artist),
-        track_text_width as u16
+        track_text_width as u16,
     );
 
     let text_lines = vec![
@@ -196,48 +198,76 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     // Render Condensed Lyrics perfectly centered
     if state.condensed_lyrics_enabled {
-        if let Some(lyrics) = &state.current_lyrics {
-            let mut current_lyric_idx = 0;
-            let current_progress = state.playback.progress_ms;
-            for (i, line) in lyrics.lines.iter().enumerate() {
-                if line.start_ms <= current_progress {
-                    current_lyric_idx = i;
-                } else {
-                    break;
-                }
-            }
-            
-            let current_line = lyrics.lines.get(current_lyric_idx).map(|l| l.text.as_str()).unwrap_or("");
-            let next_line = lyrics.lines.get(current_lyric_idx + 1).map(|l| l.text.as_str()).unwrap_or("");
-            
-            let center_width = main_layout[1].width;
-            let total_width = playback_chunks[0].width;
-            let center_x = main_layout[1].x;
-            
-            let mut format_lyric = |line: &str, style: ratatui::style::Style| -> Line {
-                let stabilized = stabilize_terminal_emoji_width(line);
-                let line_width = unicode_width::UnicodeWidthStr::width(stabilized.as_str()) as u16;
-                
-                // Ideal start x to be perfectly centered on the entire screen
-                let ideal_start_x = (total_width / 2).saturating_sub(line_width / 2);
-                
-                let pad_len = ideal_start_x.saturating_sub(center_x);
-                let pad_str = " ".repeat(pad_len as usize);
-                
-                let available_w = center_width.saturating_sub(pad_len);
-                let trunc_line = crate::tui::render::truncate_to_width_with_ellipsis(&stabilized, available_w);
-                
-                Line::from(vec![
-                    Span::raw(pad_str),
-                    Span::styled(trunc_line, style)
-                ])
-            };
+        let center_width = main_layout[1].width;
+        let total_width = playback_chunks[0].width;
+        let center_x = main_layout[1].x;
 
-            let lyrics_lines = vec![
-                format_lyric(current_line, state.active_theme.primary_style().add_modifier(Modifier::BOLD)),
-                format_lyric(next_line, state.active_theme.muted_style()),
-            ];
-            
+        let mut format_lyric = |line: &str, style: ratatui::style::Style| -> Line {
+            let stabilized = stabilize_terminal_emoji_width(line);
+            let line_width = unicode_width::UnicodeWidthStr::width(stabilized.as_str()) as u16;
+
+            // Ideal start x to be perfectly centered on the entire screen
+            let ideal_start_x = (total_width / 2).saturating_sub(line_width / 2);
+
+            let pad_len = ideal_start_x.saturating_sub(center_x);
+            let pad_str = " ".repeat(pad_len as usize);
+
+            let available_w = center_width.saturating_sub(pad_len);
+            let trunc_line =
+                crate::tui::render::truncate_to_width_with_ellipsis(&stabilized, available_w);
+
+            Line::from(vec![Span::raw(pad_str), Span::styled(trunc_line, style)])
+        };
+
+        let lyrics_lines = if let Some(lyrics) = &state.current_lyrics {
+            if lyrics.lines.is_empty() {
+                vec![format_lyric(
+                    "No lyrics found.",
+                    state.active_theme.muted_style(),
+                )]
+            } else {
+                let mut current_lyric_idx = 0;
+                let current_progress = state.playback.progress_ms;
+                for (i, line) in lyrics.lines.iter().enumerate() {
+                    if line.start_ms <= current_progress {
+                        current_lyric_idx = i;
+                    } else {
+                        break;
+                    }
+                }
+
+                let current_line = lyrics
+                    .lines
+                    .get(current_lyric_idx)
+                    .map(|l| l.text.as_str())
+                    .unwrap_or("");
+                let next_line = lyrics
+                    .lines
+                    .get(current_lyric_idx + 1)
+                    .map(|l| l.text.as_str())
+                    .unwrap_or("");
+
+                vec![
+                    format_lyric(
+                        current_line,
+                        state
+                            .active_theme
+                            .primary_style()
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    format_lyric(next_line, state.active_theme.muted_style()),
+                ]
+            }
+        } else if !state.playback.playing_track_title.is_empty() {
+            vec![format_lyric(
+                "No lyrics found.",
+                state.active_theme.muted_style(),
+            )]
+        } else {
+            vec![]
+        };
+
+        if !lyrics_lines.is_empty() {
             let lyrics_p = Paragraph::new(lyrics_lines)
                 .alignment(Alignment::Left)
                 .style(state.active_theme.base_style())
@@ -248,62 +278,66 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     if is_vis_enabled
         && let Some(shared_bands) = &state.playback.audio_visualization
-        && let Some(bands) = shared_bands.try_lock() {
-            use ratatui::widgets::{BarChart, BarGroup, Bar};
-            let c_primary = state.active_theme.primary;
-            let c_secondary = state.active_theme.secondary;
-            let c_mid_low = interpolate_color(c_secondary, c_primary, 0.33);
-            let c_mid_high = interpolate_color(c_secondary, c_primary, 0.66);
+        && let Some(bands) = shared_bands.try_lock()
+    {
+        use ratatui::widgets::{Bar, BarChart, BarGroup};
+        let c_primary = state.active_theme.primary;
+        let c_secondary = state.active_theme.secondary;
+        let c_mid_low = interpolate_color(c_secondary, c_primary, 0.33);
+        let c_mid_high = interpolate_color(c_secondary, c_primary, 0.66);
 
-            let num_bins = state.vis_bins.clamp(5, 32);
-            let mut bars = Vec::with_capacity(num_bins);
-            let chunk_size = 32.0 / num_bins as f32;
+        let num_bins = state.vis_bins.clamp(5, 32);
+        let mut bars = Vec::with_capacity(num_bins);
+        let chunk_size = 32.0 / num_bins as f32;
 
-            for i in 0..num_bins {
-                let start_idx = (i as f32 * chunk_size).floor() as usize;
-                let mut end_idx = ((i + 1) as f32 * chunk_size).floor() as usize;
-                if i == num_bins - 1 {
-                    end_idx = 32;
-                }
-                
-                let mut sum = 0.0;
-                let mut count = 0;
-                for j in start_idx..end_idx {
-                    sum += bands[j];
-                    count += 1;
-                }
-                let val = if count > 0 { sum / count as f32 } else { 0.0 };
-                
-                let ratio = (val / 100.0).clamp(0.0, 1.0);
-                
-                let color = if ratio < 0.25 {
-                    c_secondary
-                } else if ratio < 0.50 {
-                    c_mid_low
-                } else if ratio < 0.75 {
-                    c_mid_high
-                } else {
-                    c_primary
-                };
-                
-                let bar = Bar::default().value(val as u64).text_value("").style(ratatui::style::Style::default().fg(color));
-                bars.push(bar);
+        for i in 0..num_bins {
+            let start_idx = (i as f32 * chunk_size).floor() as usize;
+            let mut end_idx = ((i + 1) as f32 * chunk_size).floor() as usize;
+            if i == num_bins - 1 {
+                end_idx = 32;
             }
-            
-            let bw = (32 / num_bins).max(1) as u16;
-            let barchart = BarChart::default()
-                .data(BarGroup::default().bars(&bars))
-                .bar_width(bw)
-                .bar_gap(0)
-                .max(100);
-            if vis_idx.is_some() {
-                if vis_area.height >= 7 {
-                    vis_area.y += 2;
-                    vis_area.height = 4;
-                }
-                frame.render_widget(barchart, vis_area);
+
+            let mut sum = 0.0;
+            let mut count = 0;
+            for j in start_idx..end_idx {
+                sum += bands[j];
+                count += 1;
             }
+            let val = if count > 0 { sum / count as f32 } else { 0.0 };
+
+            let ratio = (val / 100.0).clamp(0.0, 1.0);
+
+            let color = if ratio < 0.25 {
+                c_secondary
+            } else if ratio < 0.50 {
+                c_mid_low
+            } else if ratio < 0.75 {
+                c_mid_high
+            } else {
+                c_primary
+            };
+
+            let bar = Bar::default()
+                .value(val as u64)
+                .text_value("")
+                .style(ratatui::style::Style::default().fg(color));
+            bars.push(bar);
         }
+
+        let bw = (32 / num_bins).max(1) as u16;
+        let barchart = BarChart::default()
+            .data(BarGroup::default().bars(&bars))
+            .bar_width(bw)
+            .bar_gap(0)
+            .max(100);
+        if vis_idx.is_some() {
+            if vis_area.height >= 7 {
+                vis_area.y += 2;
+                vis_area.height = 4;
+            }
+            frame.render_widget(barchart, vis_area);
+        }
+    }
 }
 
 fn color_to_rgb(c: ratatui::style::Color) -> (u8, u8, u8) {
@@ -329,13 +363,17 @@ fn color_to_rgb(c: ratatui::style::Color) -> (u8, u8, u8) {
     }
 }
 
-fn interpolate_color(c1: ratatui::style::Color, c2: ratatui::style::Color, ratio: f32) -> ratatui::style::Color {
+fn interpolate_color(
+    c1: ratatui::style::Color,
+    c2: ratatui::style::Color,
+    ratio: f32,
+) -> ratatui::style::Color {
     let rgb1 = color_to_rgb(c1);
     let rgb2 = color_to_rgb(c2);
-    
+
     let r = (rgb1.0 as f32 + (rgb2.0 as f32 - rgb1.0 as f32) * ratio) as u8;
     let g = (rgb1.1 as f32 + (rgb2.1 as f32 - rgb1.1 as f32) * ratio) as u8;
     let b = (rgb1.2 as f32 + (rgb2.2 as f32 - rgb1.2 as f32) * ratio) as u8;
-    
+
     ratatui::style::Color::Rgb(r, g, b)
 }

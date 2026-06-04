@@ -176,4 +176,112 @@ impl SpotifyWorker {
         }
         Ok((out, metadata))
     }
+
+    pub async fn fetch_top_tracks(&self) -> Result<Vec<Track>> {
+        use futures_util::StreamExt;
+        let mut stream = Box::pin(self.client.current_user_top_tracks(None));
+        let mut out = Vec::new();
+        while let Some(item) = stream.next().await {
+            if let Ok(track) = item {
+                if track.is_local { continue; }
+                out.push(Track {
+                    id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                    name: track.name,
+                    artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    duration_ms: track.duration.num_milliseconds() as u32,
+                    image_url: track.album.images.first().map(|img| img.url.clone()),
+                    album_id: track.album.id.map(|id| id.id().to_string()),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn fetch_recently_played(&self) -> Result<Vec<Track>> {
+        // rspotify's deserialization fails on missing external_ids for recently played tracks
+        // bypass using reqwest directly.
+        let token_mutex = self.client.get_token();
+        let token_guard = token_mutex.lock().await.unwrap();
+        let access_token = if let Some(t) = token_guard.as_ref() {
+            t.access_token.clone()
+        } else {
+            return Ok(vec![]);
+        };
+
+        let client = reqwest::Client::new();
+        let res = client.get("https://api.spotify.com/v1/me/player/recently-played?limit=50")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send().await?;
+
+        let json: serde_json::Value = res.json().await?;
+        let mut tracks = Vec::new();
+        
+        if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
+            for history in items {
+                if let Some(track) = history.get("track") {
+                    let name = track.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
+                    let is_local = track.get("is_local").and_then(|l| l.as_bool()).unwrap_or(false);
+                    if is_local { continue; }
+                    
+                    // Deduplicate
+                    if !tracks.iter().any(|t: &Track| t.name == name) {
+                        let id = track.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+                        let duration_ms = track.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or_default() as u32;
+                        
+                        let mut artist_names = Vec::new();
+                        if let Some(artists) = track.get("artists").and_then(|a| a.as_array()) {
+                            for a in artists {
+                                if let Some(aname) = a.get("name").and_then(|n| n.as_str()) {
+                                    artist_names.push(aname.to_string());
+                                }
+                            }
+                        }
+                        
+                        let album = track.get("album");
+                        let album_id = album.and_then(|a| a.get("id")).and_then(|id| id.as_str()).map(|s| s.to_string());
+                        let image_url = album.and_then(|a| a.get("images"))
+                                             .and_then(|imgs| imgs.as_array())
+                                             .and_then(|imgs| imgs.first())
+                                             .and_then(|img| img.get("url"))
+                                             .and_then(|url| url.as_str())
+                                             .map(|s| s.to_string());
+                                             
+                        tracks.push(Track {
+                            id,
+                            name,
+                            artist: artist_names.join(", "),
+                            duration_ms,
+                            image_url,
+                            album_id,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(tracks)
+    }
+
+    pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
+        let first_page = self.client.current_user_followed_artists(None, None).await?;
+        let mut artists = first_page.items;
+        let mut maybe_next = first_page.next;
+        
+        while let Some(url) = maybe_next {
+            // need to make a raw request or use rspotify's internal cursor handling if available.
+            // return the first page (50) for now
+            // use reqwest directly if they have more than 50.
+            break;
+        }
+
+        let mut out = Vec::new();
+        for a in artists {
+            out.push(crate::models::Artist {
+                id: a.id.id().to_string(),
+                name: a.name,
+                followers: a.followers.total,
+                image_url: a.images.first().map(|img| img.url.clone()),
+            });
+        }
+        Ok(out)
+    }
 }

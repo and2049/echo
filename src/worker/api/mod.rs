@@ -1,7 +1,11 @@
+pub mod cache;
+pub mod client;
+pub mod first_party;
 pub mod library;
-pub mod playback;
-pub mod search;
 pub mod lyrics;
+pub mod playback;
+pub mod policy;
+pub mod search;
 
 use crate::config::AppConfig;
 use anyhow::Result;
@@ -30,6 +34,9 @@ impl SpotifyWorker {
             "app-remote-control",
             "playlist-modify-public",
             "playlist-modify-private",
+            "user-top-read",
+            "user-read-recently-played",
+            "user-follow-read",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -46,24 +53,25 @@ impl SpotifyWorker {
 
         if let Some(tokens) = &config.auth_tokens
             && let Some(access) = &tokens.access_token
-                && let Some(refresh) = &tokens.refresh_token {
-                    use chrono::Utc;
-                    use rspotify::model::Token;
+            && let Some(refresh) = &tokens.refresh_token
+        {
+            use chrono::Utc;
+            use rspotify::model::Token;
 
-                    let token = Token {
-                        access_token: access.clone(),
-                        refresh_token: Some(refresh.clone()),
-                        expires_in: chrono::Duration::seconds(0),
-                        expires_at: Some(Utc::now()),
-                        scopes: scopes.clone(),
-                    };
+            let token = Token {
+                access_token: access.clone(),
+                refresh_token: Some(refresh.clone()),
+                expires_in: chrono::Duration::seconds(0),
+                expires_at: Some(Utc::now()),
+                scopes: scopes.clone(),
+            };
 
-                    *spotify.get_token().lock().await.unwrap() = Some(token);
-                    return Ok(Self {
-                        client: spotify,
-                        device_id: None,
-                    });
-                }
+            *spotify.get_token().lock().await.unwrap() = Some(token);
+            return Ok(Self {
+                client: spotify,
+                device_id: None,
+            });
+        }
 
         // AuthCodeSpotify standard challenge
         let auth_url = spotify.get_authorize_url(true)?;
@@ -125,5 +133,11 @@ impl SpotifyWorker {
         })
     }
 
-
+    /// Create a SpotifyWorker from an already-authenticated client (for spawned tasks).
+    pub fn from_client(client: AuthCodeSpotify) -> Self {
+        Self {
+            client,
+            device_id: None,
+        }
+    }
 }

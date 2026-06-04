@@ -1,5 +1,7 @@
 use crate::events::AppEvent;
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig};
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
+};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -15,10 +17,7 @@ pub enum MediaUpdate {
     Playback(bool, u32),
 }
 
-pub fn spawn_media_thread(
-    mut rx: mpsc::Receiver<MediaUpdate>,
-    app_tx: mpsc::Sender<AppEvent>,
-) {
+pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sender<AppEvent>) {
     std::thread::spawn(move || {
         #[cfg(not(target_os = "windows"))]
         let hwnd = None;
@@ -51,22 +50,24 @@ pub fn spawn_media_thread(
         let _ = controls.attach(move |e| {
             let is_playing = playing_clone.load(std::sync::atomic::Ordering::Relaxed);
             match e {
-                MediaControlEvent::Play
-                    if !is_playing => {
-                        let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(false));
-                    }
-                MediaControlEvent::Pause
-                    if is_playing => {
-                        let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(true));
-                    }
+                MediaControlEvent::Play if !is_playing => {
+                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(false));
+                }
+                MediaControlEvent::Pause if is_playing => {
+                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(true));
+                }
                 MediaControlEvent::Toggle => {
                     let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(is_playing));
                 }
                 MediaControlEvent::Next => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::NextTrack { current_track_id: None });
+                    let _ = app_tx_clone.blocking_send(AppEvent::NextTrack {
+                        current_track_id: None,
+                    });
                 }
                 MediaControlEvent::Previous => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::PreviousTrack { current_track_id: None });
+                    let _ = app_tx_clone.blocking_send(AppEvent::PreviousTrack {
+                        current_track_id: None,
+                    });
                 }
                 _ => {}
             }
@@ -76,7 +77,13 @@ pub fn spawn_media_thread(
         loop {
             while let Ok(update) = rx.try_recv() {
                 match update {
-                    MediaUpdate::Metadata { title, artist, album, duration_ms, cover_url } => {
+                    MediaUpdate::Metadata {
+                        title,
+                        artist,
+                        album,
+                        duration_ms,
+                        cover_url,
+                    } => {
                         if title != last_title {
                             last_title = title.clone();
                             let duration = Some(Duration::from_millis(duration_ms as u64));
@@ -87,13 +94,14 @@ pub fn spawn_media_thread(
                                 duration,
                                 cover_url: cover_url.as_deref(),
                             };
-                            
+
                             let _ = controls.set_metadata(meta);
                         }
                     }
                     MediaUpdate::Playback(is_playing, progress_ms) => {
                         current_playing.store(is_playing, std::sync::atomic::Ordering::Relaxed);
-                        let progress = Some(MediaPosition(Duration::from_millis(progress_ms as u64)));
+                        let progress =
+                            Some(MediaPosition(Duration::from_millis(progress_ms as u64)));
                         if is_playing {
                             let _ = controls.set_playback(MediaPlayback::Playing { progress });
                         } else {
@@ -114,17 +122,17 @@ pub fn spawn_media_thread(
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 pub mod windows {
-    
+
     use std::mem;
 
-    use windows::core::w;
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor,
-        IsDialogMessageW, PeekMessageW, RegisterClassExW, TranslateMessage, GA_ROOT, MSG,
-        PM_REMOVE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GA_ROOT, GetAncestor,
+        IsDialogMessageW, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, TranslateMessage,
+        WINDOW_EX_STYLE, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW,
     };
+    use windows::core::w;
 
     pub struct DummyWindow {
         pub handle: HWND,
@@ -172,7 +180,7 @@ pub mod windows {
                 }
             }
         }
-        
+
         extern "system" fn wnd_proc(
             hwnd: HWND,
             msg: u32,

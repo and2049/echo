@@ -1,9 +1,9 @@
-use crate::models::{PlaybackItem, Playlist, SearchResults, Track};
+use crate::models::{PlaybackItem, Playlist, SearchResults, Track, TrackListContext};
 use crossterm::event::KeyEvent;
 
 pub enum AppEvent {
     Key(KeyEvent),
-    LoadContextTracks(String, bool, Option<String>, Option<(String, String, String, String)>),
+    LoadContextTracks(TrackListContext),
     PlayTrack {
         context_id: String,
         track_id: String,
@@ -46,6 +46,14 @@ pub enum AppEvent {
     ToggleCondensedLyrics,
     FetchLyrics(String, String, String, u32),
     ForcePlaybackSync,
+    CancelArtistPageLoad,
+    FetchTopTracks,
+    FetchRecentlyPlayed,
+    FetchFollowedArtists,
+    LoadArtistPage {
+        artist_id: String,
+        artist_name: Option<String>,
+    },
 }
 
 pub enum WorkerEvent {
@@ -54,8 +62,19 @@ pub enum WorkerEvent {
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
-    TracksLoaded(Vec<Track>, Option<(String, String, String, String)>, bool),
-    AudioVisualizationReady(std::sync::Arc<parking_lot::Mutex<[f32; 32]>>, std::sync::Arc<std::sync::atomic::AtomicBool>),
+    TracksLoaded(Vec<Track>, TrackListContext),
+    TracksLoadFailed {
+        context_id: String,
+        message: String,
+    },
+    ApiRequestFailed {
+        label: String,
+        message: String,
+    },
+    AudioVisualizationReady(
+        std::sync::Arc<parking_lot::Mutex<[f32; 32]>>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ),
     PlaybackStarted {
         item: PlaybackItem,
     },
@@ -87,4 +106,21 @@ pub enum WorkerEvent {
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
     DevicesLoaded(Vec<crate::models::Device>),
     LyricsLoaded(Option<crate::models::Lyrics>),
+    TopTracksLoaded(Vec<Track>),
+    RecentlyPlayedLoaded(Vec<Track>),
+    FollowedArtistsLoaded(Vec<crate::models::Artist>),
+    ArtistPageLoaded {
+        artist_id: String,
+        artist_name: String,
+        top_tracks: Vec<crate::models::Track>,
+        albums: Vec<crate::models::Album>,
+    },
+    ArtistPageLoadFailed {
+        artist_id: String,
+        message: String,
+    },
+    ArtistPageRateLimited {
+        artist_id: String,
+        retry_after_secs: u64,
+    },
 }

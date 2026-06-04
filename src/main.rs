@@ -1,4 +1,4 @@
-mod app;
+    mod app;
 mod config;
 mod events;
 mod handlers;
@@ -390,6 +390,28 @@ async fn main() -> Result<()> {
                             state.liked_tracks.remove(&id);
                         }
                     }
+                }
+                WorkerEvent::TopTracksLoaded(tracks) => {
+                    state.top_tracks = tracks;
+                }
+                WorkerEvent::RecentlyPlayedLoaded(tracks) => {
+                    state.recently_played = tracks;
+                }
+                WorkerEvent::FollowedArtistsLoaded(artists) => {
+                    state.followed_artists = artists;
+                }
+                WorkerEvent::ArtistPageLoaded { artist_id, artist_name, top_tracks, albums } => {
+                    state.artist_page_data = Some(crate::models::ArtistPageData {
+                        artist_id,
+                        artist_name,
+                        top_tracks,
+                        albums,
+                    });
+                    state.active_view = app::ActiveView::ArtistPage;
+                    state.artist_page_tab = app::ArtistPageTab::TopTracks;
+                    state.artist_page_track_index = 0;
+                    state.artist_page_album_index = 0;
+                    state.artist_page_loading = false;
                 }
             }
         }

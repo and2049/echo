@@ -1,9 +1,9 @@
 use super::SpotifyWorker;
 use crate::models::{PlaybackItem, Track};
 use anyhow::Result;
-use rspotify::prelude::*;
-use rspotify::model::Id;
 use rspotify::AuthCodeSpotify;
+use rspotify::model::Id;
+use rspotify::prelude::*;
 
 const PLAYBACK_TYPES: [&rspotify::model::AdditionalType; 2] = [
     &rspotify::model::AdditionalType::Track,
@@ -11,7 +11,6 @@ const PLAYBACK_TYPES: [&rspotify::model::AdditionalType; 2] = [
 ];
 
 impl SpotifyWorker {
-
     pub async fn get_device_id(&mut self) -> Option<String> {
         if self.device_id.is_some() {
             return self.device_id.clone();
@@ -78,7 +77,11 @@ impl SpotifyWorker {
             artist,
             duration_ms,
             image_url,
-            album_id: value.get("album").and_then(|a| a.get("id")).and_then(|i| i.as_str()).map(str::to_string),
+            album_id: value
+                .get("album")
+                .and_then(|a| a.get("id"))
+                .and_then(|i| i.as_str())
+                .map(str::to_string),
         })
     }
 
@@ -196,10 +199,9 @@ impl SpotifyWorker {
             let device_name = device.name.clone();
 
             // Auto-cache the device ID if we found an active playback
-            if self.device_id.is_none()
-                && device.name == "echo-rs" {
-                    self.device_id = device.id.clone();
-                }
+            if self.device_id.is_none() && device.name == "echo-rs" {
+                self.device_id = device.id.clone();
+            }
 
             return Ok(Some((
                 is_playing,
@@ -227,7 +229,7 @@ impl SpotifyWorker {
 
             return Ok(Some((
                 is_playing,
-                false, // Default shuffle
+                false,             // Default shuffle
                 "Off".to_string(), // Default repeat
                 None,
                 "Unknown Device".to_string(),
@@ -278,7 +280,6 @@ impl SpotifyWorker {
         self.client.volume(volume, device.as_deref()).await?;
         Ok(())
     }
-
 
     pub async fn play_track(
         &mut self,
@@ -344,14 +345,15 @@ impl SpotifyWorker {
         Ok((title, artist, image_url))
     }
 
-
-
     pub async fn add_to_queue(&self, track_ids: Vec<String>) -> anyhow::Result<()> {
         use rspotify::model::TrackId;
         use rspotify::prelude::OAuthClient;
         for track_id in track_ids {
             if let Ok(id) = TrackId::from_id(&track_id) {
-                let _ = self.client.add_item_to_queue(id.into(), self.device_id.as_deref()).await;
+                let _ = self
+                    .client
+                    .add_item_to_queue(id.into(), self.device_id.as_deref())
+                    .await;
             }
         }
         Ok(())
@@ -361,33 +363,46 @@ impl SpotifyWorker {
         let queue = match self.client.current_user_queue().await {
             Ok(q) => q,
             Err(e) => {
-                let _ = std::fs::write("echo-debug-queue.log", format!("fetch_queue error: {:?}", e));
+                let _ = std::fs::write(
+                    "echo-debug-queue.log",
+                    format!("fetch_queue error: {:?}", e),
+                );
                 return Err(e.into());
             }
         };
-        let _ = std::fs::write("echo-debug-queue.log", format!(
-            "currently_playing: {:?}\nqueue length: {}\nfirst item type: {:?}",
-            queue.currently_playing.as_ref().map(|i| match i {
-                rspotify::model::PlayableItem::Track(t) => format!("Track: {}", t.name),
-                rspotify::model::PlayableItem::Episode(e) => format!("Episode: {}", e.name),
-                _ => "Unknown".to_string(),
-            }),
-            queue.queue.len(),
-            queue.queue.first().map(|i| match i {
-                rspotify::model::PlayableItem::Track(_) => "Track",
-                rspotify::model::PlayableItem::Episode(_) => "Episode",
-                _ => "Unknown",
-            }),
-        ));
+        let _ = std::fs::write(
+            "echo-debug-queue.log",
+            format!(
+                "currently_playing: {:?}\nqueue length: {}\nfirst item type: {:?}",
+                queue.currently_playing.as_ref().map(|i| match i {
+                    rspotify::model::PlayableItem::Track(t) => format!("Track: {}", t.name),
+                    rspotify::model::PlayableItem::Episode(e) => format!("Episode: {}", e.name),
+                    _ => "Unknown".to_string(),
+                }),
+                queue.queue.len(),
+                queue.queue.first().map(|i| match i {
+                    rspotify::model::PlayableItem::Track(_) => "Track",
+                    rspotify::model::PlayableItem::Episode(_) => "Episode",
+                    _ => "Unknown",
+                }),
+            ),
+        );
         let mut out = Vec::new();
         for item in queue.queue {
             match item {
                 rspotify::model::PlayableItem::Track(track) => {
-                    if track.is_local { continue; }
+                    if track.is_local {
+                        continue;
+                    }
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         name: track.name,
-                        artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        artist: track
+                            .artists
+                            .into_iter()
+                            .map(|a| a.name)
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
@@ -397,23 +412,38 @@ impl SpotifyWorker {
                     // The queue endpoint returns simplified track objects that rspotify
                     // can't deserialize as FullTrack — extract from raw JSON.
                     let item_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if item_type == "episode" { continue; }
+                    if item_type == "episode" {
+                        continue;
+                    }
 
-                    let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    if id.is_empty() { continue; }
+                    let id = val
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if id.is_empty() {
+                        continue;
+                    }
 
-                    let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
-                    let artist = val.get("artists")
+                    let name = val
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Unknown")
+                        .to_string();
+                    let artist = val
+                        .get("artists")
                         .and_then(|a| a.as_array())
-                        .map(|arr| arr.iter()
-                            .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
-                            .collect::<Vec<_>>()
-                            .join(", "))
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
                         .unwrap_or_default();
-                    let duration_ms = val.get("duration_ms")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as u32;
-                    let image_url = val.get("album")
+                    let duration_ms =
+                        val.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let image_url = val
+                        .get("album")
                         .and_then(|a| a.get("images"))
                         .and_then(|imgs| imgs.as_array())
                         .and_then(|arr| arr.first())
@@ -421,12 +451,20 @@ impl SpotifyWorker {
                         .and_then(|u| u.as_str())
                         .map(|s| s.to_string());
 
-                    let album_id = val.get("album")
+                    let album_id = val
+                        .get("album")
                         .and_then(|a| a.get("id"))
                         .and_then(|i| i.as_str())
                         .map(|s| s.to_string());
 
-                    out.push(Track { id, name, artist, duration_ms, image_url, album_id });
+                    out.push(Track {
+                        id,
+                        name,
+                        artist,
+                        duration_ms,
+                        image_url,
+                        album_id,
+                    });
                 }
                 _ => {}
             }
@@ -454,5 +492,4 @@ impl SpotifyWorker {
         self.client.transfer_playback(device_id, Some(true)).await?;
         Ok(())
     }
-
 }

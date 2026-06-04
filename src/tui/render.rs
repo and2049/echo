@@ -5,9 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{
-        Block, Borders, HighlightSpacing, List, ListItem, Paragraph,
-    },
+    widgets::{Block, Borders, HighlightSpacing, List, ListItem, Paragraph},
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -59,6 +57,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         crate::tui::search::render_search_results(frame, state, tracks_area);
     } else if state.active_view == ActiveView::Queue {
         crate::tui::queue::render_queue(frame, state, tracks_area);
+    } else if state.active_view == ActiveView::ArtistList {
+        crate::tui::library::render_artist_list(frame, state, tracks_area);
+    } else if state.active_view == ActiveView::ArtistPage {
+        crate::tui::library::render_artist_page(frame, state, tracks_area);
     } else {
         crate::tui::library::render_track_list(frame, state, tracks_area);
     }
@@ -84,25 +86,45 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     frame.render_widget(cmd_bar, command_bar_area);
 
     if state.mode == AppMode::Command && !state.command_suggestions.is_empty() {
-        let max_len = state.command_suggestions.iter().map(|s| s.len()).max().unwrap_or(10) as u16;
+        let max_len = state
+            .command_suggestions
+            .iter()
+            .map(|s| s.len())
+            .max()
+            .unwrap_or(10) as u16;
         let width = max_len + 4;
-        let height = state.command_suggestions.len() as u16 + 2; 
-        let x = 2; 
+        let height = state.command_suggestions.len() as u16 + 2;
+        let x = 2;
         let y = command_bar_area.y.saturating_sub(height);
-        let popup_area = Rect { x, y, width, height }; 
-        
-        let items: Vec<ratatui::widgets::ListItem> = state.command_suggestions.iter().enumerate().map(|(i, s)| {
-            let style = if Some(i) == state.command_suggestion_index {
-                ratatui::style::Style::default().bg(state.active_theme.highlight_bg).fg(state.active_theme.highlight_fg)
-            } else {
-                state.active_theme.base_style()
-            };
-            ratatui::widgets::ListItem::new(s.clone()).style(style)
-        }).collect();
-        
-        let list = ratatui::widgets::List::new(items)
-            .block(Block::default().borders(Borders::ALL).style(state.active_theme.base_style()));
-        
+        let popup_area = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+
+        let items: Vec<ratatui::widgets::ListItem> = state
+            .command_suggestions
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let style = if Some(i) == state.command_suggestion_index {
+                    ratatui::style::Style::default()
+                        .bg(state.active_theme.highlight_bg)
+                        .fg(state.active_theme.highlight_fg)
+                } else {
+                    state.active_theme.base_style()
+                };
+                ratatui::widgets::ListItem::new(s.clone()).style(style)
+            })
+            .collect();
+
+        let list = ratatui::widgets::List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(state.active_theme.base_style()),
+        );
+
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(list, popup_area);
     }
@@ -136,7 +158,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
     }
-    
+
     if let Some(album_ids) = &state.album_mass_delete_prompt {
         let count = album_ids.len();
         let popup_area = centered_rect(60, 20, frame.area());
@@ -145,7 +167,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 if count == 1 {
                     "Are you sure you want to remove this album from your library?".to_string()
                 } else {
-                    format!("Are you sure you want to remove these {} albums from your library?", count)
+                    format!(
+                        "Are you sure you want to remove these {} albums from your library?",
+                        count
+                    )
                 },
                 state.active_theme.error_style(),
             )),
@@ -207,7 +232,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 if track_ids.len() == 1 {
                     "Are you sure you want to remove this track from the playlist?".to_string()
                 } else {
-                    format!("Are you sure you want to remove these {} tracks from the playlist?", track_ids.len())
+                    format!(
+                        "Are you sure you want to remove these {} tracks from the playlist?",
+                        track_ids.len()
+                    )
                 },
                 state.active_theme.error_style(),
             )),
@@ -234,12 +262,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     if state.liked_track_remove_prompt.is_some() {
         let popup_area = centered_rect(60, 40, frame.area());
-        let popup = Paragraph::new(vec![
-            Line::from(Span::styled(
-                crate::i18n::t("prompts.remove_from_liked", &state.library_config.language),
-                state.active_theme.error_style(),
-            )),
-        ])
+        let popup = Paragraph::new(vec![Line::from(Span::styled(
+            crate::i18n::t("prompts.remove_from_liked", &state.library_config.language),
+            state.active_theme.error_style(),
+        ))])
         .style(state.active_theme.base_style())
         .block(
             Block::default()
@@ -257,9 +283,13 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     if state.playlist_add_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
-        
-        let user_playlists: Vec<_> = state.playlists.iter().filter(|p| Some(&p.owner_id) == state.user_id.as_ref()).collect();
-        
+
+        let user_playlists: Vec<_> = state
+            .playlists
+            .iter()
+            .filter(|p| Some(&p.owner_id) == state.user_id.as_ref())
+            .collect();
+
         let items: Vec<ratatui::widgets::ListItem> = user_playlists
             .iter()
             .enumerate()
@@ -292,8 +322,9 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     if state.device_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
-        
-        let items: Vec<ratatui::widgets::ListItem> = state.devices
+
+        let items: Vec<ratatui::widgets::ListItem> = state
+            .devices
             .iter()
             .enumerate()
             .map(|(i, d)| {
@@ -302,14 +333,14 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 } else {
                     state.active_theme.base_style()
                 };
-                
+
                 let active_marker = if d.is_active { " [Active]" } else { "" };
                 let text = format!("{} ({}%){}", d.name, d.volume_percent, active_marker);
-                
+
                 if d.is_active && i != state.selected_device_index {
                     style = style.fg(state.active_theme.primary);
                 }
-                
+
                 ratatui::widgets::ListItem::new(text).style(style)
             })
             .collect();
@@ -333,16 +364,16 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     // Check if we are waiting for discovery
     if std::path::Path::new("echo-librespot-status.log").exists() {
-        let popup_area = centered_rect(60, 30, frame.area());
+        let popup_area = centered_rect(72, 32, frame.area());
         let popup = Paragraph::new(vec![
             Line::from("Spotify Connect Onboarding Required")
                 .style(state.active_theme.secondary_style()),
             Line::from(""),
-            Line::from("1. Open the official Spotify app on your phone or desktop."),
-            Line::from("2. Tap the 'Devices' icon."),
-            Line::from("3. Select 'echo-rs' from the list of available devices."),
+            Line::from("1. Open Spotify on your phone or desktop."),
+            Line::from("2. Open the Devices picker."),
+            Line::from("3. Select 'echo-rs' from available devices."),
             Line::from(""),
-            Line::from("Once connected, Echo will automatically transition to normal operation!"),
+            Line::from("Echo will continue once the device connects."),
         ])
         .style(state.active_theme.base_style())
         .block(
@@ -352,31 +383,36 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 .style(state.active_theme.base_style())
                 .border_style(state.active_theme.secondary_style()),
         )
-        .alignment(ratatui::layout::Alignment::Center)
+        .alignment(ratatui::layout::Alignment::Left)
         .wrap(ratatui::widgets::Wrap { trim: true });
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
     }
-    
+
     render_lyrics_modal(frame, state);
 }
 
 pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
-    if !state.lyrics_modal_open { return; }
+    if !state.lyrics_modal_open {
+        return;
+    }
 
     let popup_area = centered_rect(60, 80, frame.area());
-    
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Lyrics ")
         .style(state.active_theme.base_style())
         .border_style(state.active_theme.primary_style());
-        
+
     frame.render_widget(ratatui::widgets::Clear, popup_area);
 
     if state.is_fetching_lyrics {
-        let p = Paragraph::new("Loading lyrics...").alignment(Alignment::Center).block(block).style(state.active_theme.base_style());
+        let p = Paragraph::new("Loading lyrics...")
+            .alignment(Alignment::Center)
+            .block(block)
+            .style(state.active_theme.base_style());
         frame.render_widget(p, popup_area);
         return;
     }
@@ -384,7 +420,7 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
     if let Some(lyrics) = &state.current_lyrics {
         let pb = &state.playback;
         let mut current_idx = 0;
-        
+
         for (i, line) in lyrics.lines.iter().enumerate() {
             if line.start_ms <= pb.progress_ms {
                 current_idx = i;
@@ -392,11 +428,14 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
                 break;
             }
         }
-        
+
         let mut items = Vec::new();
         for (i, line) in lyrics.lines.iter().enumerate() {
             let style = if i == current_idx {
-                state.active_theme.primary_style().add_modifier(Modifier::BOLD)
+                state
+                    .active_theme
+                    .primary_style()
+                    .add_modifier(Modifier::BOLD)
             } else if i > current_idx {
                 state.active_theme.muted_style()
             } else {
@@ -407,21 +446,29 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
 
         let list = ratatui::widgets::List::new(items)
             .block(block)
-            .highlight_style(state.active_theme.primary_style().add_modifier(Modifier::BOLD));
+            .highlight_style(
+                state
+                    .active_theme
+                    .primary_style()
+                    .add_modifier(Modifier::BOLD),
+            );
 
         let mut list_state = ratatui::widgets::ListState::default();
-        
+
         // Center the active item
-        let height = popup_area.height.saturating_sub(2) as usize; 
+        let height = popup_area.height.saturating_sub(2) as usize;
         let offset = height / 2;
         let start = current_idx.saturating_sub(offset);
-        
+
         *list_state.offset_mut() = start;
         list_state.select(Some(current_idx));
 
         frame.render_stateful_widget(list, popup_area, &mut list_state);
     } else {
-        let p = Paragraph::new("No lyrics found.").alignment(Alignment::Center).block(block).style(state.active_theme.base_style());
+        let p = Paragraph::new("No lyrics found.")
+            .alignment(Alignment::Center)
+            .block(block)
+            .style(state.active_theme.base_style());
         frame.render_widget(p, popup_area);
     }
 }
@@ -642,7 +689,10 @@ pub fn render_setup(frame: &mut Frame, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{buffer::Buffer, style::{Color, Style}};
+    use ratatui::{
+        buffer::Buffer,
+        style::{Color, Style},
+    };
     use unicode_width::UnicodeWidthStr;
 
     fn render_row_text(text: &str, style: Style) -> Buffer {
@@ -794,6 +844,4 @@ mod tests {
         assert_eq!(duration, "    2:46 ");
         assert_eq!(duration.width(), DURATION_COLUMN_WIDTH as usize);
     }
-
-
 }

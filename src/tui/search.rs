@@ -18,14 +18,26 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let t_title = if state.active_search_tab == SearchTab::Tracks {
-        format!("[ {} ]", crate::i18n::t("ui.tracks", &state.library_config.language))
+        format!(
+            "[ {} ]",
+            crate::i18n::t("ui.tracks", &state.library_config.language)
+        )
     } else {
-        format!("  {}  ", crate::i18n::t("ui.tracks", &state.library_config.language))
+        format!(
+            "  {}  ",
+            crate::i18n::t("ui.tracks", &state.library_config.language)
+        )
     };
     let a_title = if state.active_search_tab == SearchTab::Albums {
-        format!("[ {} ]", crate::i18n::t("ui.albums", &state.library_config.language))
+        format!(
+            "[ {} ]",
+            crate::i18n::t("ui.albums", &state.library_config.language)
+        )
     } else {
-        format!("  {}  ", crate::i18n::t("ui.albums", &state.library_config.language))
+        format!(
+            "  {}  ",
+            crate::i18n::t("ui.albums", &state.library_config.language)
+        )
     };
     let tab_title = format!("{} {}", t_title, a_title);
 
@@ -36,7 +48,8 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
         .title(format!(
             " {}: {} — {} ",
             crate::i18n::t("ui.search", &state.library_config.language),
-            state.search_context_query, tab_title
+            state.search_context_query,
+            tab_title
         ));
 
     let inner = search_block.inner(area);
@@ -52,10 +65,10 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                 crate::i18n::t("ui.tracks", &state.library_config.language),
                 crate::i18n::t("ui.artist", &state.library_config.language),
                 crate::i18n::t("ui.album", &state.library_config.language),
-                crate::i18n::t("ui.duration", &state.library_config.language)
+                crate::i18n::t("ui.duration", &state.library_config.language),
             ])
-                .style(header_style)
-                .height(1);
+            .style(header_style)
+            .height(1);
             let visual_range = if state.active_view == ActiveView::SearchResults {
                 state.get_visual_selection_range()
             } else {
@@ -92,13 +105,14 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     let w_track = (inner.width * 35 / 100).saturating_sub(1);
                     let w_artist = (inner.width * 25 / 100).saturating_sub(1);
                     let w_album = (inner.width * 30 / 100).saturating_sub(1);
-                    
+
                     let liked_str = if state.liked_tracks.contains(&t.id) {
                         "♥"
                     } else {
                         " "
                     };
-                    let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+                    let liked_cell =
+                        Cell::from(liked_str).style(state.active_theme.secondary_style());
 
                     Row::new(vec![
                         liked_cell,

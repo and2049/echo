@@ -10,7 +10,7 @@ async fn main() -> Result<()> {
 
     let creds = config.spotify_credentials.as_ref().unwrap();
     let credentials = Credentials::new(&creds.client_id, &creds.client_secret);
-    
+
     let scopes: HashSet<String> = [
         "user-read-private",
         "playlist-read-private",
@@ -53,7 +53,9 @@ async fn main() -> Result<()> {
     let mut albums = vec![];
     while let Some(item) = stream.next().await {
         albums.push(item);
-        if albums.len() >= 5 { break; }
+        if albums.len() >= 5 {
+            break;
+        }
     }
     println!("Albums: {:?}", albums);
 
