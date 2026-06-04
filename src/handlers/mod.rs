@@ -1,7 +1,10 @@
+pub mod artist_page;
+pub mod browse;
 pub mod command;
 pub mod normal;
 pub mod search;
 pub mod setup;
+pub mod tracklist;
 pub mod visual;
 
 use crate::app::{AppMode, AppState};

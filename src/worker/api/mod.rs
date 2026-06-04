@@ -3,8 +3,10 @@ pub mod client;
 pub mod first_party;
 pub mod library;
 pub mod lyrics;
+pub mod parse;
 pub mod playback;
 pub mod policy;
+pub mod rate_limit;
 pub mod search;
 
 use crate::config::AppConfig;

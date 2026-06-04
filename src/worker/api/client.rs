@@ -10,6 +10,7 @@ use super::{
     SpotifyWorker,
     cache::{CacheKey, FetchGate, SpotifyApiCache},
     first_party::{SpotifyWebApi, rate_limit_error},
+    parse,
     policy::ApiEndpoint,
 };
 
@@ -212,7 +213,7 @@ impl EchoSpotifyClient {
         Ok(json
             .get("items")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse_track).collect())
+            .map(|items| items.iter().filter_map(parse::track).collect())
             .unwrap_or_default())
     }
 
@@ -229,7 +230,7 @@ impl EchoSpotifyClient {
             .map(|items| {
                 let mut tracks = Vec::new();
                 for item in items {
-                    if let Some(track) = item.get("track").and_then(parse_track) {
+                    if let Some(track) = item.get("track").and_then(parse::track) {
                         if !tracks
                             .iter()
                             .any(|existing: &Track| existing.id == track.id)
@@ -254,7 +255,7 @@ impl EchoSpotifyClient {
             .get("artists")
             .and_then(|v| v.get("items"))
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse_artist).collect())
+            .map(|items| items.iter().filter_map(parse::artist).collect())
             .unwrap_or_default())
     }
 
@@ -285,7 +286,7 @@ impl EchoSpotifyClient {
         let top_tracks = tracks_json
             .get("tracks")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse_track).collect())
+            .map(|items| items.iter().filter_map(parse::track).collect())
             .unwrap_or_default();
 
         let albums_url = format!(
@@ -297,103 +298,12 @@ impl EchoSpotifyClient {
         let mut albums: Vec<Album> = albums_json
             .get("items")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse_album).collect())
+            .map(|items| items.iter().filter_map(parse::album).collect())
             .unwrap_or_default();
         albums.sort_by(|a, b| b.release_year.cmp(&a.release_year));
 
         Ok((artist_name, top_tracks, albums))
     }
-}
-
-fn parse_track(track: &serde_json::Value) -> Option<Track> {
-    if track
-        .get("is_local")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    let id = track.get("id")?.as_str()?.to_string();
-    let album = track.get("album");
-    Some(Track {
-        id,
-        name: track.get("name")?.as_str()?.to_string(),
-        artist: track
-            .get("artists")
-            .and_then(|v| v.as_array())
-            .map(|artists| {
-                artists
-                    .iter()
-                    .filter_map(|artist| artist.get("name").and_then(|v| v.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default(),
-        duration_ms: track
-            .get("duration_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default() as u32,
-        image_url: album
-            .and_then(|v| v.get("images"))
-            .and_then(|v| v.as_array())
-            .and_then(|images| images.first())
-            .and_then(|image| image.get("url"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string()),
-        album_id: album
-            .and_then(|v| v.get("id"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string()),
-    })
-}
-
-fn parse_album(album: &serde_json::Value) -> Option<Album> {
-    let release_date = album
-        .get("release_date")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
-    Some(Album {
-        id: album.get("id")?.as_str()?.to_string(),
-        name: album.get("name")?.as_str()?.to_string(),
-        artists: album
-            .get("artists")
-            .and_then(|v| v.as_array())
-            .map(|artists| {
-                artists
-                    .iter()
-                    .filter_map(|artist| artist.get("name").and_then(|v| v.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default(),
-        image_url: album
-            .get("images")
-            .and_then(|v| v.as_array())
-            .and_then(|images| images.first())
-            .and_then(|image| image.get("url"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string()),
-        release_year: release_date.split('-').next().unwrap_or("").to_string(),
-    })
-}
-
-fn parse_artist(artist: &serde_json::Value) -> Option<Artist> {
-    Some(Artist {
-        id: artist.get("id")?.as_str()?.to_string(),
-        name: artist.get("name")?.as_str()?.to_string(),
-        followers: artist
-            .get("followers")
-            .and_then(|v| v.get("total"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default() as u32,
-        image_url: artist
-            .get("images")
-            .and_then(|v| v.as_array())
-            .and_then(|images| images.first())
-            .and_then(|image| image.get("url"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string()),
-    })
 }
 
 pub fn format_retry_after(duration: Duration) -> String {

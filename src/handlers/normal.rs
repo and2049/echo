@@ -1,5 +1,6 @@
 use crate::app::{ActiveView, AppState};
 use crate::events::AppEvent;
+use crate::handlers::{artist_page, browse, tracklist};
 use crate::models::TrackListContext;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -181,12 +182,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     if state.selected_playlist_index < 2 {
                         state.selected_playlist_index += 1;
                     }
-                    state.active_browse_node = match state.selected_playlist_index {
-                        0 => crate::models::BrowseNode::TopTracks,
-                        1 => crate::models::BrowseNode::RecentlyPlayed,
-                        _ => crate::models::BrowseNode::FollowedArtists,
-                    };
-                    return browse_load_event_if_needed(state);
+                    browse::select_node_from_library_index(state);
+                    return browse::load_event_if_needed(state);
                 } else {
                     let max_len = if state.active_library_tab == crate::app::LibraryTab::Albums {
                         state.saved_albums.len()
@@ -255,12 +252,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     if state.selected_playlist_index > 0 {
                         state.selected_playlist_index -= 1;
                     }
-                    state.active_browse_node = match state.selected_playlist_index {
-                        0 => crate::models::BrowseNode::TopTracks,
-                        1 => crate::models::BrowseNode::RecentlyPlayed,
-                        _ => crate::models::BrowseNode::FollowedArtists,
-                    };
-                    return browse_load_event_if_needed(state);
+                    browse::select_node_from_library_index(state);
+                    return browse::load_event_if_needed(state);
                 } else {
                     if state.selected_playlist_index > 0 {
                         state.selected_playlist_index -= 1;
@@ -396,32 +389,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         None
                     }
                 } else if state.active_library_tab == crate::app::LibraryTab::Browse {
-                    match state.active_browse_node {
-                        crate::models::BrowseNode::TopTracks => {
-                            if state.top_tracks.is_empty() {
-                                return Some(AppEvent::FetchTopTracks);
-                            }
-                            state.show_generated_tracks(
-                                state.top_tracks.clone(),
-                                TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
-                            );
-                        }
-                        crate::models::BrowseNode::RecentlyPlayed => {
-                            if state.recently_played.is_empty() {
-                                return Some(AppEvent::FetchRecentlyPlayed);
-                            }
-                            state.show_generated_tracks(
-                                state.recently_played.clone(),
-                                TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
-                            );
-                        }
-                        crate::models::BrowseNode::FollowedArtists => {
-                            if state.followed_artists.is_empty() {
-                                return Some(AppEvent::FetchFollowedArtists);
-                            }
-                            state.active_view = ActiveView::ArtistList;
-                            state.selected_artist_index = 0;
-                        }
+                    if let Some(event) = browse::enter_active_node(state) {
+                        return Some(event);
                     }
                     None
                 } else {
@@ -461,21 +430,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     return Some(AppEvent::LoadContextTracks(context));
                 }
             } else if state.active_view == ActiveView::TrackList {
-                if state.selected_track_index < state.tracks.len() {
-                    let track = &state.tracks[state.selected_track_index];
-                    if let Some(context) = state.active_tracklist_context.as_ref() {
-                        return Some(AppEvent::PlayTrack {
-                            context_id: context.playback_context_id().to_string(),
-                            track_id: track.id.clone(),
-                            is_album: context.is_album(),
-                            title: track.name.clone(),
-                            artist: track.artist.clone(),
-                            duration_ms: track.duration_ms,
-                            image_url: track.image_url.clone(),
-                            album_id: track.album_id.clone(),
-                        });
-                    }
-                }
+                return tracklist::play_selected(state);
             } else if state.active_view == ActiveView::SearchResults {
                 let i = state.selected_search_index;
                 match state.active_search_tab {
@@ -510,48 +465,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                 }
             } else if state.active_view == ActiveView::ArtistList {
-                // Enter on a followed artist — load their artist page
-                if let Some(artist) = state.followed_artists.get(state.selected_artist_index) {
-                    let artist_id = artist.id.clone();
-                    let artist_name = artist.name.clone();
-                    state.begin_artist_page_load(artist_id.clone(), artist_name.clone());
-                    return Some(AppEvent::LoadArtistPage {
-                        artist_id,
-                        artist_name: Some(artist_name),
-                    });
-                }
+                return artist_page::enter_followed_artist(state);
             } else if state.active_view == ActiveView::ArtistPage {
-                if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                    // Play the selected top track (URI-only, no context)
-                    if let Some(ref data) = state.artist_page_data.clone() {
-                        if let Some(track) = data.top_tracks.get(state.artist_page_track_index) {
-                            return Some(AppEvent::PlayTrack {
-                                context_id: "LIKED_SONGS".to_string(),
-                                track_id: track.id.clone(),
-                                is_album: false,
-                                title: track.name.clone(),
-                                artist: track.artist.clone(),
-                                duration_ms: track.duration_ms,
-                                image_url: track.image_url.clone(),
-                                album_id: track.album_id.clone(),
-                            });
-                        }
-                    }
-                } else {
-                    // Drill into the selected album
-                    if let Some(ref data) = state.artist_page_data.clone() {
-                        if let Some(album) = data.albums.get(state.artist_page_album_index) {
-                            let context = TrackListContext::album(
-                                album.id.clone(),
-                                album.name.clone(),
-                                album.artists.clone(),
-                                album.image_url.clone(),
-                            );
-                            state.begin_tracklist_load(context.clone());
-                            return Some(AppEvent::LoadContextTracks(context));
-                        }
-                    }
-                }
+                return artist_page::enter_artist_page_selection(state);
             }
         }
         KeyCode::Char(':') => {
@@ -654,17 +570,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('d') => {
-            if state.active_view == ActiveView::TrackList
-                && let Some(track) = state.tracks.get(state.selected_track_index)
-                && let Some(context) = &state.active_tracklist_context
-                && context.can_modify_playlist(state.user_id.as_ref())
-            {
-                if state.pending_d_press {
-                    state.track_delete_prompt = Some((context.id.clone(), vec![track.id.clone()]));
-                    state.pending_d_press = false;
-                } else {
-                    state.pending_d_press = true;
-                }
+            if state.active_view == ActiveView::TrackList {
+                tracklist::mark_selected_for_delete(state);
             }
         }
         KeyCode::Char('A') => {
@@ -787,10 +694,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             {
                 state.active_view = ActiveView::Library;
             } else if state.active_view == ActiveView::ArtistPage {
-                // Go back to the artist list
-                state.active_view = ActiveView::ArtistList;
-                state.clear_pending_artist_page();
-                return Some(AppEvent::CancelArtistPageLoad);
+                return Some(artist_page::back_to_artist_list(state));
             } else if state.active_view == ActiveView::SearchResults {
                 // Clear search and return to Library
                 state.active_view = ActiveView::Library;
@@ -932,7 +836,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.selected_playlist_index = 0;
                 if state.active_library_tab == crate::app::LibraryTab::Browse {
                     state.active_browse_node = crate::models::BrowseNode::TopTracks;
-                    return browse_load_event_if_needed(state);
+                    return browse::load_event_if_needed(state);
                 }
             } else if state.active_view == ActiveView::SearchResults {
                 state.active_search_tab = match state.active_search_tab {
@@ -941,13 +845,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 };
                 state.selected_search_index = 0;
             } else if state.active_view == ActiveView::ArtistPage {
-                state.artist_page_tab = match state.artist_page_tab {
-                    crate::app::ArtistPageTab::TopTracks => crate::app::ArtistPageTab::Albums,
-                    crate::app::ArtistPageTab::Albums => crate::app::ArtistPageTab::TopTracks,
-                };
-                // Reset selection to top when switching tabs
-                state.artist_page_track_index = 0;
-                state.artist_page_album_index = 0;
+                artist_page::toggle_tab(state);
             }
         }
         _ => {}
@@ -959,20 +857,5 @@ fn search_results_len(state: &AppState) -> usize {
     match state.active_search_tab {
         crate::app::SearchTab::Tracks => state.search_results.tracks.len(),
         crate::app::SearchTab::Albums => state.search_results.albums.len(),
-    }
-}
-
-fn browse_load_event_if_needed(state: &AppState) -> Option<AppEvent> {
-    match state.active_browse_node {
-        crate::models::BrowseNode::TopTracks if state.top_tracks.is_empty() => {
-            Some(AppEvent::FetchTopTracks)
-        }
-        crate::models::BrowseNode::RecentlyPlayed if state.recently_played.is_empty() => {
-            Some(AppEvent::FetchRecentlyPlayed)
-        }
-        crate::models::BrowseNode::FollowedArtists if state.followed_artists.is_empty() => {
-            Some(AppEvent::FetchFollowedArtists)
-        }
-        _ => None,
     }
 }

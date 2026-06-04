@@ -1,18 +1,18 @@
+use super::SpotifyWorker;
 use crate::models::{Playlist, Track};
 use anyhow::Result;
-use rspotify::prelude::*;
 use rspotify::model::Id;
-use super::SpotifyWorker;
+use rspotify::prelude::*;
 
 impl SpotifyWorker {
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
-        let page = match self
-            .client
-            .current_user_playlists_manual(None, None)
-            .await {
+        let page = match self.client.current_user_playlists_manual(None, None).await {
             Ok(p) => p,
             Err(e) => {
-                let _ = std::fs::write("echo-debug-user-playlists.log", format!("User playlists fetch error: {:?}", e));
+                let _ = std::fs::write(
+                    "echo-debug-user-playlists.log",
+                    format!("User playlists fetch error: {:?}", e),
+                );
                 return Err(e.into());
             }
         };
@@ -48,12 +48,21 @@ impl SpotifyWorker {
                     out.push(crate::models::Album {
                         id: album.id.id().to_string(),
                         name: album.name,
-                        artists: album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                        artists: album
+                            .artists
+                            .into_iter()
+                            .map(|a| a.name)
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         image_url: album.images.first().map(|i| i.url.clone()),
+                        release_year: album.release_date.chars().take(4).collect(),
                     });
                 }
                 Err(e) => {
-                    let _ = std::fs::write("echo-debug-albums.log", format!("Albums fetch error: {:?}", e));
+                    let _ = std::fs::write(
+                        "echo-debug-albums.log",
+                        format!("Albums fetch error: {:?}", e),
+                    );
                     return Err(e.into());
                 }
             }
@@ -97,17 +106,25 @@ impl SpotifyWorker {
         }
 
         let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
-        
+
         // Debug raw request
         if let Ok(token_mutex) = self.client.get_token().lock().await
             && let Some(token) = token_mutex.as_ref()
         {
             let raw_url = format!("https://api.spotify.com/v1/playlists/{}/items", id.id());
             let client = reqwest::Client::new();
-            if let Ok(res) = client.get(&raw_url).bearer_auth(&token.access_token).send().await {
+            if let Ok(res) = client
+                .get(&raw_url)
+                .bearer_auth(&token.access_token)
+                .send()
+                .await
+            {
                 let status = res.status();
                 if let Ok(body) = res.text().await {
-                    let _ = std::fs::write("echo-debug-playlist.log", format!("RAW REQUEST RESPONSE ({}): {}", status, body));
+                    let _ = std::fs::write(
+                        "echo-debug-playlist.log",
+                        format!("RAW REQUEST RESPONSE ({}): {}", status, body),
+                    );
                 }
             }
         }
@@ -115,7 +132,8 @@ impl SpotifyWorker {
         let page = match self
             .client
             .playlist_items_manual(id, None, None, None, None)
-            .await {
+            .await
+        {
             Ok(p) => p,
             Err(e) => {
                 // The raw request above already wrote the body, so we can just return
@@ -143,16 +161,24 @@ impl SpotifyWorker {
         Ok(out)
     }
 
-    pub async fn fetch_album_tracks(&self, album_id: &str) -> Result<(Vec<Track>, Option<(String, String, String, String)>)> {
+    pub async fn fetch_album_tracks(
+        &self,
+        album_id: &str,
+    ) -> Result<(Vec<Track>, Option<(String, String, String, String)>)> {
         let id = rspotify::model::AlbumId::from_id(album_id)?;
         let album = self.client.album(id, None).await?;
         let mut out = Vec::new();
-        
+
         let image_url = album.images.first().map(|i| i.url.clone());
         let metadata = Some((
             album.id.id().to_string(),
             album.name,
-            album.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+            album
+                .artists
+                .into_iter()
+                .map(|a| a.name)
+                .collect::<Vec<_>>()
+                .join(", "),
             image_url.clone().unwrap_or_default(),
         ));
 
@@ -183,11 +209,18 @@ impl SpotifyWorker {
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
             if let Ok(track) = item {
-                if track.is_local { continue; }
+                if track.is_local {
+                    continue;
+                }
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     name: track.name,
-                    artist: track.artists.into_iter().map(|a| a.name).collect::<Vec<_>>().join(", "),
+                    artist: track
+                        .artists
+                        .into_iter()
+                        .map(|a| a.name)
+                        .collect::<Vec<_>>()
+                        .join(", "),
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.map(|id| id.id().to_string()),
@@ -209,25 +242,43 @@ impl SpotifyWorker {
         };
 
         let client = reqwest::Client::new();
-        let res = client.get("https://api.spotify.com/v1/me/player/recently-played?limit=50")
+        let res = client
+            .get("https://api.spotify.com/v1/me/player/recently-played?limit=50")
             .header("Authorization", format!("Bearer {}", access_token))
-            .send().await?;
+            .send()
+            .await?;
 
         let json: serde_json::Value = res.json().await?;
         let mut tracks = Vec::new();
-        
+
         if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
             for history in items {
                 if let Some(track) = history.get("track") {
-                    let name = track.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
-                    let is_local = track.get("is_local").and_then(|l| l.as_bool()).unwrap_or(false);
-                    if is_local { continue; }
-                    
+                    let name = track
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let is_local = track
+                        .get("is_local")
+                        .and_then(|l| l.as_bool())
+                        .unwrap_or(false);
+                    if is_local {
+                        continue;
+                    }
+
                     // Deduplicate
                     if !tracks.iter().any(|t: &Track| t.name == name) {
-                        let id = track.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
-                        let duration_ms = track.get("duration_ms").and_then(|d| d.as_u64()).unwrap_or_default() as u32;
-                        
+                        let id = track
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        let duration_ms = track
+                            .get("duration_ms")
+                            .and_then(|d| d.as_u64())
+                            .unwrap_or_default() as u32;
+
                         let mut artist_names = Vec::new();
                         if let Some(artists) = track.get("artists").and_then(|a| a.as_array()) {
                             for a in artists {
@@ -236,16 +287,20 @@ impl SpotifyWorker {
                                 }
                             }
                         }
-                        
+
                         let album = track.get("album");
-                        let album_id = album.and_then(|a| a.get("id")).and_then(|id| id.as_str()).map(|s| s.to_string());
-                        let image_url = album.and_then(|a| a.get("images"))
-                                             .and_then(|imgs| imgs.as_array())
-                                             .and_then(|imgs| imgs.first())
-                                             .and_then(|img| img.get("url"))
-                                             .and_then(|url| url.as_str())
-                                             .map(|s| s.to_string());
-                                             
+                        let album_id = album
+                            .and_then(|a| a.get("id"))
+                            .and_then(|id| id.as_str())
+                            .map(|s| s.to_string());
+                        let image_url = album
+                            .and_then(|a| a.get("images"))
+                            .and_then(|imgs| imgs.as_array())
+                            .and_then(|imgs| imgs.first())
+                            .and_then(|img| img.get("url"))
+                            .and_then(|url| url.as_str())
+                            .map(|s| s.to_string());
+
                         tracks.push(Track {
                             id,
                             name,
@@ -262,10 +317,13 @@ impl SpotifyWorker {
     }
 
     pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
-        let first_page = self.client.current_user_followed_artists(None, None).await?;
+        let first_page = self
+            .client
+            .current_user_followed_artists(None, None)
+            .await?;
         let mut artists = first_page.items;
         let mut maybe_next = first_page.next;
-        
+
         while let Some(url) = maybe_next {
             // need to make a raw request or use rspotify's internal cursor handling if available.
             // return the first page (50) for now

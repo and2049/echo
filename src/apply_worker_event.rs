@@ -1,0 +1,401 @@
+use tokio::sync::mpsc;
+
+use crate::{
+    app::{self, AppState},
+    events::{AppEvent, WorkerEvent},
+    image_tasks,
+    tui::Tui,
+};
+
+pub async fn apply_worker_event(
+    worker_event: WorkerEvent,
+    state: &mut AppState,
+    app_tx: &mpsc::Sender<AppEvent>,
+    worker_tx: &mpsc::Sender<WorkerEvent>,
+    tui: &mut Tui,
+) {
+    match worker_event {
+        WorkerEvent::AuthenticationComplete => {
+            state.mode = app::AppMode::Normal;
+        }
+        WorkerEvent::ForceContextRefresh => {
+            if state.active_view == app::ActiveView::TrackList
+                && let Some(context) = state.active_tracklist_context.clone()
+                && context.requires_worker_load()
+            {
+                let _ = app_tx.send(AppEvent::LoadContextTracks(context)).await;
+            }
+        }
+        WorkerEvent::UserIdentityLoaded(user_id) => {
+            state.user_id = Some(user_id);
+        }
+        WorkerEvent::PlaylistsLoaded(playlists) => {
+            state.playlists = playlists;
+            state.compute_library_view();
+        }
+        WorkerEvent::AlbumsLoaded(albums) => {
+            state.saved_albums = albums;
+        }
+        WorkerEvent::TracksLoaded(tracks, context) => {
+            state.tracks = tracks;
+            state.tracklist_image_url = context.image_url.clone();
+            if let Some(url) = context.image_url.as_ref() {
+                image_tasks::spawn_header_for_url(
+                    url,
+                    state.image_picker.as_ref(),
+                    worker_tx.clone(),
+                    state.library_config.cover_img_pixels,
+                );
+            }
+            state.active_tracklist_context = Some(context);
+            state.active_view = app::ActiveView::TrackList;
+            state.selected_track_index = 0;
+        }
+        WorkerEvent::TracksLoadFailed {
+            context_id: _,
+            message,
+        } => {
+            set_timed_status(state, format!("Unable to load tracks: {message}"), 5);
+        }
+        WorkerEvent::ApiRequestFailed { label, message } => {
+            let text = if message.starts_with("rate limited") {
+                format!("{label} {message}")
+            } else {
+                format!("{label} failed: {message}")
+            };
+            set_timed_status(state, text, 5);
+        }
+        WorkerEvent::PlaybackStarted { item } => {
+            state.playback.is_playing = true;
+            state.playback.playing_track_id = Some(item.id.clone());
+            state.playback.playing_track_title = item.title.clone();
+            state.playback.playing_track_artist = item.artist.clone();
+            state.playback.previous_track_image = state.playback.playing_track_image.take();
+            state.playback.duration_ms = item.duration_ms;
+            state.playback.progress_ms = 0;
+
+            if state.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
+                state.current_lyric_track_id = Some(item.id.clone());
+                state.is_fetching_lyrics = true;
+                state.current_lyrics = None;
+                let _ = app_tx
+                    .send(AppEvent::FetchLyrics(
+                        item.id.clone(),
+                        item.title.clone(),
+                        item.artist.clone(),
+                        item.duration_ms,
+                    ))
+                    .await;
+            }
+
+            if let Some(url) = item.image_url {
+                if let Some(ref picker) = state.image_picker {
+                    image_tasks::spawn_track_image_processing(
+                        item.id,
+                        url,
+                        picker,
+                        worker_tx.clone(),
+                        state.library_config.cover_img_pixels,
+                    );
+                }
+            } else {
+                let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
+            }
+        }
+        WorkerEvent::Tick => {
+            if state.playback.is_playing {
+                state.playback.progress_ms += 100;
+                if state.playback.duration_ms > 0
+                    && state.playback.progress_ms >= state.playback.duration_ms
+                {
+                    state.playback.is_playing = false;
+                    let _ = app_tx.try_send(AppEvent::ForcePlaybackSync);
+                }
+            }
+        }
+        WorkerEvent::SyncPlaybackState {
+            is_playing,
+            is_shuffled,
+            repeat_mode,
+            volume,
+            device_name,
+            progress_ms,
+            item,
+        } => {
+            state.playback.is_playing = is_playing;
+            state.playback.is_shuffled = is_shuffled;
+            state.playback.repeat_mode = repeat_mode;
+            if let Some(volume) = volume {
+                state.playback.volume = volume;
+            }
+            state.playback.device_name = device_name;
+            state.playback.progress_ms = progress_ms;
+
+            if let Some(item) = item {
+                apply_synced_playback_item(item, state, app_tx, worker_tx).await;
+            }
+        }
+        WorkerEvent::TrackMetadataLoaded {
+            track_id,
+            title,
+            artist,
+            image_url,
+        } => {
+            if state.playback.playing_track_id.as_deref() != Some(track_id.as_str()) {
+                return;
+            }
+
+            state.playback.playing_track_title = title;
+            state.playback.playing_track_artist = artist;
+
+            if let Some(url) = image_url
+                && let Some(ref picker) = state.image_picker
+            {
+                image_tasks::spawn_track_image_processing(
+                    track_id,
+                    url,
+                    picker,
+                    worker_tx.clone(),
+                    state.library_config.cover_img_pixels,
+                );
+            }
+        }
+        WorkerEvent::TrackImageProcessed { track_id, protocol } => {
+            if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
+                state.playback.playing_track_image = Some(protocol);
+                state.playback.previous_track_image = None;
+                if state.playback.fetching_track_id.as_deref() == Some(track_id.as_str()) {
+                    state.playback.fetching_track_id = None;
+                }
+            }
+        }
+        WorkerEvent::HeaderImageProcessed(protocol) => {
+            state.active_library_header_image = Some(protocol);
+            state.header_image_dirty = true;
+        }
+        WorkerEvent::ForceRedraw => {
+            let _ = tui.terminal.clear();
+        }
+        WorkerEvent::AudioVisualizationReady(shared_bands, flag) => {
+            flag.store(
+                state.library_config.enable_visualizer,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            state.playback.audio_visualization = Some(shared_bands);
+            state.playback.enable_visualizer = Some(flag);
+        }
+        WorkerEvent::SearchResultsLoaded(results) => {
+            state.search_results = results;
+            state.selected_search_index = 0;
+            state.active_view = app::ActiveView::SearchResults;
+            state.status_message = Some(format!("Search: {}", state.search_context_query));
+        }
+        WorkerEvent::QueueLoaded(tracks) => {
+            state.queue = tracks;
+            state.selected_queue_index = 0;
+        }
+        WorkerEvent::DevicesLoaded(devices) => {
+            state.devices = devices;
+            if state.selected_device_index >= state.devices.len() {
+                state.selected_device_index = state.devices.len().saturating_sub(1);
+            }
+        }
+        WorkerEvent::LyricsLoaded(lyrics) => {
+            state.current_lyrics = lyrics;
+            state.is_fetching_lyrics = false;
+        }
+        WorkerEvent::TracksQueued(count) => {
+            state.recent_queue_count += count;
+            set_timed_status(
+                state,
+                crate::i18n::t("messages.added_to_queue", &state.library_config.language)
+                    .replace("{}", &count.to_string()),
+                3,
+            );
+        }
+        WorkerEvent::LikedStatusUpdate(results) => {
+            for (id, liked) in results {
+                if liked {
+                    state.liked_tracks.insert(id);
+                } else {
+                    state.liked_tracks.remove(&id);
+                }
+            }
+        }
+        WorkerEvent::TopTracksLoaded(tracks) => {
+            state.top_tracks = tracks;
+        }
+        WorkerEvent::RecentlyPlayedLoaded(tracks) => {
+            state.recently_played = tracks;
+        }
+        WorkerEvent::FollowedArtistsLoaded(artists) => {
+            state.followed_artists = artists;
+        }
+        WorkerEvent::ArtistPageLoaded {
+            artist_id,
+            artist_name,
+            top_tracks,
+            albums,
+        } => {
+            if state.pending_artist_page_id.as_deref() != Some(artist_id.as_str()) {
+                return;
+            }
+            state.artist_page_data = Some(crate::models::ArtistPageData {
+                artist_id,
+                artist_name,
+                top_tracks,
+                albums,
+            });
+            state.active_view = app::ActiveView::ArtistPage;
+            state.artist_page_tab = app::ArtistPageTab::TopTracks;
+            state.artist_page_track_index = 0;
+            state.artist_page_album_index = 0;
+            state.artist_page_loading = false;
+        }
+        WorkerEvent::ArtistPageLoadFailed { artist_id, message } => {
+            if state.pending_artist_page_id.as_deref() == Some(artist_id.as_str()) {
+                state.artist_page_loading = false;
+                set_timed_status(state, format!("Artist page failed: {message}"), 5);
+            }
+        }
+        WorkerEvent::ArtistPageRateLimited {
+            artist_id,
+            retry_after_secs,
+        } => {
+            if state.pending_artist_page_id.as_deref() == Some(artist_id.as_str()) {
+                set_timed_status(
+                    state,
+                    format!("Artist page rate limited. Retrying in {retry_after_secs}s."),
+                    5,
+                );
+            }
+        }
+    }
+}
+
+async fn apply_synced_playback_item(
+    item: crate::models::PlaybackItem,
+    state: &mut AppState,
+    app_tx: &mpsc::Sender<AppEvent>,
+    worker_tx: &mpsc::Sender<WorkerEvent>,
+) {
+    let track_changed = state.playback.playing_track_id.as_deref() != Some(item.id.as_str());
+
+    state.playback.playing_track_id = Some(item.id.clone());
+    state.playback.playing_track_title = item.title.clone();
+    state.playback.playing_track_artist = item.artist.clone();
+    state.playback.duration_ms = item.duration_ms;
+
+    if track_changed {
+        state.playback.previous_track_image = state.playback.playing_track_image.take();
+
+        if state.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
+            state.current_lyric_track_id = Some(item.id.clone());
+            state.is_fetching_lyrics = true;
+            state.current_lyrics = None;
+            let _ = app_tx
+                .send(AppEvent::FetchLyrics(
+                    item.id.clone(),
+                    item.title.clone(),
+                    item.artist.clone(),
+                    item.duration_ms,
+                ))
+                .await;
+        }
+    }
+
+    if let Some(url) = item.image_url {
+        if let Some(ref picker) = state.image_picker {
+            let should_process_image = track_changed
+                || (state.playback.playing_track_image.is_none()
+                    && state.playback.fetching_track_id.as_deref() != Some(item.id.as_str()));
+
+            if should_process_image {
+                state.playback.fetching_track_id = Some(item.id.clone());
+                image_tasks::spawn_track_image_processing(
+                    item.id.clone(),
+                    url,
+                    picker,
+                    worker_tx.clone(),
+                    state.library_config.cover_img_pixels,
+                );
+            }
+        }
+    } else if track_changed || state.playback.playing_track_artist.is_empty() {
+        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
+    }
+}
+
+fn set_timed_status(state: &mut AppState, message: String, seconds: u64) {
+    state.status_message = Some(message);
+    state.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(seconds));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn force_context_refresh_reuses_stored_context() {
+        let (app_tx, mut app_rx) = mpsc::channel(1);
+        let (worker_tx, _) = mpsc::channel(1);
+        let mut tui = Tui::new().unwrap();
+        let mut state = AppState::new();
+        let context = crate::models::TrackListContext::playlist(
+            "playlist".to_string(),
+            "Playlist".to_string(),
+            "Owner".to_string(),
+            "owner".to_string(),
+            None,
+        );
+        state.active_view = app::ActiveView::TrackList;
+        state.active_tracklist_context = Some(context.clone());
+
+        apply_worker_event(
+            WorkerEvent::ForceContextRefresh,
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            &mut tui,
+        )
+        .await;
+
+        let AppEvent::LoadContextTracks(sent) = app_rx.try_recv().unwrap() else {
+            panic!("expected LoadContextTracks");
+        };
+        assert_eq!(sent, context);
+    }
+
+    #[tokio::test]
+    async fn stale_artist_page_result_is_ignored() {
+        let (app_tx, _) = mpsc::channel(1);
+        let (worker_tx, _) = mpsc::channel(1);
+        let mut tui = Tui::new().unwrap();
+        let mut state = AppState::new();
+        state.begin_artist_page_load("current".to_string(), "Current".to_string());
+
+        apply_worker_event(
+            WorkerEvent::ArtistPageLoaded {
+                artist_id: "stale".to_string(),
+                artist_name: "Stale".to_string(),
+                top_tracks: Vec::new(),
+                albums: Vec::new(),
+            },
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            &mut tui,
+        )
+        .await;
+
+        assert_eq!(state.pending_artist_page_id.as_deref(), Some("current"));
+        assert_eq!(
+            state
+                .artist_page_data
+                .as_ref()
+                .map(|data| data.artist_name.as_str()),
+            Some("Current")
+        );
+    }
+}

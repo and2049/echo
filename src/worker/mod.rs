@@ -1,6 +1,10 @@
 pub mod api;
+pub mod artist_page;
 pub mod audio;
+pub mod browse;
+pub mod errors;
 pub mod media;
+pub mod tracks;
 pub mod visualization;
 
 use crate::config::AppConfig;
@@ -8,13 +12,8 @@ use crate::events::{AppEvent, WorkerEvent};
 use crate::models::PlaybackItem;
 use api::SpotifyWorker;
 use rspotify::clients::OAuthClient;
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, atomic::AtomicU64};
 use tokio::sync::mpsc;
-
-const MAX_ARTIST_PAGE_AUTO_RETRY_SECS: u64 = 5;
 
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
@@ -270,52 +269,8 @@ impl Worker {
                                         }
                                     }
                             }
-                            AppEvent::LoadContextTracks(mut context) => {
-                                if let Some(ref sp) = spotify_opt {
-                                    if context.is_album() {
-                                        let id = context.id.clone();
-                                        match sp.fetch_album_tracks(&id).await {
-                                            Ok((tracks, album_metadata)) => {
-                                                if let Some((album_id, title, artists, image_url)) = album_metadata {
-                                                    context.id = album_id;
-                                                    context.title = title;
-                                                    context.subtitle = artists;
-                                                    if !image_url.is_empty() {
-                                                        context.image_url = Some(image_url);
-                                                    }
-                                                }
-                                                let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
-                                            }
-                                            Err(e) => {
-                                                let _ = std::fs::write(
-                                                    "echo-debug-tracks.log",
-                                                    format!("load album tracks err id={id}: {e:?}\n"),
-                                                );
-                                                let _ = self.tx.send(WorkerEvent::TracksLoadFailed {
-                                                    context_id: id,
-                                                    message: e.to_string(),
-                                                }).await;
-                                            }
-                                        }
-                                    } else {
-                                        let id = context.id.clone();
-                                        match sp.fetch_tracks(&id).await {
-                                            Ok(tracks) => {
-                                                let _ = self.tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
-                                            }
-                                            Err(e) => {
-                                                let _ = std::fs::write(
-                                                    "echo-debug-tracks.log",
-                                                    format!("load playlist tracks err id={id}: {e:?}\n"),
-                                                );
-                                                let _ = self.tx.send(WorkerEvent::TracksLoadFailed {
-                                                    context_id: id,
-                                                    message: e.to_string(),
-                                                }).await;
-                                            }
-                                        }
-                                    }
-                                }
+                            AppEvent::LoadContextTracks(context) => {
+                                tracks::load_context_tracks(spotify_opt.as_ref(), context, &self.tx).await;
                             }
                             AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url, album_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
@@ -650,172 +605,28 @@ impl Worker {
                                 }
                             }
                             AppEvent::CancelArtistPageLoad => {
-                                self.artist_page_generation.fetch_add(1, Ordering::SeqCst);
+                                artist_page::cancel_pending_artist_page(&self.artist_page_generation);
                             }
                             AppEvent::FetchTopTracks => {
-                                if let Some(api) = api_client.clone() {
-                                    let tx = self.tx.clone();
-                                    tokio::spawn(async move {
-                                        match api.top_tracks().await {
-                                            Ok(Some(tracks)) => {
-                                                let _ = tx.send(WorkerEvent::TopTracksLoaded(tracks)).await;
-                                            }
-                                            Ok(None) => {}
-                                            Err(e) => {
-                                                let message = api_request_error_message(&e);
-                                                let _ = std::fs::write(
-                                                    "echo-debug-api.log",
-                                                    format!("top_tracks err: {e:?}\n"),
-                                                );
-                                                let _ = tx.send(WorkerEvent::ApiRequestFailed {
-                                                    label: "Top tracks".to_string(),
-                                                    message,
-                                                }).await;
-                                            }
-                                        }
-                                    });
-                                }
+                                browse::spawn_top_tracks(api_client.clone(), self.tx.clone());
                             }
                             AppEvent::FetchRecentlyPlayed => {
-                                if let Some(api) = api_client.clone() {
-                                    let tx = self.tx.clone();
-                                    tokio::spawn(async move {
-                                        match api.recently_played().await {
-                                            Ok(Some(tracks)) => {
-                                                let _ = tx.send(WorkerEvent::RecentlyPlayedLoaded(tracks)).await;
-                                            }
-                                            Ok(None) => {}
-                                            Err(e) => {
-                                                let message = api_request_error_message(&e);
-                                                let _ = std::fs::write(
-                                                    "echo-debug-api.log",
-                                                    format!("recently_played err: {e:?}\n"),
-                                                );
-                                                let _ = tx.send(WorkerEvent::ApiRequestFailed {
-                                                    label: "Recently played".to_string(),
-                                                    message,
-                                                }).await;
-                                            }
-                                        }
-                                    });
-                                }
+                                browse::spawn_recently_played(api_client.clone(), self.tx.clone());
                             }
                             AppEvent::FetchFollowedArtists => {
-                                if let Some(api) = api_client.clone() {
-                                    let tx = self.tx.clone();
-                                    tokio::spawn(async move {
-                                        match api.followed_artists().await {
-                                            Ok(Some(artists)) => {
-                                                let _ = tx.send(WorkerEvent::FollowedArtistsLoaded(artists)).await;
-                                            }
-                                            Ok(None) => {}
-                                            Err(e) => {
-                                                let message = api_request_error_message(&e);
-                                                let _ = std::fs::write(
-                                                    "echo-debug-api.log",
-                                                    format!("followed_artists err: {e:?}\n"),
-                                                );
-                                                let _ = tx.send(WorkerEvent::ApiRequestFailed {
-                                                    label: "Followed artists".to_string(),
-                                                    message,
-                                                }).await;
-                                            }
-                                        }
-                                    });
-                                }
+                                browse::spawn_followed_artists(api_client.clone(), self.tx.clone());
                             }
                             AppEvent::LoadArtistPage {
                                 artist_id,
                                 artist_name,
                             } => {
-                                if let Some(ref api) = api_client {
-                                    let request_generation = self
-                                        .artist_page_generation
-                                        .fetch_add(1, Ordering::SeqCst)
-                                        .saturating_add(1);
-                                    let artist_page_generation = self.artist_page_generation.clone();
-                                    let tx = self.tx.clone();
-                                    let aid = artist_id.clone();
-                                    let known_artist_name = artist_name.clone();
-                                    let api = api.clone();
-                                    tokio::spawn(async move {
-                                        let mut attempts = 0usize;
-                                        let result = loop {
-                                            match api
-                                                .artist_page(&aid, known_artist_name.clone())
-                                                .await
-                                            {
-                                                Ok(result) => break Ok(result),
-                                                Err(e) => {
-                                                    if let Some(retry_after_secs) =
-                                                        artist_retry_after_secs(&e)
-                                                        && retry_after_secs <= MAX_ARTIST_PAGE_AUTO_RETRY_SECS
-                                                        && attempts < 5
-                                                    {
-                                                        if artist_page_generation.load(Ordering::SeqCst)
-                                                            != request_generation
-                                                        {
-                                                            break Ok(None);
-                                                        }
-                                                        attempts += 1;
-                                                        let _ = tx
-                                                            .send(WorkerEvent::ArtistPageRateLimited {
-                                                                artist_id: aid.clone(),
-                                                                retry_after_secs,
-                                                            })
-                                                            .await;
-                                                        tokio::time::sleep(
-                                                            std::time::Duration::from_secs(
-                                                                retry_after_secs.saturating_add(1),
-                                                            ),
-                                                        )
-                                                        .await;
-                                                        if artist_page_generation.load(Ordering::SeqCst)
-                                                            != request_generation
-                                                        {
-                                                            break Ok(None);
-                                                        }
-                                                        continue;
-                                                    }
-
-                                                    break Err(e);
-                                                }
-                                            }
-                                        };
-
-                                        match result {
-                                            Ok(Some((artist_name, top_tracks, albums))) => {
-                                                let _ = tx.send(WorkerEvent::ArtistPageLoaded {
-                                                    artist_id: aid.clone(),
-                                                    artist_name,
-                                                    top_tracks,
-                                                    albums,
-                                                }).await;
-                                            }
-                                            Ok(None) => {}
-                                            Err(e) => {
-                                                if let Ok(mut file) = std::fs::OpenOptions::new()
-                                                    .create(true)
-                                                    .append(true)
-                                                    .open("echo-debug-artist.log")
-                                                {
-                                                    use std::io::Write;
-                                                    let _ = writeln!(
-                                                        file,
-                                                        "fetch_artist_page err: {:?}",
-                                                        e
-                                                    );
-                                                }
-                                                let _ = tx
-                                                    .send(WorkerEvent::ArtistPageLoadFailed {
-                                                        artist_id: aid.clone(),
-                                                        message: e.to_string(),
-                                                    })
-                                                    .await;
-                                            }
-                                        }
-                                    });
-                                }
+                                artist_page::spawn_load_artist_page(
+                                    api_client.as_ref(),
+                                    self.artist_page_generation.clone(),
+                                    self.tx.clone(),
+                                    artist_id,
+                                    artist_name,
+                                );
                             }
                             _ => {}
                         }
@@ -825,51 +636,5 @@ impl Worker {
                 }
             }
         }
-    }
-}
-
-fn artist_retry_after_secs(err: &anyhow::Error) -> Option<u64> {
-    api::first_party::rate_limit_error(err).map(|err| err.retry_after_secs())
-}
-
-fn api_request_error_message(err: &anyhow::Error) -> String {
-    if let Some(rate_limit) = api::first_party::rate_limit_error(err) {
-        return format!(
-            "rate limited. Try again in {}.",
-            api::client::format_retry_after(rate_limit.cooldown())
-        );
-    }
-
-    err.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[test]
-    fn typed_rate_limit_drives_artist_retry_after() {
-        let err: anyhow::Error = api::first_party::SpotifyRateLimitError {
-            retry_after: Some(Duration::from_secs(4)),
-            body: String::new(),
-        }
-        .into();
-
-        assert_eq!(artist_retry_after_secs(&err), Some(4));
-    }
-
-    #[test]
-    fn typed_rate_limit_formats_browse_status() {
-        let err: anyhow::Error = api::first_party::SpotifyRateLimitError {
-            retry_after: Some(Duration::from_secs(43)),
-            body: String::new(),
-        }
-        .into();
-
-        assert_eq!(
-            api_request_error_message(&err),
-            "rate limited. Try again in 43s."
-        );
     }
 }
