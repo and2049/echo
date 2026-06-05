@@ -7,10 +7,6 @@ on:
         description: "Release version (e.g. 0.1.3)"
         required: true
         type: string
-      changelog:
-        description: "Release notes / changelog"
-        required: false
-        type: string
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
 
@@ -101,13 +97,8 @@ jobs:
           find artifacts -type f -exec cp -v {} release-assets/ \;
           test "$(find release-assets -type f | wc -l)" -gt 0
 
-          NOTES="${{ inputs.changelog }}"
-          if [ -n "$NOTES" ]; then
-            if printf '%s' "$NOTES" | base64 -d > release_notes.txt 2>/dev/null; then
-              :
-            else
-              printf '%s\n' "$NOTES" > release_notes.txt
-            fi
+          if [ -f release.md ] && [ -s release.md ]; then
+            cp release.md release_notes.txt
             gh release create v${{ inputs.version }} \
               --title "v${{ inputs.version }}" \
               --notes-file release_notes.txt \
