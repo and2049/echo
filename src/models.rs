@@ -178,7 +178,8 @@ pub struct Lyrics {
 pub struct ArtistPageData {
     pub artist_id: String,
     pub artist_name: String,
-    pub top_tracks: Vec<Track>,
+    #[serde(default)]
+    pub image_url: Option<String>,
     pub albums: Vec<Album>,
 }
 

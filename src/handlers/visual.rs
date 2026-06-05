@@ -153,13 +153,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                    if let Some(ref data) = state.artist_page_data {
-                        if state.artist_page_track_index + 1 < data.top_tracks.len() {
-                            state.artist_page_track_index += 1;
-                        }
-                    }
-                } else if let Some(ref data) = state.artist_page_data {
+                if let Some(ref data) = state.artist_page_data {
                     if state.artist_page_album_index + 1 < data.albums.len() {
                         state.artist_page_album_index += 1;
                     }
@@ -200,11 +194,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                    if state.artist_page_track_index > 0 {
-                        state.artist_page_track_index -= 1;
-                    }
-                } else if state.artist_page_album_index > 0 {
+                if state.artist_page_album_index > 0 {
                     state.artist_page_album_index -= 1;
                 }
             }
@@ -230,20 +220,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         .iter()
                         .map(|t| t.id.clone())
                         .collect(),
-                    ActiveView::ArtistPage => {
-                        if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                            if let Some(ref data) = state.artist_page_data {
-                                data.top_tracks[start..=end]
-                                    .iter()
-                                    .map(|t| t.id.clone())
-                                    .collect()
-                            } else {
-                                vec![]
-                            }
-                        } else {
-                            vec![]
-                        }
-                    }
+                    ActiveView::ArtistPage => vec![],
                     _ => vec![],
                 };
 

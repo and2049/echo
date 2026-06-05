@@ -240,6 +240,10 @@ impl SpotifyWebApi {
             .and_then(|value| value.to_str().ok())
             .and_then(parse_retry_after);
         let body = response.text().await?;
+        append_api_log(&format!(
+            "http route=first_party status={} retry_after={retry_after:?} url={url}",
+            status.as_u16()
+        ));
 
         if status.as_u16() == 401 {
             return Err(SpotifyWebError::Unauthorized(body));
@@ -315,6 +319,6 @@ fn append_api_log(message: &str) {
         .append(true)
         .open("echo-debug-artist.log")
     {
-        let _ = writeln!(file, "{message}");
+        let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
     }
 }

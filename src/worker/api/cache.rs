@@ -5,7 +5,6 @@ use crate::models::{Album, Artist, Track};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum CacheKey {
-    ArtistPage(String),
     ArtistAlbums(String),
     TopTracks,
     RecentlyPlayed,
@@ -49,7 +48,6 @@ pub struct SpotifyApiCache {
     top_tracks: Option<Timed<Vec<Track>>>,
     recently_played: Option<Timed<Vec<Track>>>,
     followed_artists: Option<Timed<Vec<Artist>>>,
-    artist_pages: HashMap<String, Timed<(String, Vec<Track>, Vec<Album>)>>,
     artist_albums: HashMap<String, Timed<Vec<Album>>>,
     inflight: HashSet<CacheKey>,
     cooldowns: HashMap<CacheKey, Instant>,
@@ -81,18 +79,6 @@ impl SpotifyApiCache {
     pub fn set_followed_artists(&mut self, artists: Vec<Artist>) {
         self.clear_cooldown(&CacheKey::FollowedArtists);
         self.followed_artists = Some(Timed::new(artists, Duration::from_secs(24 * 60 * 60)));
-    }
-
-    pub fn artist_page(&self, artist_id: &str) -> Option<(String, Vec<Track>, Vec<Album>)> {
-        self.artist_pages.get(artist_id).and_then(Timed::get)
-    }
-
-    pub fn set_artist_page(&mut self, artist_id: String, value: (String, Vec<Track>, Vec<Album>)) {
-        self.clear_cooldown(&CacheKey::ArtistPage(artist_id.clone()));
-        self.artist_pages.insert(
-            artist_id,
-            Timed::new(value, Duration::from_secs(24 * 60 * 60)),
-        );
     }
 
     pub fn artist_albums(&self, artist_id: &str) -> Option<Vec<Album>> {
@@ -181,17 +167,14 @@ mod tests {
     fn successful_fetch_clears_cooldown() {
         let mut cache = SpotifyApiCache::default();
         cache.rate_limited(
-            CacheKey::ArtistPage("artist".to_string()),
+            CacheKey::ArtistAlbums("artist".to_string()),
             Duration::from_secs(50),
         );
 
-        cache.set_artist_page(
-            "artist".to_string(),
-            ("Artist".to_string(), Vec::new(), Vec::new()),
-        );
+        cache.set_artist_albums("artist".to_string(), Vec::new());
 
         assert_eq!(
-            cache.begin(CacheKey::ArtistPage("artist".to_string())),
+            cache.begin(CacheKey::ArtistAlbums("artist".to_string())),
             FetchGate::Start
         );
     }

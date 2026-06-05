@@ -112,13 +112,6 @@ pub enum ActiveView {
     ArtistPage,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug, Default)]
-pub enum ArtistPageTab {
-    #[default]
-    TopTracks,
-    Albums,
-}
-
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum SearchTab {
     Tracks,
@@ -212,10 +205,9 @@ pub struct AppState {
     // Artist page
     pub artist_page_data: Option<ArtistPageData>,
     pub pending_artist_page_id: Option<String>,
-    pub artist_page_tab: ArtistPageTab,
-    pub artist_page_track_index: usize,
     pub artist_page_album_index: usize,
     pub artist_page_loading: bool,
+    pub artist_albums_loading: bool,
 }
 
 impl AppState {
@@ -316,10 +308,9 @@ impl AppState {
             vis_bins,
             artist_page_data: None,
             pending_artist_page_id: None,
-            artist_page_tab: ArtistPageTab::TopTracks,
-            artist_page_track_index: 0,
             artist_page_album_index: 0,
             artist_page_loading: false,
+            artist_albums_loading: false,
         }
     }
 
@@ -336,7 +327,7 @@ impl AppState {
                 ActiveView::Library => self.selected_playlist_index,
                 ActiveView::Devices => self.selected_device_index,
                 ActiveView::ArtistList => self.selected_artist_index,
-                ActiveView::ArtistPage => self.artist_page_track_index,
+                ActiveView::ArtistPage => self.artist_page_album_index,
             };
             Some((std::cmp::min(start, current), std::cmp::max(start, current)))
         } else {
@@ -446,21 +437,30 @@ impl AppState {
         self.clear_pending_artist_page();
     }
 
-    pub fn begin_artist_page_load(&mut self, artist_id: String, artist_name: String) {
+    pub fn begin_artist_page_load(
+        &mut self,
+        artist_id: String,
+        artist_name: String,
+        image_url: Option<String>,
+    ) {
         self.artist_page_data = Some(ArtistPageData {
             artist_id: artist_id.clone(),
             artist_name,
-            top_tracks: Vec::new(),
+            image_url,
             albums: Vec::new(),
         });
         self.pending_artist_page_id = Some(artist_id);
+        self.artist_page_album_index = 0;
         self.artist_page_loading = true;
+        self.artist_albums_loading = true;
         self.active_view = ActiveView::ArtistPage;
+        self.clear_header_image();
     }
 
     pub fn clear_pending_artist_page(&mut self) {
         self.pending_artist_page_id = None;
         self.artist_page_loading = false;
+        self.artist_albums_loading = false;
     }
 
     fn clear_header_image(&mut self) {
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn beginning_tracklist_load_clears_pending_artist() {
         let mut state = AppState::new();
-        state.begin_artist_page_load("artist-id".to_string(), "Artist".to_string());
+        state.begin_artist_page_load("artist-id".to_string(), "Artist".to_string(), None);
 
         state.begin_tracklist_load(TrackListContext::playlist(
             "playlist-id".to_string(),

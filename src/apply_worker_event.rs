@@ -231,26 +231,42 @@ pub async fn apply_worker_event(
         WorkerEvent::FollowedArtistsLoaded(artists) => {
             state.followed_artists = artists;
         }
-        WorkerEvent::ArtistPageLoaded {
+        WorkerEvent::ArtistPageOpened {
             artist_id,
             artist_name,
-            top_tracks,
-            albums,
+            artist_image_url,
         } => {
             if state.pending_artist_page_id.as_deref() != Some(artist_id.as_str()) {
                 return;
             }
-            state.artist_page_data = Some(crate::models::ArtistPageData {
-                artist_id,
-                artist_name,
-                top_tracks,
-                albums,
-            });
+            if !state
+                .artist_page_data
+                .as_ref()
+                .is_some_and(|data| data.artist_id == artist_id)
+            {
+                state.artist_page_data = Some(crate::models::ArtistPageData {
+                    artist_id,
+                    artist_name,
+                    image_url: artist_image_url.clone(),
+                    albums: Vec::new(),
+                });
+            } else if let Some(data) = state.artist_page_data.as_mut()
+                && data.image_url.is_none()
+            {
+                data.image_url = artist_image_url.clone();
+            }
             state.active_view = app::ActiveView::ArtistPage;
-            state.artist_page_tab = app::ArtistPageTab::TopTracks;
-            state.artist_page_track_index = 0;
             state.artist_page_album_index = 0;
-            state.artist_page_loading = false;
+            state.artist_page_loading = true;
+            state.artist_albums_loading = true;
+            if let Some(url) = artist_image_url.as_ref() {
+                image_tasks::spawn_header_for_url(
+                    url,
+                    state.image_picker.as_ref(),
+                    worker_tx.clone(),
+                    state.library_config.cover_img_pixels,
+                );
+            }
         }
         WorkerEvent::ArtistAlbumsLoaded { artist_id, albums } => {
             if let Some(data) = state.artist_page_data.as_mut()
@@ -258,6 +274,7 @@ pub async fn apply_worker_event(
             {
                 data.albums = albums;
                 state.artist_page_album_index = 0;
+                state.artist_albums_loading = false;
                 state.artist_page_loading = false;
             }
         }
@@ -267,24 +284,25 @@ pub async fn apply_worker_event(
                 .as_ref()
                 .is_some_and(|data| data.artist_id == artist_id)
             {
+                state.artist_albums_loading = false;
                 state.artist_page_loading = false;
                 set_timed_status(state, format!("Artist albums failed: {message}"), 5);
             }
         }
-        WorkerEvent::ArtistPageLoadFailed { artist_id, message } => {
-            if state.pending_artist_page_id.as_deref() == Some(artist_id.as_str()) {
-                state.artist_page_loading = false;
-                set_timed_status(state, format!("Artist page failed: {message}"), 5);
-            }
-        }
-        WorkerEvent::ArtistPageRateLimited {
+        WorkerEvent::ArtistAlbumsRateLimited {
             artist_id,
             retry_after_secs,
         } => {
-            if state.pending_artist_page_id.as_deref() == Some(artist_id.as_str()) {
+            if state
+                .artist_page_data
+                .as_ref()
+                .is_some_and(|data| data.artist_id == artist_id)
+            {
+                state.artist_albums_loading = false;
+                state.artist_page_loading = false;
                 set_timed_status(
                     state,
-                    format!("Artist page rate limited. Retrying in {retry_after_secs}s."),
+                    format!("Artist albums rate limited. Try again in {retry_after_secs}s."),
                     5,
                 );
             }
@@ -392,14 +410,18 @@ mod tests {
         let (worker_tx, _) = mpsc::channel(1);
         let mut tui = Tui::new().unwrap();
         let mut state = AppState::new();
-        state.begin_artist_page_load("current".to_string(), "Current".to_string());
+        state.begin_artist_page_load("current".to_string(), "Current".to_string(), None);
 
         apply_worker_event(
-            WorkerEvent::ArtistPageLoaded {
+            WorkerEvent::ArtistAlbumsLoaded {
                 artist_id: "stale".to_string(),
-                artist_name: "Stale".to_string(),
-                top_tracks: Vec::new(),
-                albums: Vec::new(),
+                albums: vec![crate::models::Album {
+                    id: "album".to_string(),
+                    name: "Album".to_string(),
+                    artists: "Artist".to_string(),
+                    image_url: None,
+                    release_year: "2024".to_string(),
+                }],
             },
             &mut state,
             &app_tx,
@@ -415,6 +437,64 @@ mod tests {
                 .as_ref()
                 .map(|data| data.artist_name.as_str()),
             Some("Current")
+        );
+        assert_eq!(
+            state
+                .artist_page_data
+                .as_ref()
+                .map(|data| data.albums.len()),
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn artist_album_rate_limit_leaves_page_open() {
+        let (app_tx, _) = mpsc::channel(1);
+        let (worker_tx, _) = mpsc::channel(1);
+        let mut tui = Tui::new().unwrap();
+        let mut state = AppState::new();
+        state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
+
+        apply_worker_event(
+            WorkerEvent::ArtistAlbumsRateLimited {
+                artist_id: "artist".to_string(),
+                retry_after_secs: 49,
+            },
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            &mut tui,
+        )
+        .await;
+
+        assert!(matches!(state.active_view, app::ActiveView::ArtistPage));
+        assert!(!state.artist_albums_loading);
+        assert!(!state.artist_page_loading);
+
+        apply_worker_event(
+            WorkerEvent::ArtistAlbumsLoaded {
+                artist_id: "artist".to_string(),
+                albums: vec![crate::models::Album {
+                    id: "album".to_string(),
+                    name: "Album".to_string(),
+                    artists: "Artist".to_string(),
+                    image_url: None,
+                    release_year: "2024".to_string(),
+                }],
+            },
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            &mut tui,
+        )
+        .await;
+
+        assert_eq!(
+            state
+                .artist_page_data
+                .as_ref()
+                .map(|data| data.albums.len()),
+            Some(1)
         );
     }
 }

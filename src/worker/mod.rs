@@ -671,20 +671,14 @@ impl Worker {
                             AppEvent::LoadArtistPage {
                                 artist_id,
                                 artist_name,
+                                artist_image_url,
                             } => {
                                 artist_page::spawn_load_artist_page(
                                     api_client.as_ref(),
-                                    self.artist_page_generation.clone(),
                                     self.tx.clone(),
                                     artist_id,
                                     artist_name,
-                                );
-                            }
-                            AppEvent::LoadArtistAlbums { artist_id } => {
-                                artist_page::spawn_load_artist_albums(
-                                    api_client.as_ref(),
-                                    self.tx.clone(),
-                                    artist_id,
+                                    artist_image_url,
                                 );
                             }
                             _ => {}

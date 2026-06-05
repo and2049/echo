@@ -53,9 +53,7 @@ pub enum AppEvent {
     LoadArtistPage {
         artist_id: String,
         artist_name: Option<String>,
-    },
-    LoadArtistAlbums {
-        artist_id: String,
+        artist_image_url: Option<String>,
     },
 }
 
@@ -112,19 +110,10 @@ pub enum WorkerEvent {
     TopTracksLoaded(Vec<Track>),
     RecentlyPlayedLoaded(Vec<Track>),
     FollowedArtistsLoaded(Vec<crate::models::Artist>),
-    ArtistPageLoaded {
+    ArtistPageOpened {
         artist_id: String,
         artist_name: String,
-        top_tracks: Vec<crate::models::Track>,
-        albums: Vec<crate::models::Album>,
-    },
-    ArtistPageLoadFailed {
-        artist_id: String,
-        message: String,
-    },
-    ArtistPageRateLimited {
-        artist_id: String,
-        retry_after_secs: u64,
+        artist_image_url: Option<String>,
     },
     ArtistAlbumsLoaded {
         artist_id: String,
@@ -133,5 +122,9 @@ pub enum WorkerEvent {
     ArtistAlbumsLoadFailed {
         artist_id: String,
         message: String,
+    },
+    ArtistAlbumsRateLimited {
+        artist_id: String,
+        retry_after_secs: u64,
     },
 }

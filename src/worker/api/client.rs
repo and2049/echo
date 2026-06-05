@@ -1,7 +1,9 @@
 use std::{io::Write, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
+use reqwest::header::RETRY_AFTER;
 use rspotify::AuthCodeSpotify;
+use rspotify::prelude::*;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -15,7 +17,7 @@ use super::{
     first_party::{SpotifyWebApi, rate_limit_error},
     parse,
     policy::ApiEndpoint,
-    rate_limit::{DEFAULT_RATE_LIMIT_COOLDOWN, is_probable_rate_limit},
+    rate_limit::{DEFAULT_RATE_LIMIT_COOLDOWN, is_probable_rate_limit, parse_retry_after},
 };
 
 #[derive(Clone)]
@@ -165,65 +167,6 @@ impl EchoSpotifyClient {
         Ok(Some(artists))
     }
 
-    pub async fn artist_page(
-        &self,
-        artist_id: &str,
-        known_artist_name: Option<String>,
-    ) -> Result<Option<(String, Vec<Track>, Vec<Album>)>> {
-        if let Some(page) = self.cache.lock().await.artist_page(artist_id) {
-            log_api(&format!("artist_page route=cache artist={artist_id}"));
-            return Ok(Some(page));
-        }
-        if let Some(page) = AppConfig::load_cache().get_artist_page(artist_id) {
-            log_api(&format!(
-                "artist_page route=persistent_cache artist={artist_id}"
-            ));
-            let tuple = (page.artist_name, page.top_tracks, page.albums);
-            self.cache
-                .lock()
-                .await
-                .set_artist_page(artist_id.to_string(), tuple.clone());
-            return Ok(Some(tuple));
-        }
-
-        let key = CacheKey::ArtistPage(artist_id.to_string());
-        if !self.begin_fetch(key.clone(), "Artist page").await? {
-            return Ok(None);
-        }
-
-        let result = self
-            .first_party_artist_page(artist_id, known_artist_name)
-            .await;
-        self.finish_fetch(&key, &result).await;
-
-        let page = result?;
-        self.cache
-            .lock()
-            .await
-            .set_artist_page(artist_id.to_string(), page.clone());
-        update_persistent_cache(|cache| {
-            let cached_albums = cache
-                .artist_pages
-                .get(artist_id)
-                .map(|entry| entry.value.albums.clone())
-                .unwrap_or_default();
-            cache.set_artist_page(
-                artist_id.to_string(),
-                ArtistPageData {
-                    artist_id: artist_id.to_string(),
-                    artist_name: page.0.clone(),
-                    top_tracks: page.1.clone(),
-                    albums: if page.2.is_empty() {
-                        cached_albums
-                    } else {
-                        page.2.clone()
-                    },
-                },
-            );
-        });
-        Ok(Some(page))
-    }
-
     pub async fn artist_albums(&self, artist_id: &str) -> Result<Option<Vec<Album>>> {
         if let Some(albums) = self.cache.lock().await.artist_albums(artist_id) {
             log_api(&format!("artist_albums route=cache artist={artist_id}"));
@@ -248,7 +191,33 @@ impl EchoSpotifyClient {
             return Ok(None);
         }
 
-        let result = self.first_party_artist_albums(artist_id).await;
+        let result = async {
+            match self.third_party_artist_albums(artist_id).await {
+                Ok(albums) => {
+                    log_api(&format!(
+                        "artist_albums route=third_party artist={artist_id}"
+                    ));
+                    Ok(albums)
+                }
+                Err(err) => {
+                    log_api(&format!(
+                        "artist_albums route=third_party failed artist={artist_id} err={err:?}"
+                    ));
+                    if is_probable_rate_limit(&err) {
+                        Err(err)
+                    } else {
+                        self.first_party_artist_albums(artist_id)
+                            .await
+                            .inspect(|_| {
+                                log_api(&format!(
+                                    "artist_albums route=first_party artist={artist_id}"
+                                ));
+                            })
+                    }
+                }
+            }
+        }
+        .await;
         self.finish_fetch(&key, &result).await;
         let albums = result?;
         self.cache
@@ -259,7 +228,7 @@ impl EchoSpotifyClient {
             let mut page = cache.get_artist_page(artist_id).unwrap_or(ArtistPageData {
                 artist_id: artist_id.to_string(),
                 artist_name: "Unknown Artist".to_string(),
-                top_tracks: Vec::new(),
+                image_url: None,
                 albums: Vec::new(),
             });
             page.albums = albums.clone();
@@ -276,6 +245,10 @@ impl EchoSpotifyClient {
         let persistent_key = persistent_cooldown_key(&key);
         let mut persistent_cache = AppConfig::load_cache();
         if let Some(remaining) = persistent_cache.cooldown_remaining(&persistent_key) {
+            log_api(&format!(
+                "fetch gate=persistent_cooldown key={key:?} persistent_key={persistent_key} remaining={}",
+                format_retry_after(remaining)
+            ));
             let _ = AppConfig::save_cache(&persistent_cache);
             anyhow::bail!(
                 "rate limited. Try again in {}.",
@@ -283,10 +256,17 @@ impl EchoSpotifyClient {
             );
         }
 
-        match self.cache.lock().await.begin(key) {
+        match self.cache.lock().await.begin(key.clone()) {
             FetchGate::Start => Ok(true),
-            FetchGate::InFlight => Ok(false),
+            FetchGate::InFlight => {
+                log_api(&format!("fetch gate=inflight key={key:?}"));
+                Ok(false)
+            }
             FetchGate::CoolingDown(remaining) => {
+                log_api(&format!(
+                    "fetch gate=memory_cooldown key={key:?} remaining={}",
+                    format_retry_after(remaining)
+                ));
                 anyhow::bail!(
                     "rate limited. Try again in {}.",
                     format_retry_after(remaining)
@@ -302,18 +282,25 @@ impl EchoSpotifyClient {
         if let Err(err) = result
             && let Some(rate_limit) = rate_limit_error(err)
         {
-            cache.rate_limited(key.clone(), rate_limit.cooldown());
-            update_persistent_cache(|cache| {
-                cache.set_cooldown(persistent_key.clone(), rate_limit.cooldown())
-            });
+            let cooldown = record_rate_limit_cooldown(&persistent_key, rate_limit.cooldown());
+            cache.rate_limited(key.clone(), cooldown);
+            log_api(&format!(
+                "fetch cooldown=set key={key:?} persistent_key={persistent_key} remaining={} err=typed_429",
+                format_retry_after(cooldown)
+            ));
         } else if let Err(err) = result
             && is_probable_rate_limit(err)
         {
-            cache.rate_limited(key.clone(), DEFAULT_RATE_LIMIT_COOLDOWN);
-            update_persistent_cache(|cache| {
-                cache.set_cooldown(persistent_key.clone(), DEFAULT_RATE_LIMIT_COOLDOWN)
-            });
+            let cooldown = record_rate_limit_cooldown(&persistent_key, DEFAULT_RATE_LIMIT_COOLDOWN);
+            cache.rate_limited(key.clone(), cooldown);
+            log_api(&format!(
+                "fetch cooldown=set key={key:?} persistent_key={persistent_key} remaining={} err=probable_429",
+                format_retry_after(cooldown)
+            ));
         } else if result.is_ok() {
+            log_api(&format!(
+                "fetch cooldown=clear key={key:?} persistent_key={persistent_key}"
+            ));
             update_persistent_cache(|cache| cache.clear_cooldown(&persistent_key));
         }
     }
@@ -394,55 +381,104 @@ impl EchoSpotifyClient {
             .unwrap_or_default())
     }
 
-    async fn first_party_artist_page(
-        &self,
-        artist_id: &str,
-        known_artist_name: Option<String>,
-    ) -> Result<(String, Vec<Track>, Vec<Album>)> {
-        let artist_name = if let Some(name) = known_artist_name {
-            name
-        } else {
-            let artist_url = format!("https://api.spotify.com/v1/artists/{artist_id}");
-            let artist_json = self
-                .first_party_json(ApiEndpoint::ArtistPage, &artist_url)
-                .await?;
-            artist_json
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown Artist")
-                .to_string()
-        };
+    async fn third_party_json(&self, url: &str) -> Result<serde_json::Value> {
+        self.third_party.auto_reauth().await?;
+        let token_mutex = self.third_party.get_token();
+        let token_guard = token_mutex.lock().await.unwrap();
+        let access_token = token_guard
+            .as_ref()
+            .map(|token| token.access_token.clone())
+            .context("Third-party Spotify token is unavailable")?;
+        drop(token_guard);
 
-        let tracks_url =
-            format!("https://api.spotify.com/v1/artists/{artist_id}/top-tracks?market=from_token");
-        let tracks_json = self
-            .first_party_json(ApiEndpoint::ArtistPage, &tracks_url)
+        let response = reqwest::Client::new()
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
             .await?;
-        let top_tracks = tracks_json
-            .get("tracks")
-            .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse::track).collect())
-            .unwrap_or_default();
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_retry_after);
+        let body = response.text().await?;
+        log_api(&format!(
+            "http route=third_party status={} retry_after={retry_after:?} url={url}",
+            status.as_u16()
+        ));
 
-        Ok((artist_name, top_tracks, Vec::new()))
+        if status.as_u16() == 429 {
+            return Err(super::rate_limit::SpotifyRateLimitError { retry_after, body }.into());
+        }
+
+        if !status.is_success() {
+            anyhow::bail!("Spotify Web API request failed ({status}): {body}");
+        }
+
+        Ok(serde_json::from_str(&body)?)
     }
 
-    async fn first_party_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
-        let albums_url = format!(
-            "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single&market=from_token&limit=50"
-        );
-        let albums_json = self
-            .first_party_json(ApiEndpoint::ArtistPage, &albums_url)
-            .await?;
-        let mut albums: Vec<Album> = albums_json
-            .get("items")
-            .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(parse::album).collect())
-            .unwrap_or_default();
+    async fn third_party_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
+        let mut albums = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            let albums_json = self
+                .third_party_json(&artist_albums_url(artist_id, offset))
+                .await?;
+            let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
+            let page_len = page_albums.len();
+            albums.append(&mut page_albums);
+            if !has_next || page_len == 0 {
+                break;
+            }
+            offset += ARTIST_ALBUMS_PAGE_LIMIT;
+        }
         albums.sort_by(|a, b| b.release_year.cmp(&a.release_year));
 
         Ok(albums)
     }
+
+    async fn first_party_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
+        let mut albums = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            let albums_json = self
+                .first_party_json(
+                    ApiEndpoint::ArtistPage,
+                    &artist_albums_url(artist_id, offset),
+                )
+                .await?;
+            let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
+            let page_len = page_albums.len();
+            albums.append(&mut page_albums);
+            if !has_next || page_len == 0 {
+                break;
+            }
+            offset += ARTIST_ALBUMS_PAGE_LIMIT;
+        }
+        albums.sort_by(|a, b| b.release_year.cmp(&a.release_year));
+
+        Ok(albums)
+    }
+}
+
+const ARTIST_ALBUMS_PAGE_LIMIT: usize = 10;
+
+fn artist_albums_url(artist_id: &str, offset: usize) -> String {
+    format!(
+        "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
+    )
+}
+
+fn parse_artist_albums_page(json: &serde_json::Value) -> (Vec<Album>, bool) {
+    let albums = json
+        .get("items")
+        .and_then(|v| v.as_array())
+        .map(|items| items.iter().filter_map(parse::album).collect())
+        .unwrap_or_default();
+    let has_next = json.get("next").is_some_and(|v| !v.is_null());
+    (albums, has_next)
 }
 
 fn update_persistent_cache(update: impl FnOnce(&mut CacheData)) {
@@ -451,12 +487,18 @@ fn update_persistent_cache(update: impl FnOnce(&mut CacheData)) {
     let _ = AppConfig::save_cache(&cache);
 }
 
+fn record_rate_limit_cooldown(key: &str, retry_after: Duration) -> Duration {
+    let mut cache = AppConfig::load_cache();
+    let cooldown = cache.record_rate_limit_cooldown(key.to_string(), retry_after);
+    let _ = AppConfig::save_cache(&cache);
+    cooldown
+}
+
 fn persistent_cooldown_key(key: &CacheKey) -> String {
     match key {
         CacheKey::TopTracks => "top_tracks".to_string(),
         CacheKey::RecentlyPlayed => "recently_played".to_string(),
         CacheKey::FollowedArtists => "followed_artists".to_string(),
-        CacheKey::ArtistPage(artist_id) => format!("artist_page:{artist_id}"),
         CacheKey::ArtistAlbums(artist_id) => format!("artist_albums:{artist_id}"),
     }
 }
@@ -480,6 +522,64 @@ fn log_api(message: &str) {
         .append(true)
         .open("echo-debug-api.log")
     {
-        let _ = writeln!(file, "{message}");
+        let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artist_album_url_uses_spotify_limit_ten() {
+        let url = artist_albums_url("artist", 20);
+
+        assert!(url.contains("/artists/artist/albums"));
+        assert!(url.contains("limit=10"));
+        assert!(url.contains("offset=20"));
+    }
+
+    #[test]
+    fn artist_album_page_parser_reads_items_and_next() {
+        let json = serde_json::json!({
+            "next": "https://api.spotify.com/v1/artists/artist/albums?offset=10&limit=10",
+            "items": [
+                {
+                    "id": "album-a",
+                    "name": "Album A",
+                    "artists": [{ "name": "Artist" }],
+                    "release_date": "2024-01-01",
+                    "images": [{ "url": "cover-a" }]
+                },
+                {
+                    "id": "album-b",
+                    "name": "Album B",
+                    "artists": [{ "name": "Artist" }],
+                    "release_date": "2023",
+                    "images": []
+                }
+            ]
+        });
+
+        let (albums, has_next) = parse_artist_albums_page(&json);
+
+        assert!(has_next);
+        assert_eq!(albums.len(), 2);
+        assert_eq!(albums[0].id, "album-a");
+        assert_eq!(albums[0].release_year, "2024");
+        assert_eq!(albums[1].id, "album-b");
+    }
+
+    #[test]
+    fn artist_album_page_parser_stops_on_null_next() {
+        let json = serde_json::json!({
+            "next": null,
+            "items": []
+        });
+
+        let (albums, has_next) = parse_artist_albums_page(&json);
+
+        assert!(albums.is_empty());
+        assert!(!has_next);
     }
 }

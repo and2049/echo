@@ -208,16 +208,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                    if let Some(ref data) = state.artist_page_data {
-                        if !data.top_tracks.is_empty()
-                            && state.artist_page_track_index
-                                < data.top_tracks.len().saturating_sub(1)
-                        {
-                            state.artist_page_track_index += 1;
-                        }
-                    }
-                } else if let Some(ref data) = state.artist_page_data {
+                if let Some(ref data) = state.artist_page_data {
                     if !data.albums.is_empty()
                         && state.artist_page_album_index < data.albums.len().saturating_sub(1)
                     {
@@ -271,11 +262,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if state.artist_page_tab == crate::app::ArtistPageTab::TopTracks {
-                    if state.artist_page_track_index > 0 {
-                        state.artist_page_track_index -= 1;
-                    }
-                } else if state.artist_page_album_index > 0 {
+                if state.artist_page_album_index > 0 {
                     state.artist_page_album_index -= 1;
                 }
             }
@@ -775,7 +762,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 ActiveView::Library => state.selected_playlist_index,
                 ActiveView::Devices => state.selected_device_index,
                 ActiveView::ArtistList => state.selected_artist_index,
-                ActiveView::ArtistPage => state.artist_page_track_index,
+                ActiveView::ArtistPage => state.artist_page_album_index,
             };
             state.visual_selection_start = Some(current_idx);
             state.status_message = Some(crate::i18n::t(
@@ -844,8 +831,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     crate::app::SearchTab::Albums => crate::app::SearchTab::Tracks,
                 };
                 state.selected_search_index = 0;
-            } else if state.active_view == ActiveView::ArtistPage {
-                return artist_page::toggle_tab(state);
             }
         }
         _ => {}

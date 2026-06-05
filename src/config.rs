@@ -52,6 +52,8 @@ pub struct CacheData {
     pub artist_pages: HashMap<String, CachedEntry<ArtistPageData>>,
     #[serde(default)]
     pub cooldowns: HashMap<String, u64>,
+    #[serde(default)]
+    pub cooldown_failures: HashMap<String, u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -186,6 +188,28 @@ impl CacheData {
         );
     }
 
+    pub fn record_rate_limit_cooldown(
+        &mut self,
+        key: impl Into<String>,
+        retry_after: Duration,
+    ) -> Duration {
+        let key = key.into();
+        let failures = self
+            .cooldown_failures
+            .entry(key.clone())
+            .and_modify(|count| *count = count.saturating_add(1))
+            .or_insert(1);
+        let safety_secs = 5u64
+            .saturating_mul(2u64.saturating_pow(failures.saturating_sub(1).min(6)))
+            .min(5 * 60);
+        let cooldown = retry_after.saturating_add(Duration::from_secs(safety_secs));
+        self.cooldowns.insert(
+            key,
+            now_epoch_secs().saturating_add(cooldown.as_secs().max(1)),
+        );
+        cooldown
+    }
+
     pub fn cooldown_remaining(&mut self, key: &str) -> Option<Duration> {
         let until = *self.cooldowns.get(key)?;
         let now = now_epoch_secs();
@@ -199,6 +223,7 @@ impl CacheData {
 
     pub fn clear_cooldown(&mut self, key: &str) {
         self.cooldowns.remove(key);
+        self.cooldown_failures.remove(key);
     }
 }
 
@@ -608,5 +633,21 @@ error = "Red"
             .insert("top_tracks".to_string(), now_epoch_secs().saturating_sub(1));
         assert!(cache.cooldown_remaining("top_tracks").is_none());
         assert!(!cache.cooldowns.contains_key("top_tracks"));
+    }
+
+    #[test]
+    fn rate_limit_cooldown_adds_safety_and_backs_off() {
+        let mut cache = CacheData::default();
+
+        let first =
+            cache.record_rate_limit_cooldown("artist_albums:artist", Duration::from_secs(30));
+        let second =
+            cache.record_rate_limit_cooldown("artist_albums:artist", Duration::from_secs(30));
+
+        assert_eq!(first, Duration::from_secs(35));
+        assert_eq!(second, Duration::from_secs(40));
+
+        cache.clear_cooldown("artist_albums:artist");
+        assert!(!cache.cooldown_failures.contains_key("artist_albums:artist"));
     }
 }
