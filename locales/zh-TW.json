@@ -1,0 +1,58 @@
+{
+  "ui": {
+    "library": "資料庫",
+    "search": "搜尋",
+    "queue": "播放佇列",
+    "playlists": "播放清單",
+    "albums": "專輯",
+    "browse": "瀏覽",
+    "tracks": "歌曲",
+    "artist": "歌手",
+    "artists": "歌手",
+    "album": "專輯",
+    "duration": "時長",
+    "playing": " 正在播放 (裝置: {} | 隨機: {} | 循環: {} | 音量: {}%) ",
+    "on": "開",
+    "off": "關"
+  },
+  "help": {
+    "press_help": "按 '?' 查看幫助",
+    "no_results": "未找到結果"
+  },
+  "messages": {
+    "visual_block": "可視塊選擇模式",
+    "fetching": "載入中...",
+    "fetching_album": "正在載入專輯...",
+    "fetching_playlist": "正在載入播放清單...",
+    "saved_to_library": "已將 '{}' 儲存到資料庫",
+    "removed_from_library": "已將 '{}' 從資料庫中移除",
+    "created_playlist": "已建立播放清單 '{}'",
+    "deleted_playlists": "已刪除 {} 個播放清單",
+    "unfollowed_playlist": "已取消關注播放清單",
+    "renamed_playlist": "已重新命名為 '{}'",
+    "added_to_playlist": "已將 {} 首歌曲新增到 '{}'",
+    "removed_from_playlist": "已將 {} 首歌曲從 '{}' 中移除",
+    "added_to_queue": "已將 {} 首歌曲新增到播放佇列",
+    "added_to_liked": "已新增到喜歡的歌曲",
+    "unknown_theme": "未知主題: {}",
+    "unknown_language": "未知語言: {}",
+    "language_set": "語言已設定為 {}"
+  },
+  "prompts": {
+    "search": "搜尋: ",
+    "create_playlist": "新播放清單名稱: ",
+    "rename_playlist": "重新命名播放清單: ",
+    "theme": "主題: ",
+    "lang": "語言: ",
+    "remove_from_liked": "是否從喜歡的歌曲中移除? (y/n)"
+  },
+  "actions": {
+    "go_to_album": "前往專輯",
+    "go_to_artist": "前往歌手",
+    "add_to_playlist": "新增到播放清單",
+    "add_to_queue": "新增到播放佇列",
+    "unlike_track": "取消喜歡",
+    "like_track": "喜歡這首歌",
+    "title": " 操作: {} "
+  }
+}

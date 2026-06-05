@@ -9,10 +9,13 @@ pub fn init() {
     let en: serde_json::Value = serde_json::from_str(include_str!("../locales/en.json")).unwrap();
     let zh: serde_json::Value =
         serde_json::from_str(include_str!("../locales/zh-CN.json")).unwrap();
+    let zh_tw: serde_json::Value =
+        serde_json::from_str(include_str!("../locales/zh-TW.json")).unwrap();
 
     map.insert("en", en);
     map.insert("zh", zh.clone());
     map.insert("zh-CN", zh);
+    map.insert("zh-TW", zh_tw);
 
     TRANSLATIONS.set(map).unwrap();
 }
