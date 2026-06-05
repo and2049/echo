@@ -4,14 +4,16 @@ pub mod audio;
 pub mod browse;
 pub mod errors;
 pub mod local_files;
+pub mod local_playback;
 pub mod media;
 pub mod tracks;
 pub mod visualization;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
-use crate::models::{PlaybackItem, PlaybackTarget, TrackSource};
+use crate::models::{LocalLibrary, PlaybackItem, PlaybackTarget, Track, TrackSource};
 use api::SpotifyWorker;
+use local_playback::{LocalPlaybackEngine, LocalPlaybackSnapshot, RepeatMode};
 use rspotify::clients::OAuthClient;
 use std::sync::{
     Arc,
@@ -43,6 +45,78 @@ fn invalidate_playlist_context_cache(playlist_id: &str) {
     let mut cache = AppConfig::load_cache();
     cache.invalidate_playlist_context(playlist_id);
     let _ = AppConfig::save_cache(&cache);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActivePlaybackSource {
+    Spotify,
+    Local,
+}
+
+async fn emit_local_snapshot(
+    tx: &mpsc::Sender<WorkerEvent>,
+    media_tx: &mpsc::Sender<media::MediaUpdate>,
+    snapshot: LocalPlaybackSnapshot,
+    playback_started: bool,
+) {
+    if playback_started && let Some(item) = snapshot.item.clone() {
+        let _ = tx.send(WorkerEvent::PlaybackStarted { item }).await;
+    }
+    if let Some(item) = snapshot.item.clone() {
+        let _ = media_tx
+            .send(media::MediaUpdate::Metadata {
+                title: item.title.clone(),
+                artist: item.artist.clone(),
+                album: "Local Music".to_string(),
+                duration_ms: item.duration_ms,
+                cover_url: item.image_url.clone(),
+            })
+            .await;
+    }
+    let _ = media_tx
+        .send(media::MediaUpdate::Playback(
+            snapshot.is_playing,
+            snapshot.progress_ms,
+        ))
+        .await;
+    let _ = tx
+        .send(WorkerEvent::SyncPlaybackState {
+            is_playing: snapshot.is_playing,
+            is_shuffled: snapshot.is_shuffled,
+            repeat_mode: snapshot.repeat_mode,
+            volume: Some(snapshot.volume),
+            device_name: "Local".to_string(),
+            progress_ms: snapshot.progress_ms,
+            item: snapshot.item,
+        })
+        .await;
+    let _ = tx.send(WorkerEvent::QueueLoaded(snapshot.queue)).await;
+}
+
+fn resolve_local_queue_tracks(track_ids: &[String], library: &LocalLibrary) -> Vec<Track> {
+    track_ids
+        .iter()
+        .filter_map(|track_id| {
+            library
+                .tracks
+                .iter()
+                .find(|track| track.id == *track_id)
+                .map(|track| Track {
+                    id: track.id.clone(),
+                    source: TrackSource::Local,
+                    local_path: Some(track.path.clone()),
+                    name: track.title.clone(),
+                    artist: track.artist.clone(),
+                    duration_ms: track.duration_ms,
+                    image_url: track
+                        .artwork_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().to_string()),
+                    album_id: None,
+                    artist_id: None,
+                })
+        })
+        .collect()
 }
 
 async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
@@ -82,6 +156,55 @@ async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>
                 let _ = tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn resolves_local_queue_tracks_from_library_ids() {
+        let library = crate::models::LocalLibrary {
+            tracks: vec![
+                crate::models::LocalTrack {
+                    id: "local:a".to_string(),
+                    path: PathBuf::from("/music/a.wav"),
+                    title: "A".to_string(),
+                    artist: "Artist A".to_string(),
+                    album: "Album A".to_string(),
+                    duration_ms: 1_000,
+                    artwork_path: None,
+                    file_size: 10,
+                    modified_unix_secs: 20,
+                },
+                crate::models::LocalTrack {
+                    id: "local:b".to_string(),
+                    path: PathBuf::from("/music/b.wav"),
+                    title: "B".to_string(),
+                    artist: "Artist B".to_string(),
+                    album: "Album B".to_string(),
+                    duration_ms: 2_000,
+                    artwork_path: None,
+                    file_size: 11,
+                    modified_unix_secs: 21,
+                },
+            ],
+        };
+
+        let tracks = resolve_local_queue_tracks(
+            &["local:b".to_string(), "local:missing".to_string()],
+            &library,
+        );
+
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "local:b");
+        assert_eq!(tracks[0].source, TrackSource::Local);
+        assert_eq!(
+            tracks[0].local_path.as_deref(),
+            Some(Path::new("/music/b.wav"))
+        );
     }
 }
 
@@ -213,11 +336,14 @@ impl Worker {
         let is_playing = Arc::new(AtomicBool::new(false));
         let sync_inflight = Arc::new(AtomicBool::new(false));
         let mut current_track_id: Option<String> = None;
+        let mut active_playback_source: Option<ActivePlaybackSource> = None;
+        let mut local_playback = LocalPlaybackEngine::default();
 
         loop {
             tokio::select! {
                 _ = sync_interval.tick() => {
                     if let Some(ref sp) = spotify_opt
+                        && active_playback_source != Some(ActivePlaybackSource::Local)
                         && !sync_inflight.swap(true, Ordering::SeqCst) {
                         let client = sp.client.clone();
                         let tx = self.tx.clone();
@@ -244,7 +370,26 @@ impl Worker {
                     }
                 }
                 _ = interval.tick() => {
-                    if is_playing.load(std::sync::atomic::Ordering::SeqCst) {
+                    if active_playback_source == Some(ActivePlaybackSource::Local) {
+                        match local_playback.tick() {
+                            Ok(Some(snapshot)) => {
+                                is_playing.store(snapshot.is_playing, std::sync::atomic::Ordering::SeqCst);
+                                if let Some(item) = snapshot.item.as_ref() {
+                                    current_track_id = Some(item.id.clone());
+                                }
+                                emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                active_playback_source = None;
+                                is_playing.store(false, std::sync::atomic::Ordering::SeqCst);
+                                let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                    label: "Local playback".to_string(),
+                                    message: e.to_string(),
+                                }).await;
+                            }
+                        }
+                    } else if is_playing.load(std::sync::atomic::Ordering::SeqCst) {
                         let _ = self.tx.send(WorkerEvent::Tick).await;
                     }
                 }
@@ -418,15 +563,68 @@ impl Worker {
                                 }
                             }
                             AppEvent::PlayTrack { target, track_id, title, artist, duration_ms, image_url, album_id } => {
-                                if matches!(target, PlaybackTarget::LocalTrack { .. }) {
-                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
-                                        label: "Local playback".to_string(),
-                                        message: "not implemented yet".to_string(),
-                                    }).await;
+                                if let PlaybackTarget::LocalTrack { track_id: _, path } = target.clone() {
+                                    let track = crate::models::Track {
+                                        id: track_id.clone(),
+                                        source: TrackSource::Local,
+                                        local_path: Some(path),
+                                        name: title.clone(),
+                                        artist: artist.clone(),
+                                        duration_ms,
+                                        image_url: image_url.clone(),
+                                        album_id: album_id.clone(),
+                                        artist_id: None,
+                                    };
+                                    if let Some(ref mut sp) = spotify_opt {
+                                        let _ = sp.toggle_playback(false).await;
+                                    }
+                                    local_playback.stop();
+                                    match local_playback.play_context(vec![track], 0) {
+                                        Ok(snapshot) => {
+                                            active_playback_source = Some(ActivePlaybackSource::Local);
+                                            is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
+                                            current_track_id = Some(track_id);
+                                            emit_local_snapshot(&self.tx, &self.media_tx, snapshot, true).await;
+                                        }
+                                        Err(e) => {
+                                            active_playback_source = None;
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Local playback".to_string(),
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    continue;
+                                }
+
+                                if let PlaybackTarget::LocalContext { tracks, selected_index } = target.clone() {
+                                    if let Some(ref mut sp) = spotify_opt {
+                                        let _ = sp.toggle_playback(false).await;
+                                    }
+                                    local_playback.stop();
+                                    match local_playback.play_context(tracks, selected_index) {
+                                        Ok(snapshot) => {
+                                            active_playback_source = Some(ActivePlaybackSource::Local);
+                                            is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
+                                            current_track_id = Some(track_id);
+                                            emit_local_snapshot(&self.tx, &self.media_tx, snapshot, true).await;
+                                        }
+                                        Err(e) => {
+                                            active_playback_source = None;
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Local playback".to_string(),
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
                                     continue;
                                 }
 
                                 if let Some(ref mut sp) = spotify_opt {
+                                    if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                        local_playback.stop();
+                                    }
+                                    active_playback_source = Some(ActivePlaybackSource::Spotify);
                                     let play_result = match &target {
                                         PlaybackTarget::SpotifyContext { context_id, is_album } => {
                                             sp.play_track(context_id, &track_id, *is_album).await
@@ -434,7 +632,7 @@ impl Worker {
                                         PlaybackTarget::SpotifyTrack { track_id } => {
                                             sp.play_track("LIKED_SONGS", track_id, false).await
                                         }
-                                        PlaybackTarget::LocalTrack { .. } => unreachable!(),
+                                        PlaybackTarget::LocalTrack { .. } | PlaybackTarget::LocalContext { .. } => unreachable!(),
                                     };
                                     match play_result {
                                         Ok(_) => {
@@ -470,17 +668,25 @@ impl Worker {
                             }
                             AppEvent::TogglePlayback(playing) => {
                                 is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    local_playback.toggle_playback(playing);
+                                    emit_local_snapshot(&self.tx, &self.media_tx, local_playback.snapshot(), false).await;
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.toggle_playback(playing).await;
                                 }
                             }
                             AppEvent::ToggleShuffle(is_shuffled) => {
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    emit_local_snapshot(&self.tx, &self.media_tx, local_playback.set_shuffle(is_shuffled), false).await;
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.toggle_shuffle(is_shuffled).await;
                                 }
                             }
                             AppEvent::SetRepeatMode(mode) => {
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    let snapshot = local_playback.set_repeat_mode(RepeatMode::from_label(&mode));
+                                    emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let state = match mode.as_str() {
                                         "Track" => rspotify::model::RepeatState::Track,
                                         "Context" => rspotify::model::RepeatState::Context,
@@ -490,12 +696,31 @@ impl Worker {
                                 }
                             }
                             AppEvent::SetVolume(vol) => {
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    let snapshot = local_playback.set_volume(u32::from(vol));
+                                    emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.set_volume(vol).await;
                                 }
                             }
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    match local_playback.next() {
+                                        Ok(snapshot) => {
+                                            is_playing.store(snapshot.is_playing, std::sync::atomic::Ordering::SeqCst);
+                                            if let Some(item) = snapshot.item.as_ref() {
+                                                current_track_id = Some(item.id.clone());
+                                            }
+                                            emit_local_snapshot(&self.tx, &self.media_tx, snapshot, true).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Local playback".to_string(),
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.next_track().await;
                                     is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
@@ -503,7 +728,23 @@ impl Worker {
                                 }
                             }
                             AppEvent::PreviousTrack { current_track_id: ui_current_track_id } => {
-                                if let Some(ref mut sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    match local_playback.previous() {
+                                        Ok(snapshot) => {
+                                            is_playing.store(snapshot.is_playing, std::sync::atomic::Ordering::SeqCst);
+                                            if let Some(item) = snapshot.item.as_ref() {
+                                                current_track_id = Some(item.id.clone());
+                                            }
+                                            emit_local_snapshot(&self.tx, &self.media_tx, snapshot, true).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Local playback".to_string(),
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                } else if let Some(ref mut sp) = spotify_opt {
                                     let _ = sp.previous_track().await;
                                     is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                     let previous_track_id = ui_current_track_id.or_else(|| current_track_id.clone());
@@ -529,7 +770,33 @@ impl Worker {
                                 }
                             }
                             AppEvent::AddToQueue(track_ids) => {
-                                if let Some(ref sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    if track_ids.iter().any(|id| !id.starts_with("local:")) {
+                                        let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                            label: "Local queue".to_string(),
+                                            message: "cross-source live queueing is not supported yet".to_string(),
+                                        }).await;
+                                        continue;
+                                    }
+                                    let library = AppConfig::load_local_library();
+                                    let tracks = resolve_local_queue_tracks(&track_ids, &library);
+                                    if tracks.is_empty() {
+                                        let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                            label: "Local queue".to_string(),
+                                            message: "no queued local tracks were found in the local library".to_string(),
+                                        }).await;
+                                        continue;
+                                    }
+                                    let count = tracks.len();
+                                    let snapshot = local_playback.add_to_queue(tracks);
+                                    emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                                    let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                } else if track_ids.iter().any(|id| id.starts_with("local:")) {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Spotify queue".to_string(),
+                                        message: "local tracks can only be queued while local playback is active".to_string(),
+                                    }).await;
+                                } else if let Some(ref sp) = spotify_opt {
                                     let count = track_ids.len();
                                     let _ = sp.add_to_queue(track_ids).await;
                                     let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
@@ -726,7 +993,9 @@ impl Worker {
                                 }
                             }
                             AppEvent::FetchQueue => {
-                                if let Some(ref sp) = spotify_opt {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    let _ = self.tx.send(WorkerEvent::QueueLoaded(local_playback.snapshot().queue)).await;
+                                } else if let Some(ref sp) = spotify_opt {
                                     match sp.fetch_queue().await {
                                         Ok(tracks) => {
                                             let _ = self.tx.send(WorkerEvent::QueueLoaded(tracks)).await;

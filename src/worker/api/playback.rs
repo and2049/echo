@@ -114,7 +114,11 @@ impl SpotifyWorker {
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.as_ref().map(|id| id.id().to_string()),
-                    artist_id: track.artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string()),
+                    artist_id: track
+                        .artists
+                        .first()
+                        .and_then(|a| a.id.as_ref())
+                        .map(|id| id.id().to_string()),
                 })
             }
             rspotify::model::PlayableItem::Episode(episode) => Some(PlaybackItem {
@@ -410,7 +414,10 @@ impl SpotifyWorker {
                         continue;
                     }
                     let artists = track.artists;
-                    let artist_id = artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string());
+                    let artist_id = artists
+                        .first()
+                        .and_then(|a| a.id.as_ref())
+                        .map(|id| id.id().to_string());
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         source: TrackSource::Spotify,

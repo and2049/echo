@@ -1,4 +1,6 @@
-use crate::models::{PlaybackItem, PlaybackTarget, Playlist, SearchResults, Track, TrackListContext};
+use crate::models::{
+    PlaybackItem, PlaybackTarget, Playlist, SearchResults, Track, TrackListContext,
+};
 use crossterm::event::KeyEvent;
 use std::path::PathBuf;
 

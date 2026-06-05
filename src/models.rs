@@ -21,6 +21,10 @@ pub enum PlaybackTarget {
         track_id: String,
         path: PathBuf,
     },
+    LocalContext {
+        tracks: Vec<Track>,
+        selected_index: usize,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,7 +60,7 @@ pub enum BrowseNode {
     FollowedArtists,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
     #[serde(default)]
@@ -186,10 +190,13 @@ impl TrackListContext {
                     })
                 }
             },
-            TrackSource::Local => track.local_path.clone().map(|path| PlaybackTarget::LocalTrack {
-                track_id: track.id.clone(),
-                path,
-            }),
+            TrackSource::Local => track
+                .local_path
+                .clone()
+                .map(|path| PlaybackTarget::LocalTrack {
+                    track_id: track.id.clone(),
+                    path,
+                }),
         }
     }
 }

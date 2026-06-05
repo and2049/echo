@@ -6,12 +6,21 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use lofty::{
+    file::{AudioFile, TaggedFileExt},
+    picture::MimeType,
+    prelude::Accessor,
+};
 
+use crate::config::AppConfig;
 use crate::models::{LocalLibrary, LocalScanReport, LocalTrack, stable_local_track_id};
 
 const SUPPORTED_AUDIO_EXTENSIONS: [&str; 6] = ["mp3", "wav", "flac", "ogg", "m4a", "aac"];
 
-pub fn scan_local_library(root: &Path, previous: &LocalLibrary) -> Result<(LocalLibrary, LocalScanReport)> {
+pub fn scan_local_library(
+    root: &Path,
+    previous: &LocalLibrary,
+) -> Result<(LocalLibrary, LocalScanReport)> {
     if !root.is_absolute() {
         anyhow::bail!("local music path must be absolute");
     }
@@ -62,11 +71,23 @@ pub fn scan_local_library(root: &Path, previous: &LocalLibrary) -> Result<(Local
                 previous_track.clone()
             } else {
                 report.tracks_updated += 1;
-                fallback_track_from_path(id.clone(), path, file_size, modified_unix_secs)
+                match track_from_path(id.clone(), path, file_size, modified_unix_secs) {
+                    Ok(track) => track,
+                    Err(_) => {
+                        report.skipped += 1;
+                        continue;
+                    }
+                }
             }
         } else {
             report.tracks_added += 1;
-            fallback_track_from_path(id.clone(), path, file_size, modified_unix_secs)
+            match track_from_path(id.clone(), path, file_size, modified_unix_secs) {
+                Ok(track) => track,
+                Err(_) => {
+                    report.skipped += 1;
+                    continue;
+                }
+            }
         };
 
         seen_ids.insert(id);
@@ -120,30 +141,87 @@ fn collect_supported_files(
     Ok(())
 }
 
-fn fallback_track_from_path(
+fn track_from_path(
     id: String,
     path: PathBuf,
     file_size: u64,
     modified_unix_secs: u64,
-) -> LocalTrack {
-    let title = path
-        .file_stem()
+) -> Result<LocalTrack> {
+    parse_track_metadata(&id, &path, file_size, modified_unix_secs)
+}
+
+fn parse_track_metadata(
+    id: &str,
+    path: &Path,
+    file_size: u64,
+    modified_unix_secs: u64,
+) -> Result<LocalTrack> {
+    let tagged_file = lofty::read_from_path(path)?;
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+    let fallback = fallback_track_title(path);
+    let title = tag
+        .and_then(|tag| tag.title())
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty())
+        .unwrap_or(fallback);
+    let artist = tag
+        .and_then(|tag| tag.artist())
+        .map(|artist| artist.trim().to_string())
+        .unwrap_or_default();
+    let album = tag
+        .and_then(|tag| tag.album())
+        .map(|album| album.trim().to_string())
+        .unwrap_or_default();
+    let duration_ms = tagged_file
+        .properties()
+        .duration()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u32::MAX);
+    let artwork_path =
+        tag.and_then(|tag| write_embedded_artwork(id, tag.pictures()).ok().flatten());
+
+    Ok(LocalTrack {
+        id: id.to_string(),
+        path: path.to_path_buf(),
+        title,
+        artist,
+        album,
+        duration_ms,
+        artwork_path,
+        file_size,
+        modified_unix_secs,
+    })
+}
+
+fn fallback_track_title(path: &Path) -> String {
+    path.file_stem()
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.is_empty())
         .unwrap_or("Unknown Track")
-        .to_string();
+        .to_string()
+}
 
-    LocalTrack {
-        id,
-        path,
-        title,
-        artist: String::new(),
-        album: String::new(),
-        duration_ms: 0,
-        artwork_path: None,
-        file_size,
-        modified_unix_secs,
+fn write_embedded_artwork(
+    track_id: &str,
+    pictures: &[lofty::picture::Picture],
+) -> Result<Option<PathBuf>> {
+    let Some(picture) = pictures.first() else {
+        return Ok(None);
+    };
+    if picture.data().is_empty() {
+        return Ok(None);
     }
+
+    let ext = picture.mime_type().and_then(MimeType::ext).unwrap_or("img");
+    let safe_track_id = track_id.replace([':', '/', '\\'], "_");
+    let dir = AppConfig::local_artwork_dir();
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{safe_track_id}.{ext}"));
+    fs::write(&path, picture.data())?;
+    Ok(Some(path))
 }
 
 #[cfg(test)]
@@ -159,6 +237,33 @@ mod tests {
         std::env::temp_dir().join(format!("echo-local-{name}-{}-{nanos}", std::process::id()))
     }
 
+    fn write_silent_wav(path: &Path, sample_count: u32) {
+        let channels = 1u16;
+        let sample_rate = 8_000u32;
+        let bits_per_sample = 16u16;
+        let block_align = channels * bits_per_sample / 8;
+        let byte_rate = sample_rate * u32::from(block_align);
+        let data_size = sample_count * u32::from(block_align);
+        let riff_size = 36 + data_size;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&riff_size.to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_size.to_le_bytes());
+        bytes.resize(bytes.len() + data_size as usize, 0);
+        fs::write(path, bytes).expect("write wav file");
+    }
+
     #[test]
     fn supported_extensions_are_case_insensitive() {
         assert!(is_supported_audio_file(Path::new("track.MP3")));
@@ -171,8 +276,8 @@ mod tests {
         let root = unique_temp_dir("recursive");
         let nested = root.join("Artist").join("Album");
         fs::create_dir_all(&nested).expect("create nested dir");
-        fs::write(root.join("root.mp3"), b"root").expect("write root file");
-        fs::write(nested.join("nested.FLAC"), b"nested").expect("write nested file");
+        write_silent_wav(&root.join("root.wav"), 8_000);
+        write_silent_wav(&nested.join("nested.WAV"), 4_000);
         fs::write(nested.join("notes.txt"), b"notes").expect("write unsupported file");
 
         let (library, report) =
@@ -190,11 +295,11 @@ mod tests {
     fn scan_reports_unchanged_updated_added_and_removed_files() {
         let root = unique_temp_dir("fingerprints");
         fs::create_dir_all(&root).expect("create root");
-        let keep = root.join("keep.mp3");
-        let update = root.join("update.mp3");
-        let added = root.join("added.mp3");
-        fs::write(&keep, b"keep").expect("write keep");
-        fs::write(&update, b"update").expect("write update");
+        let keep = root.join("keep.wav");
+        let update = root.join("update.wav");
+        let added = root.join("added.wav");
+        write_silent_wav(&keep, 8_000);
+        write_silent_wav(&update, 8_000);
 
         let (mut previous, _) =
             scan_local_library(&root, &LocalLibrary::default()).expect("initial scan");
@@ -212,8 +317,8 @@ mod tests {
         });
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        fs::write(&update, b"updated").expect("rewrite update");
-        fs::write(&added, b"added").expect("write added");
+        write_silent_wav(&update, 16_000);
+        write_silent_wav(&added, 8_000);
 
         let (library, report) = scan_local_library(&root, &previous).expect("rescan");
 
@@ -221,6 +326,40 @@ mod tests {
         assert_eq!(report.tracks_added, 1);
         assert_eq!(report.tracks_updated, 1);
         assert_eq!(report.tracks_removed, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scan_skips_supported_files_that_cannot_be_decoded() {
+        let root = unique_temp_dir("undecodable");
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(root.join("not-a-song.mp3"), b"nope").expect("write invalid audio");
+
+        let (library, report) =
+            scan_local_library(&root, &LocalLibrary::default()).expect("scan local library");
+
+        assert!(library.tracks.is_empty());
+        assert_eq!(report.files_found, 1);
+        assert_eq!(report.skipped, 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn decoded_files_use_filename_fallback_and_duration() {
+        let root = unique_temp_dir("metadata-fallback");
+        fs::create_dir_all(&root).expect("create root");
+        write_silent_wav(&root.join("fallback-title.wav"), 8_000);
+
+        let (library, _) =
+            scan_local_library(&root, &LocalLibrary::default()).expect("scan local library");
+
+        let track = library.tracks.first().expect("decoded track");
+        assert_eq!(track.title, "fallback-title");
+        assert_eq!(track.artist, "");
+        assert_eq!(track.album, "");
+        assert_eq!(track.duration_ms, 1000);
 
         let _ = fs::remove_dir_all(root);
     }

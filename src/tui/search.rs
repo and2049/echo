@@ -192,7 +192,12 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             frame.render_stateful_widget(table, inner, &mut ts);
         }
         SearchTab::Artists => {
-            let header = Row::new(vec![crate::i18n::t("ui.artist", &state.library_config.language)]).style(header_style).height(1);
+            let header = Row::new(vec![crate::i18n::t(
+                "ui.artist",
+                &state.library_config.language,
+            )])
+            .style(header_style)
+            .height(1);
             let rows: Vec<Row> = state
                 .search_results
                 .artists

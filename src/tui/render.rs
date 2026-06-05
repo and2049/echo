@@ -432,7 +432,12 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let x = (area.width.saturating_sub(popup_w)) / 2;
     let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect { x, y, width: popup_w, height: popup_h };
+    let popup_area = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
 
     frame.render_widget(ratatui::widgets::Clear, popup_area);
 

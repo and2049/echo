@@ -47,7 +47,12 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                     .collect()
             }
             "lang" => {
-                let options = vec!["en".to_string(), "zh".to_string(), "zh-CN".to_string(), "zh-TW".to_string()];
+                let options = vec![
+                    "en".to_string(),
+                    "zh".to_string(),
+                    "zh-CN".to_string(),
+                    "zh-TW".to_string(),
+                ];
                 options
                     .into_iter()
                     .filter(|o| o.starts_with(arg_str))
@@ -234,7 +239,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "lang" => {
                         if let Some(lang_code) = args.next() {
-                            if lang_code == "en" || lang_code == "zh" || lang_code == "zh-CN" || lang_code == "zh-TW" {
+                            if lang_code == "en"
+                                || lang_code == "zh"
+                                || lang_code == "zh-CN"
+                                || lang_code == "zh-TW"
+                            {
                                 state.library_config.language = lang_code.to_string();
                                 state.save_library_config();
                                 state.status_message = Some(
@@ -364,9 +373,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     std::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );
                             } else if !path.is_dir() {
-                                state.status_message = Some(
-                                    "Local path must be an existing directory".to_string(),
-                                );
+                                state.status_message =
+                                    Some("Local path must be an existing directory".to_string());
                                 state.status_message_expiry = Some(
                                     std::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );

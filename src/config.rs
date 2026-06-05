@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::models::{
-    Album, Artist, ArtistPageData, LocalLibrary, LocalPlaylists, Playlist, Track,
-    TrackListContext, TrackListContextKind,
+    Album, Artist, ArtistPageData, LocalLibrary, LocalPlaylists, Playlist, Track, TrackListContext,
+    TrackListContextKind,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -490,6 +490,13 @@ impl AppConfig {
         let contents = serde_json::to_string_pretty(playlists)?;
         fs::write(path, contents)?;
         Ok(())
+    }
+
+    pub fn local_artwork_dir() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("echo");
+        path.push("local_artwork");
+        path
     }
 }
 

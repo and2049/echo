@@ -85,7 +85,10 @@ impl SpotifyWorker {
                         continue;
                     }
                     let artists = track.artists;
-                    let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                    let artist_id = artists
+                        .first()
+                        .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                        .flatten();
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         source: TrackSource::Spotify,
@@ -149,7 +152,10 @@ impl SpotifyWorker {
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
                 let artists = track.artists;
-                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                let artist_id = artists
+                    .first()
+                    .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                    .flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     source: TrackSource::Spotify,
@@ -196,7 +202,10 @@ impl SpotifyWorker {
                 continue;
             }
             let artists = track.artists;
-            let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+            let artist_id = artists
+                .first()
+                .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                .flatten();
             out.push(Track {
                 id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                 source: TrackSource::Spotify,
@@ -226,7 +235,10 @@ impl SpotifyWorker {
                     continue;
                 }
                 let artists = track.artists;
-                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                let artist_id = artists
+                    .first()
+                    .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                    .flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     source: TrackSource::Spotify,

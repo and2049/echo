@@ -54,7 +54,9 @@ pub async fn apply_worker_event(
             if state
                 .active_tracklist_context
                 .as_ref()
-                .is_some_and(|context| context.kind == crate::models::TrackListContextKind::LocalLibrary)
+                .is_some_and(|context| {
+                    context.kind == crate::models::TrackListContextKind::LocalLibrary
+                })
             {
                 state.show_local_library();
             }

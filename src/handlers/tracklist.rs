@@ -1,16 +1,29 @@
 use crate::{
     app::AppState,
     events::AppEvent,
-    models::{Track, TrackListContext},
+    models::{PlaybackTarget, Track, TrackListContext, TrackSource},
 };
 
 pub fn play_selected(state: &AppState) -> Option<AppEvent> {
     let track = state.tracks.get(state.selected_track_index)?;
-    play_event(track, state.active_tracklist_context.as_ref()?)
+    let context = state.active_tracklist_context.as_ref()?;
+    let target = if track.source == TrackSource::Local {
+        PlaybackTarget::LocalContext {
+            tracks: state.tracks.clone(),
+            selected_index: state.selected_track_index,
+        }
+    } else {
+        context.playback_target_for_track(track)?
+    };
+    play_event_with_target(track, target)
 }
 
 pub fn play_event(track: &Track, context: &TrackListContext) -> Option<AppEvent> {
     let target = context.playback_target_for_track(track)?;
+    play_event_with_target(track, target)
+}
+
+fn play_event_with_target(track: &Track, target: PlaybackTarget) -> Option<AppEvent> {
     Some(AppEvent::PlayTrack {
         target,
         track_id: track.id.clone(),
@@ -39,7 +52,8 @@ pub fn mark_selected_for_delete(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::TrackListContextKind;
+    use crate::models::{TrackListContextKind, TrackSource};
+    use std::path::PathBuf;
 
     #[test]
     fn generated_context_playback_never_masquerades_as_playlist() {
@@ -56,8 +70,7 @@ mod tests {
         };
         let context = TrackListContext::generated("TOP_TRACKS", "Top Tracks");
 
-        let Some(AppEvent::PlayTrack { target, .. }) = play_event(&track, &context)
-        else {
+        let Some(AppEvent::PlayTrack { target, .. }) = play_event(&track, &context) else {
             panic!("expected play event");
         };
 
@@ -68,5 +81,50 @@ mod tests {
                 track_id: "track".to_string()
             }
         );
+    }
+
+    #[test]
+    fn selected_local_track_uses_ordered_local_context_target() {
+        let mut state = AppState::new();
+        state.active_tracklist_context = Some(TrackListContext::local_library());
+        state.tracks = vec![
+            local_track("local:a", "/music/a.wav"),
+            local_track("local:b", "/music/b.wav"),
+            local_track("local:c", "/music/c.wav"),
+        ];
+        state.selected_track_index = 1;
+
+        let Some(AppEvent::PlayTrack {
+            target, track_id, ..
+        }) = play_selected(&state)
+        else {
+            panic!("expected local play event");
+        };
+
+        assert_eq!(track_id, "local:b");
+        let PlaybackTarget::LocalContext {
+            tracks,
+            selected_index,
+        } = target
+        else {
+            panic!("expected local context target");
+        };
+        assert_eq!(selected_index, 1);
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks[1].id, "local:b");
+    }
+
+    fn local_track(id: &str, path: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            source: TrackSource::Local,
+            local_path: Some(PathBuf::from(path)),
+            name: id.to_string(),
+            artist: "Artist".to_string(),
+            artist_id: None,
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+        }
     }
 }
