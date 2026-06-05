@@ -1,16 +1,11 @@
 # Changelog
 
-### Browse tab
-New tab in library for Top Tracks, Recently Played, Followed Artists
+### Action menu replacing Go to Album
+Remove Go to Album shortcut in favor of of context menu
+- Allows for going to album or artist, adding to playlist, adding to queue, liking/unliking song
 
-### Artist Pages
-Artists pages displaying album list
-- Available through global search and Followed Artists
+### Added new themes
 
-### Caching and refresh
-Reduce API calls to reduce change of rate limiting and using background refreshes to keep up to date.
-- User playlist list: cached list displays immediately; refreshes in background if older than 15 minutes.
-- Saved albums list: same 15-minute soft refresh behavior.
-- Playlist track lists: cached tracks display immediately; refreshes in background if older than 15 minutes.
-- Album track lists: cached tracks display immediately; refreshes in background if older than 6 hours.
-- Manual library refresh: uppercase R on the Library view refreshes playlists and saved albums.
+### Language Updates
+- Removed hardcoded english text for search Artist's tab
+- Added 繁体中文
