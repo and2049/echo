@@ -17,12 +17,16 @@ use crate::models::{
 };
 use api::SpotifyWorker;
 use local_playback::{LocalPlaybackEngine, LocalPlaybackSnapshot, RepeatMode};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rspotify::clients::OAuthClient;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use tokio::sync::mpsc;
+
+type LocalScanResult = std::result::Result<(LocalLibrary, crate::models::LocalScanReport), String>;
 
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
@@ -101,23 +105,8 @@ fn resolve_local_queue_tracks(track_ids: &[String], library: &LocalLibrary) -> V
         .iter()
         .filter_map(|track_id| {
             library
-                .tracks
-                .iter()
-                .find(|track| track.id == *track_id)
-                .map(|track| Track {
-                    id: track.id.clone(),
-                    source: TrackSource::Local,
-                    local_path: Some(track.path.clone()),
-                    name: track.title.clone(),
-                    artist: track.artist.clone(),
-                    duration_ms: track.duration_ms,
-                    image_url: track
-                        .artwork_path
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
-                    album_id: None,
-                    artist_id: None,
-                })
+                .track_by_id(track_id)
+                .map(crate::models::LocalTrack::to_track)
         })
         .collect()
 }
@@ -138,6 +127,76 @@ fn current_unix_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn schedule_local_scan(
+    path: PathBuf,
+    scan_tx: &mpsc::Sender<(PathBuf, LocalScanResult)>,
+    scan_inflight: &mut bool,
+    pending_scan: &mut Option<PathBuf>,
+) {
+    if *scan_inflight {
+        *pending_scan = Some(path);
+        return;
+    }
+
+    *scan_inflight = true;
+    let tx = scan_tx.clone();
+    tokio::task::spawn_blocking(move || {
+        let result = run_local_scan(&path);
+        let _ = tx.blocking_send((path, result));
+    });
+}
+
+fn run_local_scan(path: &Path) -> LocalScanResult {
+    let previous = AppConfig::load_local_library();
+    let (library, report) =
+        local_files::scan_local_library(path, &previous).map_err(|error| error.to_string())?;
+    AppConfig::save_local_library(&library).map_err(|error| error.to_string())?;
+    Ok((library, report))
+}
+
+fn start_local_watcher(
+    root: PathBuf,
+    watch_tx: mpsc::Sender<PathBuf>,
+) -> anyhow::Result<RecommendedWatcher> {
+    let callback_root = root.clone();
+    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+        let Ok(event) = event else {
+            return;
+        };
+        if event.paths.is_empty()
+            || event
+                .paths
+                .iter()
+                .any(|path| local_watch_path_relevant(path))
+        {
+            let _ = watch_tx.blocking_send(callback_root.clone());
+        }
+    })?;
+    watcher.watch(&root, RecursiveMode::Recursive)?;
+    Ok(watcher)
+}
+
+fn local_watch_path_relevant(path: &Path) -> bool {
+    local_files::is_supported_audio_file(path) || is_folder_artwork_candidate(path)
+}
+
+fn is_folder_artwork_candidate(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "cover.jpg"
+            | "cover.jpeg"
+            | "cover.png"
+            | "folder.jpg"
+            | "folder.jpeg"
+            | "folder.png"
+            | "front.jpg"
+            | "front.png"
+    )
 }
 
 async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
@@ -267,6 +326,23 @@ mod tests {
 
         assert_eq!(merged.tracks.len(), 2);
         assert_eq!(merged.tracks[1].source, TrackSource::Local);
+    }
+
+    #[test]
+    fn local_watch_filter_accepts_audio_and_folder_artwork() {
+        assert!(local_watch_path_relevant(Path::new("/music/song.FLAC")));
+        assert!(local_watch_path_relevant(Path::new(
+            "/music/Album/cover.jpg"
+        )));
+        assert!(local_watch_path_relevant(Path::new(
+            "/music/Album/FOLDER.PNG"
+        )));
+    }
+
+    #[test]
+    fn local_watch_filter_ignores_unrelated_files() {
+        assert!(!local_watch_path_relevant(Path::new("/music/notes.txt")));
+        assert!(!local_watch_path_relevant(Path::new("/music/cover.gif")));
     }
 }
 
@@ -400,9 +476,51 @@ impl Worker {
         let mut current_track_id: Option<String> = None;
         let mut active_playback_source: Option<ActivePlaybackSource> = None;
         let mut local_playback = LocalPlaybackEngine::default();
+        let (local_scan_tx, mut local_scan_rx) = mpsc::channel::<(PathBuf, LocalScanResult)>(4);
+        let (local_watch_tx, mut local_watch_rx) = mpsc::channel::<PathBuf>(32);
+        let mut local_scan_inflight = false;
+        let mut pending_local_scan: Option<PathBuf> = None;
+        let mut pending_watch_scan: Option<PathBuf> = None;
+        let mut _local_watcher: Option<RecommendedWatcher> = None;
+        let mut local_watch_debounce = tokio::time::interval(std::time::Duration::from_secs(2));
 
         loop {
             tokio::select! {
+                scan_result = local_scan_rx.recv() => {
+                    if let Some((path, result)) = scan_result {
+                        local_scan_inflight = false;
+                        match result {
+                            Ok((library, report)) => {
+                                let _ = self.tx.send(WorkerEvent::LocalLibraryLoaded {
+                                    library,
+                                    report,
+                                }).await;
+                            }
+                            Err(message) => {
+                                let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                    label: "Local scan".to_string(),
+                                    message,
+                                }).await;
+                            }
+                        }
+
+                        if let Some(path) = pending_local_scan.take() {
+                            schedule_local_scan(path, &local_scan_tx, &mut local_scan_inflight, &mut pending_local_scan);
+                        } else {
+                            let _ = path;
+                        }
+                    }
+                }
+                watch_path = local_watch_rx.recv() => {
+                    if let Some(path) = watch_path {
+                        pending_watch_scan = Some(path);
+                    }
+                }
+                _ = local_watch_debounce.tick() => {
+                    if let Some(path) = pending_watch_scan.take() {
+                        schedule_local_scan(path, &local_scan_tx, &mut local_scan_inflight, &mut pending_local_scan);
+                    }
+                }
                 _ = sync_interval.tick() => {
                     if let Some(ref sp) = spotify_opt
                         && active_playback_source != Some(ActivePlaybackSource::Local)
@@ -581,48 +699,45 @@ impl Worker {
                                 }
                             }
                             AppEvent::ScanLocalLibrary(path) => {
-                                let previous = AppConfig::load_local_library();
-                                match local_files::scan_local_library(&path, &previous) {
-                                    Ok((library, report)) => {
-                                        let _ = AppConfig::save_local_library(&library);
-                                        let _ = self.tx.send(WorkerEvent::LocalLibraryLoaded {
-                                            library,
-                                            report,
-                                        }).await;
+                                match start_local_watcher(path.clone(), local_watch_tx.clone()) {
+                                    Ok(watcher) => {
+                                        _local_watcher = Some(watcher);
                                     }
                                     Err(e) => {
+                                        _local_watcher = None;
                                         let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
-                                            label: "Local scan".to_string(),
+                                            label: "Local watcher".to_string(),
                                             message: e.to_string(),
                                         }).await;
                                     }
                                 }
+                                schedule_local_scan(path, &local_scan_tx, &mut local_scan_inflight, &mut pending_local_scan);
                             }
                             AppEvent::RescanLocalLibrary => {
                                 let config = AppConfig::load();
                                 if let Some(path) = config.library.local_music_dir {
-                                    let previous = AppConfig::load_local_library();
-                                    match local_files::scan_local_library(&path, &previous) {
-                                        Ok((library, report)) => {
-                                            let _ = AppConfig::save_local_library(&library);
-                                            let _ = self.tx.send(WorkerEvent::LocalLibraryLoaded {
-                                                library,
-                                                report,
-                                            }).await;
-                                        }
-                                        Err(e) => {
-                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
-                                                label: "Local scan".to_string(),
-                                                message: e.to_string(),
-                                            }).await;
-                                        }
-                                    }
+                                    schedule_local_scan(path, &local_scan_tx, &mut local_scan_inflight, &mut pending_local_scan);
                                 } else {
                                     let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
                                         label: "Local scan".to_string(),
                                         message: "no local music path configured".to_string(),
                                     }).await;
                                 }
+                            }
+                            AppEvent::StartLocalLibraryAutoRefresh(path) => {
+                                match start_local_watcher(path.clone(), local_watch_tx.clone()) {
+                                    Ok(watcher) => {
+                                        _local_watcher = Some(watcher);
+                                    }
+                                    Err(e) => {
+                                        _local_watcher = None;
+                                        let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                            label: "Local watcher".to_string(),
+                                            message: e.to_string(),
+                                        }).await;
+                                    }
+                                }
+                                schedule_local_scan(path, &local_scan_tx, &mut local_scan_inflight, &mut pending_local_scan);
                             }
                             AppEvent::PlayTrack { target, track_id, title, artist, duration_ms, image_url, album_id } => {
                                 if let PlaybackTarget::LocalTrack { track_id: _, path } = target.clone() {
@@ -729,12 +844,16 @@ impl Worker {
                                 }
                             }
                             AppEvent::TogglePlayback(playing) => {
-                                is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
                                 if active_playback_source == Some(ActivePlaybackSource::Local) {
                                     local_playback.toggle_playback(playing);
+                                    is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
                                     emit_local_snapshot(&self.tx, &self.media_tx, local_playback.snapshot(), false).await;
                                 } else if let Some(ref mut sp) = spotify_opt {
-                                    let _ = sp.toggle_playback(playing).await;
+                                    if sp.toggle_playback(playing).await.is_ok() {
+                                        is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
+                                        let _ = self.media_tx.send(media::MediaUpdate::Playback(playing, 0)).await;
+                                        let _ = self.tx.send(WorkerEvent::PlaybackControlState { is_playing: playing }).await;
+                                    }
                                 }
                             }
                             AppEvent::ToggleShuffle(is_shuffled) => {

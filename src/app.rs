@@ -1,6 +1,6 @@
 use crate::models::{
     ActionMenuContext, ArtistPageData, LocalLibrary, LocalPlaylists, Playlist, SearchResults,
-    Track, TrackListContext,
+    Track, TrackListContext, TrackSource,
 };
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
@@ -15,6 +15,7 @@ pub struct PlaybackState {
     pub playing_track_artist: String,
     pub playing_track_album_id: Option<String>,
     pub playing_track_artist_id: Option<String>,
+    pub playing_track_source: Option<TrackSource>,
     pub playing_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
     pub previous_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
     pub fetching_track_id: Option<String>,
@@ -96,6 +97,7 @@ impl Default for PlaybackState {
             playing_track_artist: String::new(),
             playing_track_album_id: None,
             playing_track_artist_id: None,
+            playing_track_source: None,
             playing_track_image: None,
             previous_track_image: None,
             fetching_track_id: None,
@@ -385,7 +387,7 @@ impl AppState {
             view.push(LibraryNode::Playlist {
                 playlist: crate::models::Playlist {
                     id: "local-library".to_string(),
-                    name: "Local Music".to_string(),
+                    name: "📁 Local Music".to_string(),
                     owner: "Local".to_string(),
                     owner_id: "local".to_string(),
                     image_url: None,

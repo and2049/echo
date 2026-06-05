@@ -138,7 +138,7 @@ impl TrackListContext {
     pub fn local_library() -> Self {
         Self {
             id: "local-library".to_string(),
-            title: "Local Music".to_string(),
+            title: "📁 Local Music".to_string(),
             subtitle: String::new(),
             owner_id: None,
             image_url: None,
@@ -271,23 +271,11 @@ pub struct LocalLibrary {
 
 impl LocalLibrary {
     pub fn to_tracks(&self) -> Vec<Track> {
-        self.tracks
-            .iter()
-            .map(|track| Track {
-                id: track.id.clone(),
-                source: TrackSource::Local,
-                local_path: Some(track.path.clone()),
-                name: track.title.clone(),
-                artist: track.artist.clone(),
-                duration_ms: track.duration_ms,
-                image_url: track
-                    .artwork_path
-                    .as_ref()
-                    .map(|path| path.to_string_lossy().to_string()),
-                album_id: None,
-                artist_id: None,
-            })
-            .collect()
+        self.tracks.iter().map(LocalTrack::to_track).collect()
+    }
+
+    pub fn track_by_id(&self, track_id: &str) -> Option<&LocalTrack> {
+        self.tracks.iter().find(|track| track.id == track_id)
     }
 
     pub fn search(&self, query: &str) -> SearchResults {
@@ -325,10 +313,7 @@ impl LocalLibrary {
                     artist: track.artist.clone(),
                     album: track.album.clone(),
                     duration_ms: track.duration_ms,
-                    image_url: track
-                        .artwork_path
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
+                    image_url: track.artwork_url(),
                     album_id: None,
                     artist_id: None,
                 });
@@ -345,10 +330,7 @@ impl LocalLibrary {
                         id: stable_local_group_id("local-album", &key),
                         name: track.album.clone(),
                         artist: track.artist.clone(),
-                        image_url: track
-                            .artwork_path
-                            .as_ref()
-                            .map(|path| path.to_string_lossy().to_string()),
+                        image_url: track.artwork_url(),
                     });
                 }
             }
@@ -360,10 +342,7 @@ impl LocalLibrary {
                         id: stable_local_group_id("local-artist", &key),
                         name: key,
                         followers: 0,
-                        image_url: track
-                            .artwork_path
-                            .as_ref()
-                            .map(|path| path.to_string_lossy().to_string()),
+                        image_url: track.artwork_url(),
                     });
                 }
             }
@@ -384,6 +363,28 @@ pub struct LocalTrack {
     pub artwork_path: Option<PathBuf>,
     pub file_size: u64,
     pub modified_unix_secs: u64,
+}
+
+impl LocalTrack {
+    pub fn to_track(&self) -> Track {
+        Track {
+            id: self.id.clone(),
+            source: TrackSource::Local,
+            local_path: Some(self.path.clone()),
+            name: self.title.clone(),
+            artist: self.artist.clone(),
+            duration_ms: self.duration_ms,
+            image_url: self.artwork_url(),
+            album_id: None,
+            artist_id: None,
+        }
+    }
+
+    pub fn artwork_url(&self) -> Option<String> {
+        self.artwork_path
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string())
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -424,24 +425,9 @@ impl LocalPlaylists {
             .entries
             .iter()
             .filter_map(|entry| match entry {
-                LocalPlaylistEntry::LocalTrack { track_id } => library
-                    .tracks
-                    .iter()
-                    .find(|track| &track.id == track_id)
-                    .map(|track| Track {
-                        id: track.id.clone(),
-                        source: TrackSource::Local,
-                        local_path: Some(track.path.clone()),
-                        name: track.title.clone(),
-                        artist: track.artist.clone(),
-                        duration_ms: track.duration_ms,
-                        image_url: track
-                            .artwork_path
-                            .as_ref()
-                            .map(|path| path.to_string_lossy().to_string()),
-                        album_id: None,
-                        artist_id: None,
-                    }),
+                LocalPlaylistEntry::LocalTrack { track_id } => {
+                    library.track_by_id(track_id).map(LocalTrack::to_track)
+                }
                 LocalPlaylistEntry::SpotifyTrack {
                     track_id,
                     title,

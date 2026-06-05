@@ -11,6 +11,7 @@ pub enum AppEvent {
     RefreshLibraryLists,
     ScanLocalLibrary(PathBuf),
     RescanLocalLibrary,
+    StartLocalLibraryAutoRefresh(PathBuf),
     PlayTrack {
         target: PlaybackTarget,
         track_id: String,
@@ -93,6 +94,9 @@ pub enum WorkerEvent {
     ),
     PlaybackStarted {
         item: PlaybackItem,
+    },
+    PlaybackControlState {
+        is_playing: bool,
     },
     SyncPlaybackState {
         is_playing: bool,

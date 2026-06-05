@@ -8,9 +8,19 @@ pub fn play_selected(state: &AppState) -> Option<AppEvent> {
     let track = state.tracks.get(state.selected_track_index)?;
     let context = state.active_tracklist_context.as_ref()?;
     let target = if track.source == TrackSource::Local {
+        let tracks: Vec<_> = state
+            .tracks
+            .iter()
+            .filter(|track| track.source == TrackSource::Local)
+            .cloned()
+            .collect();
+        let selected_index = tracks
+            .iter()
+            .position(|local_track| local_track.id == track.id)
+            .unwrap_or(0);
         PlaybackTarget::LocalContext {
-            tracks: state.tracks.clone(),
-            selected_index: state.selected_track_index,
+            tracks,
+            selected_index,
         }
     } else {
         context.playback_target_for_track(track)?
@@ -114,11 +124,59 @@ mod tests {
         assert_eq!(tracks[1].id, "local:b");
     }
 
+    #[test]
+    fn selected_local_track_context_excludes_spotify_entries() {
+        let mut state = AppState::new();
+        state.active_tracklist_context = Some(TrackListContext::local_playlist(
+            "local-playlist:a".to_string(),
+            "Mixed".to_string(),
+        ));
+        state.tracks = vec![
+            local_track("local:a", "/music/a.wav"),
+            spotify_track("spotify:a"),
+            local_track("local:b", "/music/b.wav"),
+        ];
+        state.selected_track_index = 2;
+
+        let Some(AppEvent::PlayTrack { target, .. }) = play_selected(&state) else {
+            panic!("expected local play event");
+        };
+
+        let PlaybackTarget::LocalContext {
+            tracks,
+            selected_index,
+        } = target
+        else {
+            panic!("expected local context target");
+        };
+        assert_eq!(selected_index, 1);
+        assert_eq!(tracks.len(), 2);
+        assert!(
+            tracks
+                .iter()
+                .all(|track| track.source == TrackSource::Local)
+        );
+    }
+
     fn local_track(id: &str, path: &str) -> Track {
         Track {
             id: id.to_string(),
             source: TrackSource::Local,
             local_path: Some(PathBuf::from(path)),
+            name: id.to_string(),
+            artist: "Artist".to_string(),
+            artist_id: None,
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+        }
+    }
+
+    fn spotify_track(id: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            source: TrackSource::Spotify,
+            local_path: None,
             name: id.to_string(),
             artist: "Artist".to_string(),
             artist_id: None,

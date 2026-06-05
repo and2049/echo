@@ -17,6 +17,7 @@ librespot-discovery = { git = "https://github.com/librespot-org/librespot" }
 librespot-oauth = { git = "https://github.com/librespot-org/librespot" }
 librespot-playback = { git = "https://github.com/librespot-org/librespot", features = ["rodio-backend"] }
 lofty = "0.24.0"
+notify = "8.2.0"
 ratatui = "0.30.0"
 ratatui-image = { version = "11.0.2", default-features = false, features = ["image-defaults", "crossterm"] }
 reqwest = { version = "0.13.4", features = ["json"] }

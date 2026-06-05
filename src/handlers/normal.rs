@@ -940,8 +940,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(AppEvent::FetchDevices);
         }
         KeyCode::Char(' ') => {
-            state.playback.is_playing = !state.playback.is_playing;
-            return Some(AppEvent::TogglePlayback(state.playback.is_playing));
+            return Some(AppEvent::TogglePlayback(!state.playback.is_playing));
         }
         KeyCode::Char('c') if state.active_view == ActiveView::Library => {
             state.mode = crate::app::AppMode::Command;
