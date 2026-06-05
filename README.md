@@ -9,8 +9,9 @@ echo is a terminal-based Spotify client written in Rust. echo brings your entire
 - **Terminal Image Support**: Renders high-quality album art and playlist covers directly in your terminal (supports Kitty, Sixel, and block fallbacks).
 - **Blazing Fast Liked Songs**: Uses a global caching architecture. Your entire Liked Songs library is cached locally (`~/.config/echo/cache.json`) for zero-latency, rate-limit-free scrolling, even with thousands of saved tracks.
 - **Library Management**: Create, rename, delete, and organize playlists into folders.
+- **Local Music Support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
 - **Responsive Playback Controls**: Full control over playback, queue, shuffle, repeat, and volume.
-- **Search**: Fast global search for tracks and albums.
+- **Search**: Fast global search for Spotify catalog items and scanned local tracks.
 
 ## Setup
 
@@ -89,6 +90,9 @@ echo is heavily keyboard-driven.
 While in Command Mode (`:`), you can use the following:
 - `:search <query>`: Search for tracks or albums.
 - `:newplaylist <name>`: Create a new playlist.
+- `:newlocalplaylist <name>`: Create a local playlist stored on this machine.
+- `:localpath <absolute-folder-path>`: Set the local music folder and scan it. The path must be absolute and works on macOS, Windows, and Linux.
+- `:rescanlocal`: Rescan the configured local music folder.
 - `:newfolder <name>`: Create a new folder to organize playlists.
 - `:delfolder`: Delete the currently selected folder.
 - `:rename <name>`: Rename the currently selected playlist or folder.
@@ -103,8 +107,17 @@ While in Command Mode (`:`), you can use the following:
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
 
+## Local Music
+
+Local support is separate from Spotify. Use `:localpath <absolute-folder-path>` to choose the folder echo should scan. Supported audio extensions are `mp3`, `wav`, `flac`, `ogg`, `m4a`, and `aac`; echo scans recursively and reads title, artist, album, duration, and artwork when available. Echo refreshes the configured local folder on startup and watches it for supported audio/artwork changes while running; `:rescanlocal` is still available as a manual fallback.
+
+Local playlists are stored locally and are not Spotify playlists. They can contain local tracks and Spotify track references. Spotify playlists cannot contain local tracks. Local shuffle, repeat, volume, queue, and play/pause are handled by echo's local playback engine.
+
+Embedded artwork is used when available. If a track has no embedded artwork, echo looks for folder artwork such as `cover.jpg`, `folder.jpg`, or `front.png`.
+
 ## Troubleshooting
 
 - **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). echo will fall back to block rendering if neither is supported.
 - **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
-- **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences) and `~/.config/echo/cache.json` (holds liked tracks).
+- **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
+- **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences), `~/.config/echo/cache.json` (holds liked tracks), `~/.config/echo/local_library.json`, and `~/.config/echo/local_playlists.json`.

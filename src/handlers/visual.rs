@@ -43,12 +43,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.selected_playlist_modal_index = 0;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                let user_playlists: Vec<_> = state
-                    .playlists
-                    .iter()
-                    .filter(|p| Some(&p.owner_id) == state.user_id.as_ref())
-                    .collect();
-                if state.selected_playlist_modal_index + 1 < user_playlists.len() {
+                if state.selected_playlist_modal_index + 1
+                    < crate::handlers::normal::playlist_modal_choices(state).len()
+                {
                     state.selected_playlist_modal_index += 1;
                 }
             }
@@ -56,32 +53,32 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.selected_playlist_modal_index -= 1;
             }
             KeyCode::Enter => {
-                let user_playlists: Vec<_> = state
-                    .playlists
-                    .iter()
-                    .filter(|p| Some(&p.owner_id) == state.user_id.as_ref())
-                    .collect();
-                if let Some(playlist) = user_playlists.get(state.selected_playlist_modal_index) {
-                    let track_ids = if let Some((start, end)) = state.get_visual_selection_range() {
+                let playlists = crate::handlers::normal::playlist_modal_choices(state);
+                if let Some(playlist) = playlists.get(state.selected_playlist_modal_index) {
+                    let tracks = if let Some((start, end)) = state.get_visual_selection_range() {
                         match state.active_view {
-                            ActiveView::TrackList => state.tracks[start..=end]
-                                .iter()
-                                .map(|t| t.id.clone())
-                                .collect(),
+                            ActiveView::TrackList => state.tracks[start..=end].to_vec(),
                             ActiveView::SearchResults => {
                                 if state.active_search_tab == crate::app::SearchTab::Tracks {
                                     state.search_results.tracks[start..=end]
                                         .iter()
-                                        .map(|t| t.id.clone())
+                                        .map(|t| crate::models::Track {
+                                            id: t.id.clone(),
+                                            source: t.source,
+                                            local_path: t.local_path.clone(),
+                                            name: t.name.clone(),
+                                            artist: t.artist.clone(),
+                                            duration_ms: t.duration_ms,
+                                            image_url: t.image_url.clone(),
+                                            album_id: t.album_id.clone(),
+                                            artist_id: t.artist_id.clone(),
+                                        })
                                         .collect()
                                 } else {
                                     vec![]
                                 }
                             }
-                            ActiveView::Queue => state.queue[start..=end]
-                                .iter()
-                                .map(|t| t.id.clone())
-                                .collect(),
+                            ActiveView::Queue => state.queue[start..=end].to_vec(),
                             _ => vec![],
                         }
                     } else {
@@ -91,11 +88,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.selected_playlist_modal_index = 0;
                     state.mode = AppMode::Normal;
                     state.visual_selection_start = None;
-                    if !track_ids.is_empty() {
-                        return Some(AppEvent::AddTracksToPlaylist(
-                            playlist.id.clone(),
-                            track_ids,
-                        ));
+                    if !tracks.is_empty() {
+                        return Some(AppEvent::AddTracksToPlaylist(playlist.id.clone(), tracks));
                     }
                 }
             }
@@ -243,7 +237,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     .iter()
                     .filter_map(|node| match node {
                         crate::models::LibraryNode::Playlist { playlist, .. } => {
-                            if playlist.id != "LIKED_SONGS" {
+                            if playlist.id != "LIKED_SONGS" && playlist.id != "local-library" {
                                 Some(playlist.id.clone())
                             } else {
                                 None
@@ -295,8 +289,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             .iter()
                             .filter_map(|node| match node {
                                 crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                    if playlist.id != "LIKED_SONGS"
-                                        && Some(&playlist.owner_id) == state.user_id.as_ref()
+                                    if playlist.id.starts_with("local-playlist:")
+                                        || (playlist.id != "LIKED_SONGS"
+                                            && playlist.id != "local-library"
+                                            && Some(&playlist.owner_id) == state.user_id.as_ref())
                                     {
                                         Some(playlist.id.clone())
                                     } else {
@@ -330,8 +326,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             .iter()
                             .filter_map(|node| match node {
                                 crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                    if playlist.id != "LIKED_SONGS"
-                                        && Some(&playlist.owner_id) == state.user_id.as_ref()
+                                    if playlist.id.starts_with("local-playlist:")
+                                        || (playlist.id != "LIKED_SONGS"
+                                            && playlist.id != "local-library"
+                                            && Some(&playlist.owner_id) == state.user_id.as_ref())
                                     {
                                         Some(playlist.id.clone())
                                     } else {

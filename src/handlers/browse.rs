@@ -77,6 +77,8 @@ mod tests {
         state.selected_playlist_index = 0; // The "Browse" node
         state.top_tracks = vec![crate::models::Track {
             id: "track1".to_string(),
+            source: crate::models::TrackSource::Spotify,
+            local_path: None,
             name: "Test Track".to_string(),
             artist: "Test Artist".to_string(),
             artist_id: Some("artist1".to_string()),
@@ -101,6 +103,8 @@ mod tests {
         state.active_browse_node = BrowseNode::TopTracks;
         state.top_tracks = vec![crate::models::Track {
             id: "track".to_string(),
+            source: crate::models::TrackSource::Spotify,
+            local_path: None,
             name: "Track".to_string(),
             artist: "Artist".to_string(),
             artist_id: None,

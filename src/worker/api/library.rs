@@ -1,5 +1,5 @@
 use super::SpotifyWorker;
-use crate::models::{Playlist, Track};
+use crate::models::{Playlist, Track, TrackSource};
 use anyhow::Result;
 use rspotify::model::Id;
 use rspotify::prelude::*;
@@ -85,9 +85,14 @@ impl SpotifyWorker {
                         continue;
                     }
                     let artists = track.artists;
-                    let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                    let artist_id = artists
+                        .first()
+                        .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                        .flatten();
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                        source: TrackSource::Spotify,
+                        local_path: None,
                         name: track.name,
                         artist: artists
                             .into_iter()
@@ -147,9 +152,14 @@ impl SpotifyWorker {
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
                 let artists = track.artists;
-                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                let artist_id = artists
+                    .first()
+                    .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                    .flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                    source: TrackSource::Spotify,
+                    local_path: None,
                     name: track.name,
                     artist: artists
                         .into_iter()
@@ -192,9 +202,14 @@ impl SpotifyWorker {
                 continue;
             }
             let artists = track.artists;
-            let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+            let artist_id = artists
+                .first()
+                .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                .flatten();
             out.push(Track {
                 id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                source: TrackSource::Spotify,
+                local_path: None,
                 name: track.name,
                 artist: artists
                     .into_iter()
@@ -220,9 +235,14 @@ impl SpotifyWorker {
                     continue;
                 }
                 let artists = track.artists;
-                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
+                let artist_id = artists
+                    .first()
+                    .map(|a| a.id.as_ref().map(|id| id.id().to_string()))
+                    .flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                    source: TrackSource::Spotify,
+                    local_path: None,
                     name: track.name,
                     artist: artists
                         .into_iter()
@@ -318,6 +338,8 @@ impl SpotifyWorker {
 
                         tracks.push(Track {
                             id,
+                            source: TrackSource::Spotify,
+                            local_path: None,
                             name,
                             artist: artist_names.join(", "),
                             duration_ms,

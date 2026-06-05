@@ -22,7 +22,10 @@ impl SpotifyWorker {
                     let id = t.id?.id().to_string();
                     let name = t.name;
                     let artists = t.artists;
-                    let artist_id = artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string());
+                    let artist_id = artists
+                        .first()
+                        .and_then(|a| a.id.as_ref())
+                        .map(|id| id.id().to_string());
                     let artist = artists
                         .into_iter()
                         .map(|a| a.name)
@@ -34,6 +37,8 @@ impl SpotifyWorker {
                     let album_id = t.album.id.map(|id| id.id().to_string());
                     Some(crate::models::SearchTrack {
                         id,
+                        source: crate::models::TrackSource::Spotify,
+                        local_path: None,
                         name,
                         artist,
                         album,

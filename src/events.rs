@@ -1,15 +1,20 @@
-use crate::models::{PlaybackItem, Playlist, SearchResults, Track, TrackListContext};
+use crate::models::{
+    PlaybackItem, PlaybackTarget, Playlist, SearchResults, Track, TrackListContext,
+};
 use crossterm::event::KeyEvent;
+use std::path::PathBuf;
 
 pub enum AppEvent {
     Key(KeyEvent),
     LoadContextTracks(TrackListContext),
     RefreshContextTracks(TrackListContext),
     RefreshLibraryLists,
+    ScanLocalLibrary(PathBuf),
+    RescanLocalLibrary,
+    StartLocalLibraryAutoRefresh(PathBuf),
     PlayTrack {
-        context_id: String,
+        target: PlaybackTarget,
         track_id: String,
-        is_album: bool,
         title: String,
         artist: String,
         duration_ms: u32,
@@ -32,9 +37,10 @@ pub enum AppEvent {
     GlobalSearch(String),
     AddToQueue(Vec<String>),
     FetchQueue,
-    AddTracksToPlaylist(String, Vec<String>),
+    AddTracksToPlaylist(String, Vec<Track>),
     RemoveTracksFromPlaylist(String, Vec<String>),
     CreatePlaylist(String),
+    CreateLocalPlaylist(String),
     RenamePlaylist(String, String),
     DeletePlaylists(Vec<String>),
     DeletePlaylistTracks(String, Vec<String>),
@@ -68,6 +74,11 @@ pub enum WorkerEvent {
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
+    LocalLibraryLoaded {
+        library: crate::models::LocalLibrary,
+        report: crate::models::LocalScanReport,
+    },
+    LocalPlaylistsLoaded(crate::models::LocalPlaylists),
     TracksLoaded(Vec<Track>, TrackListContext),
     TracksLoadFailed {
         context_id: String,
@@ -83,6 +94,9 @@ pub enum WorkerEvent {
     ),
     PlaybackStarted {
         item: PlaybackItem,
+    },
+    PlaybackControlState {
+        is_playing: bool,
     },
     SyncPlaybackState {
         is_playing: bool,
