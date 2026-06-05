@@ -49,27 +49,23 @@ pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sen
 
         let _ = controls.attach(move |e| {
             let is_playing = playing_clone.load(std::sync::atomic::Ordering::Relaxed);
-            match e {
-                MediaControlEvent::Play if !is_playing => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(false));
+            match desired_playback_state(&e, is_playing) {
+                Some(playing) => {
+                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(playing));
                 }
-                MediaControlEvent::Pause if is_playing => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(true));
-                }
-                MediaControlEvent::Toggle => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(is_playing));
-                }
-                MediaControlEvent::Next => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::NextTrack {
-                        current_track_id: None,
-                    });
-                }
-                MediaControlEvent::Previous => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::PreviousTrack {
-                        current_track_id: None,
-                    });
-                }
-                _ => {}
+                None => match e {
+                    MediaControlEvent::Next => {
+                        let _ = app_tx_clone.blocking_send(AppEvent::NextTrack {
+                            current_track_id: None,
+                        });
+                    }
+                    MediaControlEvent::Previous => {
+                        let _ = app_tx_clone.blocking_send(AppEvent::PreviousTrack {
+                            current_track_id: None,
+                        });
+                    }
+                    _ => {}
+                },
             }
         });
 
@@ -117,6 +113,53 @@ pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sen
             windows::pump_event_queue();
         }
     });
+}
+
+fn desired_playback_state(event: &MediaControlEvent, is_playing: bool) -> Option<bool> {
+    match event {
+        MediaControlEvent::Play if !is_playing => Some(true),
+        MediaControlEvent::Pause if is_playing => Some(false),
+        MediaControlEvent::Toggle => Some(!is_playing),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn media_play_requests_playing_state() {
+        assert_eq!(
+            desired_playback_state(&MediaControlEvent::Play, false),
+            Some(true)
+        );
+        assert_eq!(desired_playback_state(&MediaControlEvent::Play, true), None);
+    }
+
+    #[test]
+    fn media_pause_requests_paused_state() {
+        assert_eq!(
+            desired_playback_state(&MediaControlEvent::Pause, true),
+            Some(false)
+        );
+        assert_eq!(
+            desired_playback_state(&MediaControlEvent::Pause, false),
+            None
+        );
+    }
+
+    #[test]
+    fn media_toggle_requests_inverse_state() {
+        assert_eq!(
+            desired_playback_state(&MediaControlEvent::Toggle, true),
+            Some(false)
+        );
+        assert_eq!(
+            desired_playback_state(&MediaControlEvent::Toggle, false),
+            Some(true)
+        );
+    }
 }
 
 #[cfg(target_os = "windows")]

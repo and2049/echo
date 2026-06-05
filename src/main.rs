@@ -70,8 +70,15 @@ async fn main() -> Result<()> {
     if config.spotify_credentials.is_some() {
         state.mode = app::AppMode::Authenticating;
         let _ = app_tx.send(AppEvent::StartAuth).await;
+    } else if config.library.local_music_dir.is_some() {
+        state.mode = app::AppMode::Normal;
     } else {
         state.mode = app::AppMode::Setup;
+    }
+    if let Some(path) = startup_local_auto_refresh_path(&config) {
+        let _ = app_tx
+            .send(AppEvent::StartLocalLibraryAutoRefresh(path))
+            .await;
     }
 
     let mut tui = Tui::new()?;
@@ -164,4 +171,29 @@ async fn main() -> Result<()> {
 
     tui.exit()?;
     Ok(())
+}
+
+fn startup_local_auto_refresh_path(config: &config::AppConfig) -> Option<std::path::PathBuf> {
+    config.library.local_music_dir.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_local_path_starts_auto_refresh_on_startup() {
+        let path = std::path::PathBuf::from("/music");
+        let mut config = config::AppConfig::default();
+        config.library.local_music_dir = Some(path.clone());
+
+        assert_eq!(startup_local_auto_refresh_path(&config), Some(path));
+    }
+
+    #[test]
+    fn missing_local_path_skips_auto_refresh_on_startup() {
+        let config = config::AppConfig::default();
+
+        assert_eq!(startup_local_auto_refresh_path(&config), None);
+    }
 }

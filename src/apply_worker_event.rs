@@ -36,6 +36,40 @@ pub async fn apply_worker_event(
         WorkerEvent::AlbumsLoaded(albums) => {
             state.saved_albums = albums;
         }
+        WorkerEvent::LocalLibraryLoaded { library, report } => {
+            state.local_library = library;
+            state.compute_library_view();
+            set_timed_status(
+                state,
+                format!(
+                    "Local scan: {} files, {} added, {} updated, {} removed, {} skipped.",
+                    report.files_found,
+                    report.tracks_added,
+                    report.tracks_updated,
+                    report.tracks_removed,
+                    report.skipped
+                ),
+                5,
+            );
+            if state
+                .active_tracklist_context
+                .as_ref()
+                .is_some_and(|context| {
+                    context.kind == crate::models::TrackListContextKind::LocalLibrary
+                })
+            {
+                state.show_local_library();
+            }
+        }
+        WorkerEvent::LocalPlaylistsLoaded(playlists) => {
+            state.local_playlists = playlists;
+            state.compute_library_view();
+            if let Some(context) = state.active_tracklist_context.clone()
+                && context.kind == crate::models::TrackListContextKind::LocalPlaylist
+            {
+                state.show_local_playlist(&context.id, context.title);
+            }
+        }
         WorkerEvent::TracksLoaded(tracks, context) => {
             let preserve_track_selection = state
                 .active_tracklist_context
@@ -83,6 +117,7 @@ pub async fn apply_worker_event(
             state.playback.playing_track_artist = item.artist.clone();
             state.playback.playing_track_album_id = item.album_id.clone();
             state.playback.playing_track_artist_id = item.artist_id.clone();
+            state.playback.playing_track_source = Some(item.source);
             state.playback.previous_track_image = state.playback.playing_track_image.take();
             state.playback.duration_ms = item.duration_ms;
             state.playback.progress_ms = 0;
@@ -147,6 +182,9 @@ pub async fn apply_worker_event(
             if let Some(item) = item {
                 apply_synced_playback_item(item, state, app_tx, worker_tx).await;
             }
+        }
+        WorkerEvent::PlaybackControlState { is_playing } => {
+            state.playback.is_playing = is_playing;
         }
         WorkerEvent::TrackMetadataLoaded {
             track_id,
@@ -367,6 +405,7 @@ async fn apply_synced_playback_item(
     state.playback.playing_track_artist = item.artist.clone();
     state.playback.playing_track_album_id = item.album_id.clone();
     state.playback.playing_track_artist_id = item.artist_id.clone();
+    state.playback.playing_track_source = Some(item.source);
     state.playback.duration_ms = item.duration_ms;
 
     if track_changed {

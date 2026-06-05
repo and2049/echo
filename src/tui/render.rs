@@ -284,11 +284,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     if state.playlist_add_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
 
-        let user_playlists: Vec<_> = state
-            .playlists
-            .iter()
-            .filter(|p| Some(&p.owner_id) == state.user_id.as_ref())
-            .collect();
+        let user_playlists = crate::handlers::normal::playlist_modal_choices(state);
 
         let items: Vec<ratatui::widgets::ListItem> = user_playlists
             .iter()
@@ -299,7 +295,12 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 } else {
                     state.active_theme.base_style()
                 };
-                ratatui::widgets::ListItem::new(p.name.clone()).style(style)
+                let label = if p.owner_id == "local" {
+                    format!("{} · Local", p.name)
+                } else {
+                    p.name.clone()
+                };
+                ratatui::widgets::ListItem::new(label).style(style)
             })
             .collect();
 
@@ -414,9 +415,21 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let lbl_unlike = crate::i18n::t("actions.unlike_track", lang);
     let lbl_like = crate::i18n::t("actions.like_track", lang);
 
+    let has_local_album = ctx.source == crate::models::TrackSource::Local
+        && state
+            .local_library
+            .tracks
+            .iter()
+            .find(|track| track.id == ctx.track_id)
+            .is_some_and(|track| !track.album.is_empty());
+
     let actions: &[(String, bool)] = &[
-        (lbl_album, ctx.album_id.is_some()),
-        (lbl_artist, ctx.artist_id.is_some()),
+        (lbl_album, ctx.album_id.is_some() || has_local_album),
+        (
+            lbl_artist,
+            ctx.artist_id.is_some()
+                || (ctx.source == crate::models::TrackSource::Local && !ctx.artist_name.is_empty()),
+        ),
         (lbl_playlist, true),
         (lbl_queue, true),
         (if is_liked { lbl_unlike } else { lbl_like }, true),
@@ -432,7 +445,12 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
     let x = (area.width.saturating_sub(popup_w)) / 2;
     let y = (area.height.saturating_sub(popup_h)) / 2;
-    let popup_area = Rect { x, y, width: popup_w, height: popup_h };
+    let popup_area = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
 
     frame.render_widget(ratatui::widgets::Clear, popup_area);
 
