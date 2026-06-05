@@ -1,8 +1,8 @@
 primary = "#ff7b64"
 secondary = "#c4f765"
-background = "#14120f"
+background = "#16161a"
 text = "#faf6c6"
 text_muted = "#494640" # progress remaining
 highlight_bg = "#f7b87e"
 highlight_fg = "#25251a"
-error = "Red"
+error = "#f34d68"

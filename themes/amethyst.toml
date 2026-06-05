@@ -5,4 +5,4 @@ text = "#dcd0f0"
 text_muted = "#594f6e" # progress remaining
 highlight_bg = "#947bb1"
 highlight_fg = "#d3c3e0"
-error = "Red"
+error = "#fa6537"
