@@ -2,6 +2,21 @@ use tokio::sync::mpsc;
 
 use crate::events::WorkerEvent;
 
+async fn load_image_bytes(source: &str) -> Option<Vec<u8>> {
+    if source.starts_with("http://") || source.starts_with("https://") {
+        reqwest::get(source)
+            .await
+            .ok()?
+            .bytes()
+            .await
+            .ok()
+            .map(|bytes| bytes.to_vec())
+    } else {
+        let path = source.strip_prefix("file://").unwrap_or(source);
+        tokio::fs::read(path).await.ok()
+    }
+}
+
 pub fn spawn_track_image_processing(
     track_id: String,
     url: String,
@@ -12,8 +27,7 @@ pub fn spawn_track_image_processing(
     let picker_clone = picker.clone();
 
     tokio::spawn(async move {
-        if let Ok(resp) = reqwest::get(&url).await
-            && let Ok(bytes) = resp.bytes().await
+        if let Some(bytes) = load_image_bytes(&url).await
             && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
                 if let Ok(mut dyn_img) = image::load_from_memory(&bytes) {
                     if pixels > 0 {
@@ -49,8 +63,7 @@ pub fn spawn_header_image_processing(
     let picker_clone = picker.clone();
 
     tokio::spawn(async move {
-        if let Ok(resp) = reqwest::get(&url).await
-            && let Ok(bytes) = resp.bytes().await
+        if let Some(bytes) = load_image_bytes(&url).await
             && let Ok(image_handle) = tokio::task::spawn_blocking(move || {
                 if let Ok(mut dyn_img) = image::load_from_memory(&bytes) {
                     if pixels > 0 {

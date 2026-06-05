@@ -1,5 +1,6 @@
 use std::{
     fs::File,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -179,29 +180,34 @@ impl LocalPlaybackEngine {
     }
 
     fn start_current(&mut self) -> Result<()> {
-        let track = self
-            .queue
-            .current()
-            .context("local queue has no current track")?
-            .clone();
-        let path = track
-            .local_path
-            .clone()
-            .context("local track is missing a file path")?;
-        let file =
-            File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
-        let byte_len = file.metadata().ok().map(|metadata| metadata.len());
-        let mut decoder = Decoder::builder().with_data(file);
-        if let Some(byte_len) = byte_len {
-            decoder = decoder.with_byte_len(byte_len).with_seekable(true);
+        let attempts = self.queue.len().max(1);
+        let mut last_error = None;
+        for _ in 0..attempts {
+            let Some(path) = self.queue.current_local_path() else {
+                last_error = Some(anyhow::anyhow!("local track is missing a file path"));
+                if !self.queue.advance() {
+                    break;
+                }
+                continue;
+            };
+            match build_decoder(&path) {
+                Ok(source) => {
+                    self.start_source(source)?;
+                    return Ok(());
+                }
+                Err(error) => {
+                    last_error = Some(error);
+                    if !self.queue.advance() {
+                        break;
+                    }
+                }
+            }
         }
-        if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
-            decoder = decoder.with_hint(ext);
-        }
-        let source = decoder
-            .build()
-            .with_context(|| format!("failed to decode {}", path.display()))?;
 
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("local queue has no playable tracks")))
+    }
+
+    fn start_source(&mut self, source: rodio::decoder::Decoder<File>) -> Result<()> {
         if let Some(sink) = self.sink.take() {
             sink.stop();
         }
@@ -222,6 +228,21 @@ impl LocalPlaybackEngine {
         self.playing = true;
         Ok(())
     }
+}
+
+fn build_decoder(path: &Path) -> Result<rodio::decoder::Decoder<File>> {
+    let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let byte_len = file.metadata().ok().map(|metadata| metadata.len());
+    let mut decoder = Decoder::builder().with_data(file);
+    if let Some(byte_len) = byte_len {
+        decoder = decoder.with_byte_len(byte_len).with_seekable(true);
+    }
+    if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+        decoder = decoder.with_hint(ext);
+    }
+    decoder
+        .build()
+        .with_context(|| format!("failed to decode {}", path.display()))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -249,6 +270,14 @@ impl LocalQueue {
         self.play_order
             .get(self.position)
             .and_then(|track_index| self.original_tracks.get(*track_index))
+    }
+
+    pub fn current_local_path(&self) -> Option<PathBuf> {
+        self.current()?.local_path.clone()
+    }
+
+    pub fn len(&self) -> usize {
+        self.play_order.len()
     }
 
     pub fn advance(&mut self) -> bool {

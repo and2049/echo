@@ -180,8 +180,9 @@ fn parse_track_metadata(
         .as_millis()
         .try_into()
         .unwrap_or(u32::MAX);
-    let artwork_path =
-        tag.and_then(|tag| write_embedded_artwork(id, tag.pictures()).ok().flatten());
+    let artwork_path = tag
+        .and_then(|tag| write_embedded_artwork(id, tag.pictures()).ok().flatten())
+        .or_else(|| find_folder_artwork(path.parent()?));
 
     Ok(LocalTrack {
         id: id.to_string(),
@@ -194,6 +195,24 @@ fn parse_track_metadata(
         file_size,
         modified_unix_secs,
     })
+}
+
+fn find_folder_artwork(dir: &Path) -> Option<PathBuf> {
+    const CANDIDATES: [&str; 8] = [
+        "cover.jpg",
+        "cover.jpeg",
+        "cover.png",
+        "folder.jpg",
+        "folder.jpeg",
+        "folder.png",
+        "front.jpg",
+        "front.png",
+    ];
+
+    CANDIDATES
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
 }
 
 fn fallback_track_title(path: &Path) -> String {
@@ -360,6 +379,25 @@ mod tests {
         assert_eq!(track.artist, "");
         assert_eq!(track.album, "");
         assert_eq!(track.duration_ms, 1000);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn scan_uses_folder_artwork_when_embedded_artwork_is_absent() {
+        let root = unique_temp_dir("folder-artwork");
+        fs::create_dir_all(&root).expect("create root");
+        let cover = root.join("cover.jpg");
+        fs::write(&cover, b"not decoded during scan").expect("write cover");
+        write_silent_wav(&root.join("track.wav"), 8_000);
+
+        let (library, _) =
+            scan_local_library(&root, &LocalLibrary::default()).expect("scan local library");
+
+        assert_eq!(
+            library.tracks[0].artwork_path.as_deref(),
+            Some(cover.as_path())
+        );
 
         let _ = fs::remove_dir_all(root);
     }

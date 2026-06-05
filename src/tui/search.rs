@@ -76,6 +76,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                 crate::i18n::t("ui.tracks", &state.library_config.language),
                 crate::i18n::t("ui.artist", &state.library_config.language),
                 crate::i18n::t("ui.album", &state.library_config.language),
+                crate::i18n::t("ui.source", &state.library_config.language),
                 crate::i18n::t("ui.duration", &state.library_config.language),
             ])
             .style(header_style)
@@ -113,9 +114,17 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                         t.duration_ms / 1000 / 60,
                         t.duration_ms / 1000 % 60
                     );
-                    let w_track = (inner.width * 35 / 100).saturating_sub(1);
-                    let w_artist = (inner.width * 25 / 100).saturating_sub(1);
-                    let w_album = (inner.width * 30 / 100).saturating_sub(1);
+                    let w_track = (inner.width * 32 / 100).saturating_sub(1);
+                    let w_artist = (inner.width * 23 / 100).saturating_sub(1);
+                    let w_album = (inner.width * 26 / 100).saturating_sub(1);
+                    let source = match t.source {
+                        crate::models::TrackSource::Local => {
+                            crate::i18n::t("ui.local", &state.library_config.language)
+                        }
+                        crate::models::TrackSource::Spotify => {
+                            crate::i18n::t("ui.spotify", &state.library_config.language)
+                        }
+                    };
 
                     let liked_str = if state.liked_tracks.contains(&t.id) {
                         "♥"
@@ -130,6 +139,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                         Cell::from(truncate_to_width_with_ellipsis(&t.name, w_track)),
                         Cell::from(truncate_to_width_with_ellipsis(&t.artist, w_artist)),
                         Cell::from(truncate_to_width_with_ellipsis(&t.album, w_album)),
+                        Cell::from(source),
                         Cell::from(format_duration_text(dur)),
                     ])
                     .style(style)
@@ -139,9 +149,10 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                 rows,
                 [
                     Constraint::Length(2),
-                    Constraint::Percentage(35),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(30),
+                    Constraint::Percentage(32),
+                    Constraint::Percentage(23),
+                    Constraint::Percentage(26),
+                    Constraint::Length(8),
                     Constraint::Length(DURATION_COLUMN_WIDTH),
                 ],
             )

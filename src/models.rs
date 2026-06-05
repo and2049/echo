@@ -289,6 +289,88 @@ impl LocalLibrary {
             })
             .collect()
     }
+
+    pub fn search(&self, query: &str) -> SearchResults {
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(|term| term.to_lowercase())
+            .filter(|term| !term.is_empty())
+            .collect();
+        if terms.is_empty() {
+            return SearchResults::default();
+        }
+
+        let mut results = SearchResults::default();
+        let mut album_keys = std::collections::BTreeSet::new();
+        let mut artist_keys = std::collections::BTreeSet::new();
+
+        for track in &self.tracks {
+            let title = track.title.to_lowercase();
+            let artist = track.artist.to_lowercase();
+            let album = track.album.to_lowercase();
+            let path = track.path.to_string_lossy().to_lowercase();
+            let matches_all_terms = terms.iter().all(|term| {
+                title.contains(term)
+                    || artist.contains(term)
+                    || album.contains(term)
+                    || path.contains(term)
+            });
+
+            if matches_all_terms {
+                results.tracks.push(SearchTrack {
+                    id: track.id.clone(),
+                    source: TrackSource::Local,
+                    local_path: Some(track.path.clone()),
+                    name: track.title.clone(),
+                    artist: track.artist.clone(),
+                    album: track.album.clone(),
+                    duration_ms: track.duration_ms,
+                    image_url: track
+                        .artwork_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().to_string()),
+                    album_id: None,
+                    artist_id: None,
+                });
+            }
+
+            if !track.album.is_empty()
+                && terms
+                    .iter()
+                    .all(|term| album.contains(term) || artist.contains(term))
+            {
+                let key = format!("{}|{}", track.album, track.artist);
+                if album_keys.insert(key.clone()) {
+                    results.albums.push(SearchAlbum {
+                        id: stable_local_group_id("local-album", &key),
+                        name: track.album.clone(),
+                        artist: track.artist.clone(),
+                        image_url: track
+                            .artwork_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                    });
+                }
+            }
+
+            if !track.artist.is_empty() && terms.iter().all(|term| artist.contains(term)) {
+                let key = track.artist.clone();
+                if artist_keys.insert(key.clone()) {
+                    results.artists.push(Artist {
+                        id: stable_local_group_id("local-artist", &key),
+                        name: key,
+                        followers: 0,
+                        image_url: track
+                            .artwork_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                    });
+                }
+            }
+        }
+
+        results
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -443,6 +525,10 @@ pub fn stable_local_playlist_id(name: &str, created_unix_secs: u64) -> String {
         "local-playlist:{:016x}",
         fnv1a_64(format!("{name}:{created_unix_secs}").as_bytes())
     )
+}
+
+pub fn stable_local_group_id(prefix: &str, key: &str) -> String {
+    format!("{prefix}:{:016x}", fnv1a_64(key.as_bytes()))
 }
 
 pub fn stable_local_track_id(path: &Path) -> String {
@@ -620,6 +706,32 @@ mod tests {
             TrackListContext::local_playlist("local-playlist:one".to_string(), "Local".to_string());
 
         assert!(context.can_modify_playlist(None));
+    }
+
+    #[test]
+    fn local_search_matches_title_artist_and_album() {
+        let library = LocalLibrary {
+            tracks: vec![LocalTrack {
+                id: "local:one".to_string(),
+                path: PathBuf::from("/music/Artist/Album/Song.wav"),
+                title: "Song".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_ms: 1_000,
+                artwork_path: Some(PathBuf::from("/cache/cover.jpg")),
+                file_size: 1,
+                modified_unix_secs: 2,
+            }],
+        };
+
+        let title = library.search("song");
+        let artist = library.search("artist");
+        let album = library.search("album");
+
+        assert_eq!(title.tracks[0].source, TrackSource::Local);
+        assert_eq!(artist.tracks[0].id, "local:one");
+        assert_eq!(album.albums[0].name, "Album");
+        assert_eq!(artist.artists[0].name, "Artist");
     }
 }
 

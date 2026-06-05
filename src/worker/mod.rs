@@ -122,6 +122,17 @@ fn resolve_local_queue_tracks(track_ids: &[String], library: &LocalLibrary) -> V
         .collect()
 }
 
+fn merged_search_results(
+    spotify: Option<crate::models::SearchResults>,
+    local: crate::models::SearchResults,
+) -> crate::models::SearchResults {
+    let mut results = spotify.unwrap_or_default();
+    results.tracks.extend(local.tracks);
+    results.albums.extend(local.albums);
+    results.artists.extend(local.artists);
+    results
+}
+
 fn current_unix_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -215,6 +226,47 @@ mod tests {
             tracks[0].local_path.as_deref(),
             Some(Path::new("/music/b.wav"))
         );
+    }
+
+    #[test]
+    fn merged_search_results_keep_spotify_and_local_tracks() {
+        let spotify = crate::models::SearchResults {
+            tracks: vec![crate::models::SearchTrack {
+                id: "spotify".to_string(),
+                source: TrackSource::Spotify,
+                local_path: None,
+                name: "Spotify".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_ms: 1,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            }],
+            albums: Vec::new(),
+            artists: Vec::new(),
+        };
+        let local = crate::models::SearchResults {
+            tracks: vec![crate::models::SearchTrack {
+                id: "local:a".to_string(),
+                source: TrackSource::Local,
+                local_path: Some(PathBuf::from("/music/a.wav")),
+                name: "Local".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_ms: 1,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            }],
+            albums: Vec::new(),
+            artists: Vec::new(),
+        };
+
+        let merged = merged_search_results(Some(spotify), local);
+
+        assert_eq!(merged.tracks.len(), 2);
+        assert_eq!(merged.tracks[1].source, TrackSource::Local);
     }
 }
 
@@ -768,15 +820,21 @@ impl Worker {
                                     }
                             }
                             AppEvent::GlobalSearch(query) => {
+                                let local_results = AppConfig::load_local_library().search(&query);
                                 if let Some(ref mut sp) = spotify_opt {
                                     match sp.search_catalog(&query).await {
                                         Ok(results) => {
-                                            let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(results)).await;
+                                            let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(
+                                                merged_search_results(Some(results), local_results),
+                                            )).await;
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write("echo-debug-search.log", format!("Search error: {:?}", e));
+                                            let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(local_results)).await;
                                         }
                                     }
+                                } else {
+                                    let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(local_results)).await;
                                 }
                             }
                             AppEvent::AddToQueue(track_ids) => {
