@@ -72,7 +72,7 @@ echo is heavily keyboard-driven.
 
 ### Track & Library Actions
 - `l`: Like / Unlike the selected track
-- `A` (Shift + a): Jump to the Album of the selected track
+- `A` (Shift + a): Open action menu for hovered track (or currently playing if not focused in track page)
 - `p`: paste a cut playlist into a folder
 - `a`: Add selected track to playlist / Add selected album to library
 - `q`: Add currently hovered track to Queue
