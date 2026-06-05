@@ -44,6 +44,59 @@ fn invalidate_playlist_context_cache(playlist_id: &str) {
     let _ = AppConfig::save_cache(&cache);
 }
 
+async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
+    let cache = AppConfig::load_cache();
+    let playlists_need_refresh = if let Some(entry) = cache.get_playlists_entry() {
+        let needs_refresh = crate::config::CacheData::library_list_needs_refresh(&entry);
+        let _ = tx.send(WorkerEvent::PlaylistsLoaded(entry.value)).await;
+        needs_refresh
+    } else {
+        true
+    };
+
+    let albums_need_refresh = if let Some(entry) = cache.get_saved_albums_entry() {
+        let needs_refresh = crate::config::CacheData::library_list_needs_refresh(&entry);
+        let _ = tx.send(WorkerEvent::AlbumsLoaded(entry.value)).await;
+        needs_refresh
+    } else {
+        true
+    };
+
+    if playlists_need_refresh {
+        let sp = sp.clone();
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            if let Ok(playlists) = sp.fetch_playlists().await {
+                save_playlists_cache(playlists.clone());
+                let _ = tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+            }
+        });
+    }
+
+    if albums_need_refresh {
+        let sp = sp.clone();
+        tokio::spawn(async move {
+            if let Ok(albums) = sp.fetch_albums().await {
+                save_saved_albums_cache(albums.clone());
+                let _ = tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+            }
+        });
+    }
+}
+
+fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
+    tokio::spawn(async move {
+        if let Ok(playlists) = sp.fetch_playlists().await {
+            save_playlists_cache(playlists.clone());
+            let _ = tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
+        }
+        if let Ok(albums) = sp.fetch_albums().await {
+            save_saved_albums_cache(albums.clone());
+            let _ = tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
+        }
+    });
+}
+
 impl Worker {
     pub fn new(
         rx: mpsc::Receiver<AppEvent>,
@@ -258,24 +311,9 @@ impl Worker {
 
                                         audio::spawn_librespot_daemon(String::new(), "echo-rs".to_string(), self.tx.clone()).await;
 
-                                        // Fetch playlists initially
+                                        // Hydrate library lists from cache immediately, then refresh stale entries in background.
                                         if let Some(ref mut sp) = spotify_opt {
-                                            let mut cache = AppConfig::load_cache();
-                                            if let Some(playlists) = cache.get_playlists() {
-                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
-                                            } else if let Ok(playlists) = sp.fetch_playlists().await {
-                                                cache.set_playlists(playlists.clone());
-                                                let _ = AppConfig::save_cache(&cache);
-                                                let _ = self.tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
-                                            }
-                                            let mut cache = AppConfig::load_cache();
-                                            if let Some(albums) = cache.get_saved_albums() {
-                                                let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
-                                            } else if let Ok(albums) = sp.fetch_albums().await {
-                                                cache.set_saved_albums(albums.clone());
-                                                let _ = AppConfig::save_cache(&cache);
-                                                let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
-                                            }
+                                            hydrate_library_lists(sp, self.tx.clone()).await;
                                             // Initial State Sync (Seamless Handoff)
                                             // Try up to 5 times to sync, allowing the librespot daemon to authenticate
                                             let mut found_playback = false;
@@ -312,7 +350,27 @@ impl Worker {
                                     }
                             }
                             AppEvent::LoadContextTracks(context) => {
-                                tracks::load_context_tracks(spotify_opt.as_ref(), context, &self.tx).await;
+                                if let Some(sp) = spotify_opt.as_ref() {
+                                    let sp = sp.clone();
+                                    let tx = self.tx.clone();
+                                    tokio::spawn(async move {
+                                        tracks::load_context_tracks(Some(&sp), context, &tx).await;
+                                    });
+                                }
+                            }
+                            AppEvent::RefreshContextTracks(context) => {
+                                if let Some(sp) = spotify_opt.as_ref() {
+                                    let sp = sp.clone();
+                                    let tx = self.tx.clone();
+                                    tokio::spawn(async move {
+                                        tracks::refresh_context_tracks(Some(&sp), context, &tx).await;
+                                    });
+                                }
+                            }
+                            AppEvent::RefreshLibraryLists => {
+                                if let Some(sp) = spotify_opt.as_ref() {
+                                    spawn_refresh_library_lists(sp.clone(), self.tx.clone());
+                                }
                             }
                             AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url, album_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
@@ -679,6 +737,13 @@ impl Worker {
                                     artist_id,
                                     artist_name,
                                     artist_image_url,
+                                );
+                            }
+                            AppEvent::RefreshArtistAlbums { artist_id } => {
+                                artist_page::spawn_refresh_artist_albums(
+                                    api_client.as_ref(),
+                                    self.tx.clone(),
+                                    artist_id,
                                 );
                             }
                             _ => {}

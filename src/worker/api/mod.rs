@@ -14,6 +14,7 @@ use anyhow::Result;
 use rspotify::{AuthCodeSpotify, Credentials, OAuth, prelude::*};
 use std::collections::HashSet;
 
+#[derive(Clone)]
 pub struct SpotifyWorker {
     pub client: AuthCodeSpotify,
     pub device_id: Option<String>,

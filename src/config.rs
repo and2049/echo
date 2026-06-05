@@ -72,9 +72,13 @@ pub const FOLLOWED_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 6
 pub const TOP_TRACKS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const RECENTLY_PLAYED_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 pub const ARTIST_PAGE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+pub const ARTIST_ALBUMS_REFRESH_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const ALBUM_TRACKS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub const PLAYLIST_TRACKS_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 pub const LIBRARY_LIST_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
+pub const LIBRARY_LIST_REFRESH_TTL: Duration = Duration::from_secs(15 * 60);
+pub const PLAYLIST_TRACKS_REFRESH_TTL: Duration = Duration::from_secs(15 * 60);
+pub const ALBUM_TRACKS_REFRESH_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 impl<T> CachedEntry<T> {
     pub fn new(value: T) -> Self {
@@ -98,6 +102,14 @@ impl CacheData {
             .and_then(|entry| entry.fresh_value(LIBRARY_LIST_CACHE_TTL))
     }
 
+    pub fn get_playlists_entry(&self) -> Option<CachedEntry<Vec<Playlist>>> {
+        self.playlists.clone()
+    }
+
+    pub fn library_list_needs_refresh<T>(entry: &CachedEntry<T>) -> bool {
+        !is_fresh(entry.fetched_at, LIBRARY_LIST_REFRESH_TTL)
+    }
+
     pub fn set_playlists(&mut self, playlists: Vec<Playlist>) {
         self.playlists = Some(CachedEntry::new(playlists));
     }
@@ -106,6 +118,10 @@ impl CacheData {
         self.saved_albums
             .as_ref()
             .and_then(|entry| entry.fresh_value(LIBRARY_LIST_CACHE_TTL))
+    }
+
+    pub fn get_saved_albums_entry(&self) -> Option<CachedEntry<Vec<Album>>> {
+        self.saved_albums.clone()
     }
 
     pub fn set_saved_albums(&mut self, albums: Vec<Album>) {
@@ -155,6 +171,20 @@ impl CacheData {
             .and_then(|entry| entry.fresh_value(ttl))
     }
 
+    pub fn get_context_tracks_entry(
+        &self,
+        context: &TrackListContext,
+    ) -> Option<CachedEntry<ContextTracksCacheEntry>> {
+        self.context_tracks
+            .get(&context_cache_key(context)?)
+            .cloned()
+    }
+
+    pub fn context_tracks_need_refresh(entry: &CachedEntry<ContextTracksCacheEntry>) -> bool {
+        let ttl = context_refresh_ttl(&entry.value.context);
+        !is_fresh(entry.fetched_at, ttl)
+    }
+
     pub fn set_context_tracks(&mut self, context: TrackListContext, tracks: Vec<Track>) {
         let Some(key) = context_cache_key(&context) else {
             return;
@@ -174,6 +204,15 @@ impl CacheData {
         self.artist_pages
             .get(artist_id)
             .and_then(|entry| entry.fresh_value(ARTIST_PAGE_CACHE_TTL))
+    }
+
+    pub fn get_artist_page_entry(&self, artist_id: &str) -> Option<CachedEntry<ArtistPageData>> {
+        self.artist_pages.get(artist_id).cloned()
+    }
+
+    pub fn artist_page_needs_album_refresh(entry: &CachedEntry<ArtistPageData>) -> bool {
+        !is_fresh(entry.fetched_at, ARTIST_ALBUMS_REFRESH_TTL)
+            || !artist_album_metadata_complete(&entry.value.albums)
     }
 
     pub fn set_artist_page(&mut self, artist_id: String, page: ArtistPageData) {
@@ -238,6 +277,10 @@ fn is_fresh(fetched_at: u64, ttl: Duration) -> bool {
     now_epoch_secs().saturating_sub(fetched_at) <= ttl.as_secs()
 }
 
+pub fn artist_album_metadata_complete(albums: &[Album]) -> bool {
+    albums.iter().all(|album| album.track_count.is_some())
+}
+
 pub fn context_cache_key(context: &TrackListContext) -> Option<String> {
     match context.kind {
         TrackListContextKind::Playlist => Some(format!("playlist:{}", context.id)),
@@ -251,6 +294,14 @@ fn context_cache_ttl(context: &TrackListContext) -> Option<Duration> {
         TrackListContextKind::Playlist => Some(PLAYLIST_TRACKS_CACHE_TTL),
         TrackListContextKind::Album => Some(ALBUM_TRACKS_CACHE_TTL),
         TrackListContextKind::Generated => None,
+    }
+}
+
+fn context_refresh_ttl(context: &TrackListContext) -> Duration {
+    match context.kind {
+        TrackListContextKind::Playlist => PLAYLIST_TRACKS_REFRESH_TTL,
+        TrackListContextKind::Album => ALBUM_TRACKS_REFRESH_TTL,
+        TrackListContextKind::Generated => Duration::MAX,
     }
 }
 
@@ -649,5 +700,126 @@ error = "Red"
 
         cache.clear_cooldown("artist_albums:artist");
         assert!(!cache.cooldown_failures.contains_key("artist_albums:artist"));
+    }
+
+    fn artist_page_entry(track_count: Option<u32>, age: Duration) -> CachedEntry<ArtistPageData> {
+        let mut entry = CachedEntry::new(ArtistPageData {
+            artist_id: "artist".to_string(),
+            artist_name: "Artist".to_string(),
+            image_url: None,
+            albums: vec![Album {
+                id: "album".to_string(),
+                name: "Album".to_string(),
+                artists: "Artist".to_string(),
+                image_url: None,
+                release_year: "2024".to_string(),
+                track_count,
+            }],
+        });
+        entry.fetched_at = now_epoch_secs().saturating_sub(age.as_secs());
+        entry
+    }
+
+    #[test]
+    fn artist_album_cache_missing_track_counts_requires_refresh() {
+        let entry = artist_page_entry(None, Duration::from_secs(60));
+
+        assert!(CacheData::artist_page_needs_album_refresh(&entry));
+    }
+
+    #[test]
+    fn artist_album_cache_recent_complete_entry_does_not_refresh() {
+        let entry = artist_page_entry(Some(12), Duration::from_secs(60));
+
+        assert!(!CacheData::artist_page_needs_album_refresh(&entry));
+    }
+
+    #[test]
+    fn artist_album_cache_soft_stale_entry_requires_refresh() {
+        let entry = artist_page_entry(Some(12), ARTIST_ALBUMS_REFRESH_TTL + Duration::from_secs(1));
+
+        assert!(CacheData::artist_page_needs_album_refresh(&entry));
+    }
+
+    #[test]
+    fn expired_artist_page_entry_can_still_be_read_for_display() {
+        let mut cache = CacheData::default();
+        let mut entry = artist_page_entry(Some(12), ARTIST_PAGE_CACHE_TTL + Duration::from_secs(1));
+        entry.value.albums[0].name = "Cached Album".to_string();
+        cache
+            .artist_pages
+            .insert("artist".to_string(), entry.clone());
+
+        assert!(cache.get_artist_page("artist").is_none());
+        assert_eq!(
+            cache.get_artist_page_entry("artist").and_then(|entry| entry
+                .value
+                .albums
+                .first()
+                .map(|album| album.name.clone())),
+            Some("Cached Album".to_string())
+        );
+    }
+
+    #[test]
+    fn library_list_soft_stale_entry_requires_refresh() {
+        let mut entry = CachedEntry::new(vec![Playlist {
+            id: "playlist".to_string(),
+            name: "Playlist".to_string(),
+            owner: "Owner".to_string(),
+            owner_id: "owner".to_string(),
+            image_url: None,
+        }]);
+        entry.fetched_at = now_epoch_secs().saturating_sub(LIBRARY_LIST_REFRESH_TTL.as_secs() + 1);
+
+        assert!(CacheData::library_list_needs_refresh(&entry));
+    }
+
+    #[test]
+    fn recent_library_list_entry_does_not_refresh() {
+        let entry = CachedEntry::new(Vec::<Playlist>::new());
+
+        assert!(!CacheData::library_list_needs_refresh(&entry));
+    }
+
+    #[test]
+    fn expired_context_track_entry_can_still_be_read_for_display() {
+        let mut cache = CacheData::default();
+        let context = TrackListContext::playlist(
+            "playlist".to_string(),
+            "Playlist".to_string(),
+            "Owner".to_string(),
+            "owner".to_string(),
+            None,
+        );
+        cache.set_context_tracks(context.clone(), Vec::new());
+        let key = context_cache_key(&context).expect("cacheable context");
+        cache
+            .context_tracks
+            .get_mut(&key)
+            .expect("context cache entry")
+            .fetched_at = now_epoch_secs().saturating_sub(PLAYLIST_TRACKS_CACHE_TTL.as_secs() + 1);
+
+        assert!(cache.get_context_tracks(&context).is_none());
+        assert!(cache.get_context_tracks_entry(&context).is_some());
+    }
+
+    #[test]
+    fn playlist_context_soft_stale_entry_requires_refresh() {
+        let context = TrackListContext::playlist(
+            "playlist".to_string(),
+            "Playlist".to_string(),
+            "Owner".to_string(),
+            "owner".to_string(),
+            None,
+        );
+        let mut entry = CachedEntry::new(ContextTracksCacheEntry {
+            context,
+            tracks: Vec::new(),
+        });
+        entry.fetched_at =
+            now_epoch_secs().saturating_sub(PLAYLIST_TRACKS_REFRESH_TTL.as_secs() + 1);
+
+        assert!(CacheData::context_tracks_need_refresh(&entry));
     }
 }

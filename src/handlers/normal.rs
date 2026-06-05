@@ -790,6 +790,27 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 current_track_id: state.playback.playing_track_id.clone(),
             });
         }
+        KeyCode::Char('R') => {
+            if state.active_view == ActiveView::ArtistPage
+                && let Some(data) = state.artist_page_data.as_ref()
+            {
+                if state.artist_albums_loading {
+                    state.status_message =
+                        Some("Artist albums refresh already in progress.".to_string());
+                    state.status_message_expiry =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    return None;
+                }
+                state.artist_albums_loading = true;
+                state.status_message = Some("Refreshing artist albums...".to_string());
+                return Some(AppEvent::RefreshArtistAlbums {
+                    artist_id: data.artist_id.clone(),
+                });
+            } else if state.active_view == ActiveView::Library {
+                state.status_message = Some("Refreshing library...".to_string());
+                return Some(AppEvent::RefreshLibraryLists);
+            }
+        }
         KeyCode::Char('r') => {
             let next_mode = match state.playback.repeat_mode.as_str() {
                 "Off" => "Track",

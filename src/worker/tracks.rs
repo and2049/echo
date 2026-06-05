@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
 use crate::{
-    config::AppConfig,
+    config::{AppConfig, CacheData},
     events::WorkerEvent,
     models::{TrackListContext, TrackListContextKind},
 };
@@ -13,14 +13,37 @@ pub async fn load_context_tracks(
     context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
 ) {
+    load_context_tracks_with_policy(spotify, context, tx, ContextTrackCachePolicy::UseCache).await;
+}
+
+pub async fn refresh_context_tracks(
+    spotify: Option<&SpotifyWorker>,
+    context: TrackListContext,
+    tx: &mpsc::Sender<WorkerEvent>,
+) {
+    load_context_tracks_with_policy(spotify, context, tx, ContextTrackCachePolicy::Refresh).await;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContextTrackCachePolicy {
+    UseCache,
+    Refresh,
+}
+
+async fn load_context_tracks_with_policy(
+    spotify: Option<&SpotifyWorker>,
+    context: TrackListContext,
+    tx: &mpsc::Sender<WorkerEvent>,
+    policy: ContextTrackCachePolicy,
+) {
     let Some(sp) = spotify else {
         return;
     };
 
     if context.is_album() {
-        load_album_tracks(sp, context, tx).await;
+        load_album_tracks(sp, context, tx, policy).await;
     } else {
-        load_playlist_tracks(sp, context, tx).await;
+        load_playlist_tracks(sp, context, tx, policy).await;
     }
 }
 
@@ -32,12 +55,23 @@ async fn load_album_tracks(
     sp: &SpotifyWorker,
     mut context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
+    policy: ContextTrackCachePolicy,
 ) {
-    if let Some(cached) = AppConfig::load_cache().get_context_tracks(&context) {
+    if policy == ContextTrackCachePolicy::UseCache
+        && let Some(entry) = AppConfig::load_cache().get_context_tracks_entry(&context)
+    {
+        let needs_refresh = CacheData::context_tracks_need_refresh(&entry);
+        let cached = entry.value;
         let _ = tx
-            .send(WorkerEvent::TracksLoaded(cached.tracks, cached.context))
+            .send(WorkerEvent::TracksLoaded(
+                cached.tracks.clone(),
+                cached.context.clone(),
+            ))
             .await;
-        return;
+        if !needs_refresh {
+            return;
+        }
+        context = cached.context;
     }
 
     let id = context.id.clone();
@@ -71,14 +105,25 @@ async fn load_album_tracks(
 
 async fn load_playlist_tracks(
     sp: &SpotifyWorker,
-    context: TrackListContext,
+    mut context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
+    policy: ContextTrackCachePolicy,
 ) {
-    if let Some(cached) = AppConfig::load_cache().get_context_tracks(&context) {
+    if policy == ContextTrackCachePolicy::UseCache
+        && let Some(entry) = AppConfig::load_cache().get_context_tracks_entry(&context)
+    {
+        let needs_refresh = CacheData::context_tracks_need_refresh(&entry);
+        let cached = entry.value;
         let _ = tx
-            .send(WorkerEvent::TracksLoaded(cached.tracks, cached.context))
+            .send(WorkerEvent::TracksLoaded(
+                cached.tracks.clone(),
+                cached.context.clone(),
+            ))
             .await;
-        return;
+        if !needs_refresh {
+            return;
+        }
+        context = cached.context;
     }
 
     let id = context.id.clone();

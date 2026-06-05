@@ -27,6 +27,19 @@ pub struct EchoSpotifyClient {
     cache: Arc<Mutex<SpotifyApiCache>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArtistAlbumsCachePolicy {
+    UseCache,
+    Refresh,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ArtistAlbumsResponse {
+    pub cached: Option<Vec<Album>>,
+    pub refreshed: Option<Vec<Album>>,
+    pub refresh_skipped: bool,
+}
+
 impl EchoSpotifyClient {
     pub fn new(third_party: AuthCodeSpotify, first_party: Option<SpotifyWebApi>) -> Self {
         Self {
@@ -167,74 +180,65 @@ impl EchoSpotifyClient {
         Ok(Some(artists))
     }
 
-    pub async fn artist_albums(&self, artist_id: &str) -> Result<Option<Vec<Album>>> {
-        if let Some(albums) = self.cache.lock().await.artist_albums(artist_id) {
-            log_api(&format!("artist_albums route=cache artist={artist_id}"));
-            return Ok(Some(albums));
+    pub async fn artist_albums_with_policy(
+        &self,
+        artist_id: &str,
+        policy: ArtistAlbumsCachePolicy,
+    ) -> Result<ArtistAlbumsResponse> {
+        let force_refresh = policy == ArtistAlbumsCachePolicy::Refresh;
+        let mut response = ArtistAlbumsResponse::default();
+        let mut needs_refresh = force_refresh;
+
+        if !force_refresh {
+            let memory = {
+                let cache = self.cache.lock().await;
+                cache.artist_albums(artist_id).map(|albums| {
+                    (
+                        albums,
+                        cache.artist_albums_need_refresh(artist_id).unwrap_or(true),
+                    )
+                })
+            };
+            if let Some((albums, memory_needs_refresh)) = memory {
+                log_api(&format!(
+                    "artist_albums route=cache artist={artist_id} needs_refresh={memory_needs_refresh}"
+                ));
+                response.cached = Some(albums);
+                needs_refresh = memory_needs_refresh;
+            } else if let Some(entry) = AppConfig::load_cache().get_artist_page_entry(artist_id) {
+                let persistent_needs_refresh = CacheData::artist_page_needs_album_refresh(&entry);
+                log_api(&format!(
+                    "artist_albums route=persistent_cache artist={artist_id} needs_refresh={persistent_needs_refresh}"
+                ));
+                response.cached = Some(entry.value.albums.clone());
+                needs_refresh = persistent_needs_refresh;
+                if !persistent_needs_refresh {
+                    self.cache
+                        .lock()
+                        .await
+                        .set_artist_albums(artist_id.to_string(), entry.value.albums);
+                }
+            } else {
+                needs_refresh = true;
+            }
         }
 
-        if let Some(page) = AppConfig::load_cache().get_artist_page(artist_id)
-            && !page.albums.is_empty()
-        {
-            log_api(&format!(
-                "artist_albums route=persistent_cache artist={artist_id}"
-            ));
-            self.cache
-                .lock()
-                .await
-                .set_artist_albums(artist_id.to_string(), page.albums.clone());
-            return Ok(Some(page.albums));
+        if !needs_refresh && response.cached.is_some() {
+            return Ok(response);
         }
 
         let key = CacheKey::ArtistAlbums(artist_id.to_string());
         if !self.begin_fetch(key.clone(), "Artist albums").await? {
-            return Ok(None);
+            response.refresh_skipped = true;
+            return Ok(response);
         }
 
-        let result = async {
-            match self.third_party_artist_albums(artist_id).await {
-                Ok(albums) => {
-                    log_api(&format!(
-                        "artist_albums route=third_party artist={artist_id}"
-                    ));
-                    Ok(albums)
-                }
-                Err(err) => {
-                    log_api(&format!(
-                        "artist_albums route=third_party failed artist={artist_id} err={err:?}"
-                    ));
-                    if is_probable_rate_limit(&err) {
-                        Err(err)
-                    } else {
-                        self.first_party_artist_albums(artist_id)
-                            .await
-                            .inspect(|_| {
-                                log_api(&format!(
-                                    "artist_albums route=first_party artist={artist_id}"
-                                ));
-                            })
-                    }
-                }
-            }
-        }
-        .await;
+        let result = self.fetch_artist_albums_network(artist_id).await;
         self.finish_fetch(&key, &result).await;
         let albums = result?;
-        self.cache
-            .lock()
-            .await
-            .set_artist_albums(artist_id.to_string(), albums.clone());
-        update_persistent_cache(|cache| {
-            let mut page = cache.get_artist_page(artist_id).unwrap_or(ArtistPageData {
-                artist_id: artist_id.to_string(),
-                artist_name: "Unknown Artist".to_string(),
-                image_url: None,
-                albums: Vec::new(),
-            });
-            page.albums = albums.clone();
-            cache.set_artist_page(artist_id.to_string(), page);
-        });
-        Ok(Some(albums))
+        self.store_artist_albums(artist_id, albums.clone()).await;
+        response.refreshed = Some(albums);
+        Ok(response)
     }
 
     fn third_party_worker(&self) -> SpotifyWorker {
@@ -379,6 +383,53 @@ impl EchoSpotifyClient {
             .and_then(|v| v.as_array())
             .map(|items| items.iter().filter_map(parse::artist).collect())
             .unwrap_or_default())
+    }
+
+    async fn fetch_artist_albums_network(&self, artist_id: &str) -> Result<Vec<Album>> {
+        match self.third_party_artist_albums(artist_id).await {
+            Ok(albums) => {
+                log_api(&format!(
+                    "artist_albums route=third_party artist={artist_id}"
+                ));
+                Ok(albums)
+            }
+            Err(err) => {
+                log_api(&format!(
+                    "artist_albums route=third_party failed artist={artist_id} err={err:?}"
+                ));
+                if is_probable_rate_limit(&err) {
+                    Err(err)
+                } else {
+                    self.first_party_artist_albums(artist_id)
+                        .await
+                        .inspect(|_| {
+                            log_api(&format!(
+                                "artist_albums route=first_party artist={artist_id}"
+                            ));
+                        })
+                }
+            }
+        }
+    }
+
+    async fn store_artist_albums(&self, artist_id: &str, albums: Vec<Album>) {
+        self.cache
+            .lock()
+            .await
+            .set_artist_albums(artist_id.to_string(), albums.clone());
+        update_persistent_cache(|cache| {
+            let mut page = cache
+                .get_artist_page_entry(artist_id)
+                .map(|entry| entry.value)
+                .unwrap_or(ArtistPageData {
+                    artist_id: artist_id.to_string(),
+                    artist_name: "Unknown Artist".to_string(),
+                    image_url: None,
+                    albums: Vec::new(),
+                });
+            page.albums = albums.clone();
+            cache.set_artist_page(artist_id.to_string(), page);
+        });
     }
 
     async fn third_party_json(&self, url: &str) -> Result<serde_json::Value> {

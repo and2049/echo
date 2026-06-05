@@ -4,6 +4,8 @@ use crossterm::event::KeyEvent;
 pub enum AppEvent {
     Key(KeyEvent),
     LoadContextTracks(TrackListContext),
+    RefreshContextTracks(TrackListContext),
+    RefreshLibraryLists,
     PlayTrack {
         context_id: String,
         track_id: String,
@@ -54,6 +56,9 @@ pub enum AppEvent {
         artist_id: String,
         artist_name: Option<String>,
         artist_image_url: Option<String>,
+    },
+    RefreshArtistAlbums {
+        artist_id: String,
     },
 }
 

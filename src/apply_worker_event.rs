@@ -23,7 +23,7 @@ pub async fn apply_worker_event(
                 && let Some(context) = state.active_tracklist_context.clone()
                 && context.requires_worker_load()
             {
-                let _ = app_tx.send(AppEvent::LoadContextTracks(context)).await;
+                let _ = app_tx.send(AppEvent::RefreshContextTracks(context)).await;
             }
         }
         WorkerEvent::UserIdentityLoaded(user_id) => {
@@ -37,6 +37,17 @@ pub async fn apply_worker_event(
             state.saved_albums = albums;
         }
         WorkerEvent::TracksLoaded(tracks, context) => {
+            let preserve_track_selection = state
+                .active_tracklist_context
+                .as_ref()
+                .is_some_and(|active| active.id == context.id && active.kind == context.kind);
+            let selected_track_index = if preserve_track_selection && !tracks.is_empty() {
+                state
+                    .selected_track_index
+                    .min(tracks.len().saturating_sub(1))
+            } else {
+                0
+            };
             state.tracks = tracks;
             state.tracklist_image_url = context.image_url.clone();
             if let Some(url) = context.image_url.as_ref() {
@@ -49,7 +60,7 @@ pub async fn apply_worker_event(
             }
             state.active_tracklist_context = Some(context);
             state.active_view = app::ActiveView::TrackList;
-            state.selected_track_index = 0;
+            state.selected_track_index = selected_track_index;
         }
         WorkerEvent::TracksLoadFailed {
             context_id: _,
@@ -272,8 +283,15 @@ pub async fn apply_worker_event(
             if let Some(data) = state.artist_page_data.as_mut()
                 && data.artist_id == artist_id
             {
+                let selected_album_index = if !albums.is_empty() {
+                    state
+                        .artist_page_album_index
+                        .min(albums.len().saturating_sub(1))
+                } else {
+                    0
+                };
                 data.albums = albums;
-                state.artist_page_album_index = 0;
+                state.artist_page_album_index = selected_album_index;
                 state.artist_albums_loading = false;
                 state.artist_page_loading = false;
             }
@@ -286,25 +304,32 @@ pub async fn apply_worker_event(
             {
                 state.artist_albums_loading = false;
                 state.artist_page_loading = false;
-                set_timed_status(state, format!("Artist albums failed: {message}"), 5);
+                let status = if message == "refresh already in progress" {
+                    "Artist albums refresh already in progress.".to_string()
+                } else {
+                    format!("Artist albums failed: {message}")
+                };
+                set_timed_status(state, status, 5);
             }
         }
         WorkerEvent::ArtistAlbumsRateLimited {
             artist_id,
             retry_after_secs,
         } => {
-            if state
-                .artist_page_data
-                .as_ref()
-                .is_some_and(|data| data.artist_id == artist_id)
+            if let Some(data) = state.artist_page_data.as_ref()
+                && data.artist_id == artist_id
             {
+                let has_cached_albums = !data.albums.is_empty();
                 state.artist_albums_loading = false;
                 state.artist_page_loading = false;
-                set_timed_status(
-                    state,
-                    format!("Artist albums rate limited. Try again in {retry_after_secs}s."),
-                    5,
-                );
+                let message = if has_cached_albums {
+                    format!(
+                        "Artist albums rate limited. Showing cached albums. Try again in {retry_after_secs}s."
+                    )
+                } else {
+                    format!("Artist albums rate limited. Try again in {retry_after_secs}s.")
+                };
+                set_timed_status(state, message, 5);
             }
         }
     }
@@ -398,8 +423,8 @@ mod tests {
         )
         .await;
 
-        let AppEvent::LoadContextTracks(sent) = app_rx.try_recv().unwrap() else {
-            panic!("expected LoadContextTracks");
+        let AppEvent::RefreshContextTracks(sent) = app_rx.try_recv().unwrap() else {
+            panic!("expected RefreshContextTracks");
         };
         assert_eq!(sent, context);
     }

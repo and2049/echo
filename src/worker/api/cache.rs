@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use crate::config::{ARTIST_ALBUMS_REFRESH_TTL, artist_album_metadata_complete};
 use crate::models::{Album, Artist, Track};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -83,6 +84,14 @@ impl SpotifyApiCache {
 
     pub fn artist_albums(&self, artist_id: &str) -> Option<Vec<Album>> {
         self.artist_albums.get(artist_id).and_then(Timed::get)
+    }
+
+    pub fn artist_albums_need_refresh(&self, artist_id: &str) -> Option<bool> {
+        let entry = self.artist_albums.get(artist_id)?;
+        Some(
+            entry.fetched_at.elapsed() > ARTIST_ALBUMS_REFRESH_TTL
+                || !artist_album_metadata_complete(&entry.value),
+        )
     }
 
     pub fn set_artist_albums(&mut self, artist_id: String, albums: Vec<Album>) {
