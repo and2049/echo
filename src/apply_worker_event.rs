@@ -61,6 +61,15 @@ pub async fn apply_worker_event(
                 state.show_local_library();
             }
         }
+        WorkerEvent::LocalPlaylistsLoaded(playlists) => {
+            state.local_playlists = playlists;
+            state.compute_library_view();
+            if let Some(context) = state.active_tracklist_context.clone()
+                && context.kind == crate::models::TrackListContextKind::LocalPlaylist
+            {
+                state.show_local_playlist(&context.id, context.title);
+            }
+        }
         WorkerEvent::TracksLoaded(tracks, context) => {
             let preserve_track_selection = state
                 .active_tracklist_context

@@ -162,7 +162,11 @@ impl TrackListContext {
     }
 
     pub fn can_modify_playlist(&self, user_id: Option<&String>) -> bool {
-        self.kind == TrackListContextKind::Playlist && self.owner_id.as_ref() == user_id
+        match self.kind {
+            TrackListContextKind::Playlist => self.owner_id.as_ref() == user_id,
+            TrackListContextKind::LocalPlaylist => true,
+            _ => false,
+        }
     }
 
     pub fn requires_worker_load(&self) -> bool {
@@ -315,6 +319,72 @@ pub struct LocalPlaylists {
     pub playlists: Vec<LocalPlaylist>,
 }
 
+impl LocalPlaylists {
+    pub fn to_library_playlists(&self) -> Vec<Playlist> {
+        self.playlists
+            .iter()
+            .map(|playlist| Playlist {
+                id: playlist.id.clone(),
+                name: playlist.name.clone(),
+                owner: "Local".to_string(),
+                owner_id: "local".to_string(),
+                image_url: None,
+            })
+            .collect()
+    }
+
+    pub fn tracks_for_playlist(&self, playlist_id: &str, library: &LocalLibrary) -> Vec<Track> {
+        let Some(playlist) = self.playlists.iter().find(|p| p.id == playlist_id) else {
+            return Vec::new();
+        };
+
+        playlist
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                LocalPlaylistEntry::LocalTrack { track_id } => library
+                    .tracks
+                    .iter()
+                    .find(|track| &track.id == track_id)
+                    .map(|track| Track {
+                        id: track.id.clone(),
+                        source: TrackSource::Local,
+                        local_path: Some(track.path.clone()),
+                        name: track.title.clone(),
+                        artist: track.artist.clone(),
+                        duration_ms: track.duration_ms,
+                        image_url: track
+                            .artwork_path
+                            .as_ref()
+                            .map(|path| path.to_string_lossy().to_string()),
+                        album_id: None,
+                        artist_id: None,
+                    }),
+                LocalPlaylistEntry::SpotifyTrack {
+                    track_id,
+                    title,
+                    artist,
+                    duration_ms,
+                    image_url,
+                    album_id,
+                    artist_id,
+                    ..
+                } => Some(Track {
+                    id: track_id.clone(),
+                    source: TrackSource::Spotify,
+                    local_path: None,
+                    name: title.clone(),
+                    artist: artist.clone(),
+                    duration_ms: *duration_ms,
+                    image_url: image_url.clone(),
+                    album_id: album_id.clone(),
+                    artist_id: artist_id.clone(),
+                }),
+            })
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LocalPlaylist {
     pub id: String,
@@ -340,6 +410,39 @@ pub enum LocalPlaylistEntry {
         album_id: Option<String>,
         artist_id: Option<String>,
     },
+}
+
+impl LocalPlaylistEntry {
+    pub fn from_track(track: &Track) -> Option<Self> {
+        match track.source {
+            TrackSource::Local => Some(Self::LocalTrack {
+                track_id: track.id.clone(),
+            }),
+            TrackSource::Spotify => Some(Self::SpotifyTrack {
+                track_id: track.id.clone(),
+                title: track.name.clone(),
+                artist: track.artist.clone(),
+                album: String::new(),
+                duration_ms: track.duration_ms,
+                image_url: track.image_url.clone(),
+                album_id: track.album_id.clone(),
+                artist_id: track.artist_id.clone(),
+            }),
+        }
+    }
+
+    pub fn track_id(&self) -> &str {
+        match self {
+            Self::LocalTrack { track_id } | Self::SpotifyTrack { track_id, .. } => track_id,
+        }
+    }
+}
+
+pub fn stable_local_playlist_id(name: &str, created_unix_secs: u64) -> String {
+    format!(
+        "local-playlist:{:016x}",
+        fnv1a_64(format!("{name}:{created_unix_secs}").as_bytes())
+    )
 }
 
 pub fn stable_local_track_id(path: &Path) -> String {
@@ -461,6 +564,62 @@ mod tests {
 
         assert_eq!(decoded_library.tracks[0].id, track_id);
         assert_eq!(decoded_playlists.playlists[0].entries.len(), 2);
+    }
+
+    #[test]
+    fn local_playlists_render_mixed_entries_as_tracks() {
+        let local_id = "local:one".to_string();
+        let library = LocalLibrary {
+            tracks: vec![LocalTrack {
+                id: local_id.clone(),
+                path: PathBuf::from("/music/local.wav"),
+                title: "Local Track".to_string(),
+                artist: "Local Artist".to_string(),
+                album: "Local Album".to_string(),
+                duration_ms: 1_000,
+                artwork_path: None,
+                file_size: 1,
+                modified_unix_secs: 2,
+            }],
+        };
+        let playlists = LocalPlaylists {
+            playlists: vec![LocalPlaylist {
+                id: "local-playlist:mixed".to_string(),
+                name: "Mixed".to_string(),
+                created_unix_secs: 1,
+                updated_unix_secs: 1,
+                entries: vec![
+                    LocalPlaylistEntry::LocalTrack {
+                        track_id: local_id.clone(),
+                    },
+                    LocalPlaylistEntry::SpotifyTrack {
+                        track_id: "spotify".to_string(),
+                        title: "Spotify Track".to_string(),
+                        artist: "Spotify Artist".to_string(),
+                        album: "Spotify Album".to_string(),
+                        duration_ms: 2_000,
+                        image_url: None,
+                        album_id: Some("album".to_string()),
+                        artist_id: Some("artist".to_string()),
+                    },
+                ],
+            }],
+        };
+
+        let tracks = playlists.tracks_for_playlist("local-playlist:mixed", &library);
+
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].source, TrackSource::Local);
+        assert_eq!(tracks[1].source, TrackSource::Spotify);
+        assert_eq!(tracks[1].name, "Spotify Track");
+    }
+
+    #[test]
+    fn local_playlist_context_can_be_modified_without_spotify_owner() {
+        let context =
+            TrackListContext::local_playlist("local-playlist:one".to_string(), "Local".to_string());
+
+        assert!(context.can_modify_playlist(None));
     }
 }
 

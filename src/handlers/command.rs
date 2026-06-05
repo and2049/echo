@@ -20,6 +20,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "album",
         "lang",
         "newplaylist",
+        "newlocalplaylist",
         "localpath",
         "rescanlocal",
         "rename",
@@ -357,6 +358,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             return Some(AppEvent::CreatePlaylist(name));
                         }
                     }
+                    "newlocalplaylist" => {
+                        let name = args.collect::<Vec<&str>>().join(" ");
+                        if !name.is_empty() {
+                            state.status_message =
+                                Some(format!("Creating local playlist '{}'...", name));
+                            state.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                            return Some(AppEvent::CreateLocalPlaylist(name));
+                        }
+                    }
                     "localpath" => {
                         let path_text = command_remainder(&cmd, "localpath");
                         if path_text.is_empty() {
@@ -513,5 +524,18 @@ mod tests {
             command_remainder("  localpath   /Users/sun/Music Library  ", "localpath"),
             "/Users/sun/Music Library"
         );
+    }
+
+    #[test]
+    fn newlocalplaylist_command_emits_local_playlist_event() {
+        let mut state = AppState::new();
+        state.command_buffer = "newlocalplaylist Road Mix".to_string();
+        let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+
+        let Some(AppEvent::CreateLocalPlaylist(name)) = handle_key(&mut state, &key) else {
+            panic!("expected CreateLocalPlaylist");
+        };
+
+        assert_eq!(name, "Road Mix");
     }
 }

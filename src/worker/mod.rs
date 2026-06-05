@@ -11,7 +11,10 @@ pub mod visualization;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
-use crate::models::{LocalLibrary, PlaybackItem, PlaybackTarget, Track, TrackSource};
+use crate::models::{
+    LocalLibrary, LocalPlaylist, LocalPlaylistEntry, PlaybackItem, PlaybackTarget, Track,
+    TrackSource, stable_local_playlist_id,
+};
 use api::SpotifyWorker;
 use local_playback::{LocalPlaybackEngine, LocalPlaybackSnapshot, RepeatMode};
 use rspotify::clients::OAuthClient;
@@ -117,6 +120,13 @@ fn resolve_local_queue_tracks(track_ids: &[String], library: &LocalLibrary) -> V
                 })
         })
         .collect()
+}
+
+fn current_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
@@ -803,14 +813,38 @@ impl Worker {
                                 }
                             }
                             AppEvent::AddTracksToPlaylist(playlist_id, track_ids) => {
-                                if let Some(ref sp) = spotify_opt {
+                                if playlist_id.starts_with("local-playlist:") {
+                                    let mut local_playlists = AppConfig::load_local_playlists();
+                                    if let Some(playlist) = local_playlists.playlists.iter_mut().find(|playlist| playlist.id == playlist_id) {
+                                        let entries: Vec<_> = track_ids
+                                            .iter()
+                                            .filter_map(LocalPlaylistEntry::from_track)
+                                            .collect();
+                                        let count = entries.len();
+                                        playlist.entries.extend(entries);
+                                        playlist.updated_unix_secs = current_unix_secs();
+                                        let _ = AppConfig::save_local_playlists(&local_playlists);
+                                        let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                                        let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                    } else {
+                                        let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                            label: "Local playlist".to_string(),
+                                            message: "playlist not found".to_string(),
+                                        }).await;
+                                    }
+                                } else if track_ids.iter().any(|track| track.source == TrackSource::Local) {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Spotify playlist".to_string(),
+                                        message: "local tracks cannot be added to Spotify playlists".to_string(),
+                                    }).await;
+                                } else if let Some(ref sp) = spotify_opt {
                                     use rspotify::prelude::OAuthClient;
                                     use rspotify::model::{PlaylistId, PlayableId, TrackId};
 
                                     if let Ok(pid) = PlaylistId::from_id(&playlist_id) {
                                         let mut items = Vec::new();
-                                        for t_id in &track_ids {
-                                            if let Ok(id) = TrackId::from_id(t_id) {
+                                        for track in &track_ids {
+                                            if let Ok(id) = TrackId::from_id(&track.id) {
                                                 items.push(PlayableId::Track(id));
                                             }
                                         }
@@ -832,7 +866,19 @@ impl Worker {
                                 }
                             }
                             AppEvent::RemoveTracksFromPlaylist(playlist_id, track_ids) => {
-                                if let Some(ref sp) = spotify_opt {
+                                if playlist_id.starts_with("local-playlist:") {
+                                    let mut local_playlists = AppConfig::load_local_playlists();
+                                    if let Some(playlist) = local_playlists.playlists.iter_mut().find(|playlist| playlist.id == playlist_id) {
+                                        for track_id in &track_ids {
+                                            if let Some(pos) = playlist.entries.iter().position(|entry| entry.track_id() == track_id) {
+                                                playlist.entries.remove(pos);
+                                            }
+                                        }
+                                        playlist.updated_unix_secs = current_unix_secs();
+                                        let _ = AppConfig::save_local_playlists(&local_playlists);
+                                        let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                                    }
+                                } else if let Some(ref sp) = spotify_opt {
                                     use rspotify::prelude::OAuthClient;
                                     use rspotify::model::{PlaylistId, PlayableId, TrackId};
 
@@ -937,8 +983,30 @@ impl Worker {
                                     });
                                 }
                             }
+                            AppEvent::CreateLocalPlaylist(name) => {
+                                let mut local_playlists = AppConfig::load_local_playlists();
+                                let now = current_unix_secs();
+                                let id = stable_local_playlist_id(&name, now);
+                                local_playlists.playlists.push(LocalPlaylist {
+                                    id,
+                                    name,
+                                    created_unix_secs: now,
+                                    updated_unix_secs: now,
+                                    entries: Vec::new(),
+                                });
+                                let _ = AppConfig::save_local_playlists(&local_playlists);
+                                let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                            }
                             AppEvent::RenamePlaylist(playlist_id, new_name) => {
-                                if let Some(ref sp) = spotify_opt
+                                if playlist_id.starts_with("local-playlist:") {
+                                    let mut local_playlists = AppConfig::load_local_playlists();
+                                    if let Some(playlist) = local_playlists.playlists.iter_mut().find(|playlist| playlist.id == playlist_id) {
+                                        playlist.name = new_name;
+                                        playlist.updated_unix_secs = current_unix_secs();
+                                        let _ = AppConfig::save_local_playlists(&local_playlists);
+                                        let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                                    }
+                                } else if let Some(ref sp) = spotify_opt
                                     && let Ok(pid) = rspotify::model::PlaylistId::from_id(&playlist_id) {
                                         let res = sp.client.playlist_change_detail(
                                             pid,
@@ -955,8 +1023,15 @@ impl Worker {
                                     }
                             }
                             AppEvent::DeletePlaylists(playlist_ids) => {
+                                let has_local = playlist_ids.iter().any(|id| id.starts_with("local-playlist:"));
+                                if has_local {
+                                    let mut local_playlists = AppConfig::load_local_playlists();
+                                    local_playlists.playlists.retain(|playlist| !playlist_ids.contains(&playlist.id));
+                                    let _ = AppConfig::save_local_playlists(&local_playlists);
+                                    let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                                }
                                 if let Some(ref sp) = spotify_opt {
-                                    for id_str in &playlist_ids {
+                                    for id_str in playlist_ids.iter().filter(|id| !id.starts_with("local-playlist:")) {
                                         if let Ok(pid) = rspotify::model::PlaylistId::from_id(id_str) {
                                             let _ = sp.client.library_remove([rspotify::model::LibraryId::Playlist(pid)]).await;
                                             invalidate_playlist_context_cache(id_str);
@@ -1031,7 +1106,18 @@ impl Worker {
                                 }
                             }
                             AppEvent::ToggleTrackLike(track_id, like) => {
-                                if let Some(ref sp) = spotify_opt {
+                                if track_id.starts_with("local:") {
+                                    let mut cache = AppConfig::load_cache();
+                                    if like {
+                                        cache.liked_tracks.insert(track_id.clone());
+                                    } else {
+                                        cache.liked_tracks.remove(&track_id);
+                                    }
+                                    let _ = AppConfig::save_cache(&cache);
+                                    let mut update = std::collections::HashMap::new();
+                                    update.insert(track_id, like);
+                                    let _ = self.tx.send(WorkerEvent::LikedStatusUpdate(update)).await;
+                                } else if let Some(ref sp) = spotify_opt {
                                     use rspotify::model::{TrackId, LibraryId};
                                     if let Ok(tid) = TrackId::from_id(&track_id) {
                                         let lib_id = LibraryId::Track(tid);
@@ -1040,6 +1126,13 @@ impl Worker {
                                         } else {
                                             let _ = sp.client.library_remove([lib_id]).await;
                                         }
+                                        let mut cache = AppConfig::load_cache();
+                                        if like {
+                                            cache.liked_tracks.insert(track_id.clone());
+                                        } else {
+                                            cache.liked_tracks.remove(&track_id);
+                                        }
+                                        let _ = AppConfig::save_cache(&cache);
                                     }
                                 }
                             }

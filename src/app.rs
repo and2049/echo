@@ -394,6 +394,13 @@ impl AppState {
             });
         }
 
+        for playlist in self.local_playlists.to_library_playlists() {
+            view.push(LibraryNode::Playlist {
+                playlist,
+                indent: 0,
+            });
+        }
+
         let pinned_set: HashSet<String> = self.library_config.pinned.iter().cloned().collect();
         let mut folder_playlists: HashSet<String> = HashSet::new();
 
@@ -479,6 +486,19 @@ impl AppState {
         let context = TrackListContext::local_library();
         self.active_view = ActiveView::TrackList;
         self.tracks = self.local_library.to_tracks();
+        self.selected_track_index = 0;
+        self.active_tracklist_context = Some(context);
+        self.tracklist_image_url = None;
+        self.clear_header_image();
+        self.clear_pending_artist_page();
+    }
+
+    pub fn show_local_playlist(&mut self, playlist_id: &str, title: String) {
+        let context = TrackListContext::local_playlist(playlist_id.to_string(), title);
+        self.active_view = ActiveView::TrackList;
+        self.tracks = self
+            .local_playlists
+            .tracks_for_playlist(playlist_id, &self.local_library);
         self.selected_track_index = 0;
         self.active_tracklist_context = Some(context);
         self.tracklist_image_url = None;
@@ -595,6 +615,28 @@ mod tests {
             node,
             crate::models::LibraryNode::Playlist { playlist, .. }
                 if playlist.id == "local-library"
+        )));
+    }
+
+    #[test]
+    fn local_playlists_are_shown_in_library_view() {
+        let mut state = AppState::new();
+        state.local_playlists = crate::models::LocalPlaylists {
+            playlists: vec![crate::models::LocalPlaylist {
+                id: "local-playlist:one".to_string(),
+                name: "Road".to_string(),
+                created_unix_secs: 1,
+                updated_unix_secs: 1,
+                entries: Vec::new(),
+            }],
+        };
+
+        state.compute_library_view();
+
+        assert!(state.library_view.iter().any(|node| matches!(
+            node,
+            crate::models::LibraryNode::Playlist { playlist, .. }
+                if playlist.id == "local-playlist:one" && playlist.owner_id == "local"
         )));
     }
 }
