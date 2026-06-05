@@ -83,6 +83,7 @@ echo is heavily keyboard-driven.
 - `v`: Enter Visual mode for multi-selection
 - `d` (double press): Delete playlist/folder, or remove a track from your custom playlist
 - `x`: Cut playlist (to move into a folder)
+- `R` (Shift + r): Force refresh
 
 ## Commands
 While in Command Mode (`:`), you can use the following:
