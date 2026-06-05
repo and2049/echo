@@ -10,10 +10,10 @@ pub fn play_selected(state: &AppState) -> Option<AppEvent> {
 }
 
 pub fn play_event(track: &Track, context: &TrackListContext) -> Option<AppEvent> {
+    let target = context.playback_target_for_track(track)?;
     Some(AppEvent::PlayTrack {
-        context_id: context.playback_context_id().to_string(),
+        target,
         track_id: track.id.clone(),
-        is_album: context.is_album(),
         title: track.name.clone(),
         artist: track.artist.clone(),
         duration_ms: track.duration_ms,
@@ -45,6 +45,8 @@ mod tests {
     fn generated_context_playback_never_masquerades_as_playlist() {
         let track = Track {
             id: "track".to_string(),
+            source: crate::models::TrackSource::Spotify,
+            local_path: None,
             name: "Track".to_string(),
             artist: "Artist".to_string(),
             artist_id: None,
@@ -54,17 +56,17 @@ mod tests {
         };
         let context = TrackListContext::generated("TOP_TRACKS", "Top Tracks");
 
-        let Some(AppEvent::PlayTrack {
-            context_id,
-            is_album,
-            ..
-        }) = play_event(&track, &context)
+        let Some(AppEvent::PlayTrack { target, .. }) = play_event(&track, &context)
         else {
             panic!("expected play event");
         };
 
         assert_eq!(context.kind, TrackListContextKind::Generated);
-        assert_eq!(context_id, "LIKED_SONGS");
-        assert!(!is_album);
+        assert_eq!(
+            target,
+            crate::models::PlaybackTarget::SpotifyTrack {
+                track_id: "track".to_string()
+            }
+        );
     }
 }

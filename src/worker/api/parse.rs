@@ -1,4 +1,4 @@
-use crate::models::{Album, Artist, Track};
+use crate::models::{Album, Artist, Track, TrackSource};
 
 pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     if track
@@ -13,6 +13,8 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     let artists = track.get("artists").and_then(|v| v.as_array());
     Some(Track {
         id,
+        source: TrackSource::Spotify,
+        local_path: None,
         name: track.get("name")?.as_str()?.to_string(),
         artist: artists
             .map(|artists| {

@@ -20,6 +20,8 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "album",
         "lang",
         "newplaylist",
+        "localpath",
+        "rescanlocal",
         "rename",
         "pixelate",
     ];
@@ -60,6 +62,14 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
             .map(String::from)
             .collect()
     }
+}
+
+fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
+    command
+        .trim()
+        .strip_prefix(command_name)
+        .map(str::trim)
+        .unwrap_or_default()
 }
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
@@ -338,6 +348,55 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             return Some(AppEvent::CreatePlaylist(name));
                         }
                     }
+                    "localpath" => {
+                        let path_text = command_remainder(&cmd, "localpath");
+                        if path_text.is_empty() {
+                            state.status_message =
+                                Some("Usage: localpath <absolute-folder-path>".to_string());
+                            state.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        } else {
+                            let path = std::path::PathBuf::from(path_text);
+                            if !path.is_absolute() {
+                                state.status_message =
+                                    Some("Local path must be absolute".to_string());
+                                state.status_message_expiry = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                                );
+                            } else if !path.is_dir() {
+                                state.status_message = Some(
+                                    "Local path must be an existing directory".to_string(),
+                                );
+                                state.status_message_expiry = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                                );
+                            } else {
+                                state.library_config.local_music_dir = Some(path.clone());
+                                state.save_library_config();
+                                state.compute_library_view();
+                                state.status_message =
+                                    Some(format!("Scanning local music in {}...", path.display()));
+                                state.status_message_expiry = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                                );
+                                return Some(AppEvent::ScanLocalLibrary(path));
+                            }
+                        }
+                    }
+                    "rescanlocal" => {
+                        if let Some(path) = state.library_config.local_music_dir.clone() {
+                            state.status_message =
+                                Some(format!("Rescanning local music in {}...", path.display()));
+                            state.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                            return Some(AppEvent::RescanLocalLibrary);
+                        } else {
+                            state.status_message =
+                                Some("No local music path configured".to_string());
+                            state.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        }
+                    }
                     "rename" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty()
@@ -426,4 +485,25 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         _ => {}
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localpath_remainder_preserves_spaces() {
+        assert_eq!(
+            command_remainder("localpath C:\\Users\\sun\\Music Folder", "localpath"),
+            "C:\\Users\\sun\\Music Folder"
+        );
+    }
+
+    #[test]
+    fn localpath_remainder_trims_outer_whitespace() {
+        assert_eq!(
+            command_remainder("  localpath   /Users/sun/Music Library  ", "localpath"),
+            "/Users/sun/Music Library"
+        );
+    }
 }

@@ -70,6 +70,8 @@ async fn main() -> Result<()> {
     if config.spotify_credentials.is_some() {
         state.mode = app::AppMode::Authenticating;
         let _ = app_tx.send(AppEvent::StartAuth).await;
+    } else if config.library.local_music_dir.is_some() {
+        state.mode = app::AppMode::Normal;
     } else {
         state.mode = app::AppMode::Setup;
     }

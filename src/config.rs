@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::models::{
-    Album, Artist, ArtistPageData, Playlist, Track, TrackListContext, TrackListContextKind,
+    Album, Artist, ArtistPageData, LocalLibrary, LocalPlaylists, Playlist, Track,
+    TrackListContext, TrackListContextKind,
 };
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -285,7 +286,9 @@ pub fn context_cache_key(context: &TrackListContext) -> Option<String> {
     match context.kind {
         TrackListContextKind::Playlist => Some(format!("playlist:{}", context.id)),
         TrackListContextKind::Album => Some(format!("album:{}", context.id)),
-        TrackListContextKind::Generated => None,
+        TrackListContextKind::Generated
+        | TrackListContextKind::LocalLibrary
+        | TrackListContextKind::LocalPlaylist => None,
     }
 }
 
@@ -293,7 +296,9 @@ fn context_cache_ttl(context: &TrackListContext) -> Option<Duration> {
     match context.kind {
         TrackListContextKind::Playlist => Some(PLAYLIST_TRACKS_CACHE_TTL),
         TrackListContextKind::Album => Some(ALBUM_TRACKS_CACHE_TTL),
-        TrackListContextKind::Generated => None,
+        TrackListContextKind::Generated
+        | TrackListContextKind::LocalLibrary
+        | TrackListContextKind::LocalPlaylist => None,
     }
 }
 
@@ -301,7 +306,9 @@ fn context_refresh_ttl(context: &TrackListContext) -> Duration {
     match context.kind {
         TrackListContextKind::Playlist => PLAYLIST_TRACKS_REFRESH_TTL,
         TrackListContextKind::Album => ALBUM_TRACKS_REFRESH_TTL,
-        TrackListContextKind::Generated => Duration::MAX,
+        TrackListContextKind::Generated
+        | TrackListContextKind::LocalLibrary
+        | TrackListContextKind::LocalPlaylist => Duration::MAX,
     }
 }
 
@@ -335,6 +342,8 @@ pub struct LibraryConfig {
     pub vis_bins: usize,
     #[serde(default = "default_enable_visualizer")]
     pub enable_visualizer: bool,
+    #[serde(default)]
+    pub local_music_dir: Option<PathBuf>,
 }
 
 fn default_enable_visualizer() -> bool {
@@ -358,6 +367,7 @@ impl Default for LibraryConfig {
             condensed_lyrics_enabled: false,
             vis_bins: 7,
             enable_visualizer: false,
+            local_music_dir: None,
         }
     }
 }
@@ -426,6 +436,58 @@ impl AppConfig {
             fs::create_dir_all(parent)?;
         }
         let contents = serde_json::to_string(cache)?;
+        fs::write(path, contents)?;
+        Ok(())
+    }
+
+    pub fn local_library_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("echo");
+        path.push("local_library.json");
+        path
+    }
+
+    pub fn load_local_library() -> LocalLibrary {
+        let path = Self::local_library_path();
+        if let Ok(contents) = fs::read_to_string(&path) {
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            LocalLibrary::default()
+        }
+    }
+
+    pub fn save_local_library(library: &LocalLibrary) -> Result<()> {
+        let path = Self::local_library_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(library)?;
+        fs::write(path, contents)?;
+        Ok(())
+    }
+
+    pub fn local_playlists_path() -> PathBuf {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("echo");
+        path.push("local_playlists.json");
+        path
+    }
+
+    pub fn load_local_playlists() -> LocalPlaylists {
+        let path = Self::local_playlists_path();
+        if let Ok(contents) = fs::read_to_string(&path) {
+            serde_json::from_str(&contents).unwrap_or_default()
+        } else {
+            LocalPlaylists::default()
+        }
+    }
+
+    pub fn save_local_playlists(playlists: &LocalPlaylists) -> Result<()> {
+        let path = Self::local_playlists_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let contents = serde_json::to_string_pretty(playlists)?;
         fs::write(path, contents)?;
         Ok(())
     }
@@ -669,6 +731,21 @@ error = "Red"
         cache.set_context_tracks(context.clone(), Vec::new());
 
         assert!(cache.get_context_tracks(&context).is_none());
+        assert!(cache.context_tracks.is_empty());
+    }
+
+    #[test]
+    fn local_contexts_are_not_persisted_as_spotify_track_contexts() {
+        let mut cache = CacheData::default();
+        let library = TrackListContext::local_library();
+        let playlist =
+            TrackListContext::local_playlist("local-playlist:one".to_string(), "Local".to_string());
+
+        cache.set_context_tracks(library.clone(), Vec::new());
+        cache.set_context_tracks(playlist.clone(), Vec::new());
+
+        assert!(cache.get_context_tracks(&library).is_none());
+        assert!(cache.get_context_tracks(&playlist).is_none());
         assert!(cache.context_tracks.is_empty());
     }
 

@@ -476,13 +476,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     if state.selected_playlist_index < state.library_view.len() {
                         match &state.library_view[state.selected_playlist_index] {
                             crate::models::LibraryNode::Playlist { playlist, .. } => {
-                                Some(TrackListContext::playlist(
-                                    playlist.id.clone(),
-                                    playlist.name.clone(),
-                                    playlist.owner.clone(),
-                                    playlist.owner_id.clone(),
-                                    playlist.image_url.clone(),
-                                ))
+                                if playlist.id == "local-library" {
+                                    state.show_local_library();
+                                    None
+                                } else {
+                                    Some(TrackListContext::playlist(
+                                        playlist.id.clone(),
+                                        playlist.name.clone(),
+                                        playlist.owner.clone(),
+                                        playlist.owner_id.clone(),
+                                        playlist.image_url.clone(),
+                                    ))
+                                }
                             }
                             crate::models::LibraryNode::Folder(f) => {
                                 let folder_name = f.name.clone();
@@ -518,9 +523,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             // Play track directly (no context — use URI playback)
                             let track_id = t.id.clone();
                             return Some(AppEvent::PlayTrack {
-                                context_id: "LIKED_SONGS".to_string(), // URI-only play
+                                target: crate::models::PlaybackTarget::SpotifyTrack {
+                                    track_id: track_id.clone(),
+                                },
                                 track_id,
-                                is_album: false,
                                 title: t.name.clone(),
                                 artist: t.artist.clone(),
                                 duration_ms: t.duration_ms,
@@ -616,6 +622,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         if playlist.id == "LIKED_SONGS" {
                             return None;
                         }
+                        if playlist.id == "local-library" {
+                            return None;
+                        }
 
                         if key.code == KeyCode::Char('x') {
                             // Put in cut register
@@ -665,6 +674,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let t = &state.tracks[state.selected_track_index];
                 Some(crate::models::ActionMenuContext {
                     track_id: t.id.clone(),
+                    source: t.source,
                     track_name: t.name.clone(),
                     album_id: t.album_id.clone(),
                     artist_id: t.artist_id.clone(),
@@ -676,6 +686,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let t = &state.queue[state.selected_queue_index];
                 Some(crate::models::ActionMenuContext {
                     track_id: t.id.clone(),
+                    source: t.source,
                     track_name: t.name.clone(),
                     album_id: t.album_id.clone(),
                     artist_id: t.artist_id.clone(),
@@ -688,6 +699,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let t = &state.search_results.tracks[state.selected_search_index];
                 Some(crate::models::ActionMenuContext {
                     track_id: t.id.clone(),
+                    source: t.source,
                     track_name: t.name.clone(),
                     album_id: t.album_id.clone(),
                     artist_id: t.artist_id.clone(),
@@ -697,6 +709,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 // Library / other views — use the currently playing track
                 Some(crate::models::ActionMenuContext {
                     track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
+                    source: crate::models::TrackSource::Spotify,
                     track_name: state.playback.playing_track_title.clone(),
                     album_id: state.playback.playing_track_album_id.clone(),
                     artist_id: state.playback.playing_track_artist_id.clone(),
@@ -775,7 +788,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     &state.library_view[state.selected_playlist_index]
             {
                 let id = &playlist.id;
-                if id == "LIKED_SONGS" {
+                if id == "LIKED_SONGS" || id == "local-library" {
                     return None;
                 }
                 if state.library_config.pinned.contains(id) {

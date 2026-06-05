@@ -1,5 +1,5 @@
 use super::SpotifyWorker;
-use crate::models::{PlaybackItem, Track};
+use crate::models::{PlaybackItem, Track, TrackSource};
 use anyhow::Result;
 use rspotify::AuthCodeSpotify;
 use rspotify::model::Id;
@@ -73,6 +73,8 @@ impl SpotifyWorker {
 
         Some(PlaybackItem {
             id,
+            source: TrackSource::Spotify,
+            local_path: None,
             title,
             artist,
             duration_ms,
@@ -100,6 +102,8 @@ impl SpotifyWorker {
                 let id = track.id.as_ref()?.id().to_string();
                 Some(PlaybackItem {
                     id,
+                    source: TrackSource::Spotify,
+                    local_path: None,
                     title: track.name.clone(),
                     artist: track
                         .artists
@@ -115,6 +119,8 @@ impl SpotifyWorker {
             }
             rspotify::model::PlayableItem::Episode(episode) => Some(PlaybackItem {
                 id: episode.id.id().to_string(),
+                source: TrackSource::Spotify,
+                local_path: None,
                 title: episode.name.clone(),
                 artist: episode.show.name.clone(),
                 duration_ms: episode.duration.num_milliseconds() as u32,
@@ -407,6 +413,8 @@ impl SpotifyWorker {
                     let artist_id = artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string());
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                        source: TrackSource::Spotify,
+                        local_path: None,
                         name: track.name,
                         artist: artists
                             .into_iter()
@@ -478,6 +486,8 @@ impl SpotifyWorker {
 
                     out.push(Track {
                         id,
+                        source: TrackSource::Spotify,
+                        local_path: None,
                         name,
                         artist,
                         duration_ms,

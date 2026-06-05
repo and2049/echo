@@ -1,15 +1,17 @@
-use crate::models::{PlaybackItem, Playlist, SearchResults, Track, TrackListContext};
+use crate::models::{PlaybackItem, PlaybackTarget, Playlist, SearchResults, Track, TrackListContext};
 use crossterm::event::KeyEvent;
+use std::path::PathBuf;
 
 pub enum AppEvent {
     Key(KeyEvent),
     LoadContextTracks(TrackListContext),
     RefreshContextTracks(TrackListContext),
     RefreshLibraryLists,
+    ScanLocalLibrary(PathBuf),
+    RescanLocalLibrary,
     PlayTrack {
-        context_id: String,
+        target: PlaybackTarget,
         track_id: String,
-        is_album: bool,
         title: String,
         artist: String,
         duration_ms: u32,
@@ -68,6 +70,10 @@ pub enum WorkerEvent {
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),
+    LocalLibraryLoaded {
+        library: crate::models::LocalLibrary,
+        report: crate::models::LocalScanReport,
+    },
     TracksLoaded(Vec<Track>, TrackListContext),
     TracksLoadFailed {
         context_id: String,

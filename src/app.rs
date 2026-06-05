@@ -1,4 +1,7 @@
-use crate::models::{ActionMenuContext, ArtistPageData, Playlist, SearchResults, Track, TrackListContext};
+use crate::models::{
+    ActionMenuContext, ArtistPageData, LocalLibrary, LocalPlaylists, Playlist, SearchResults,
+    Track, TrackListContext,
+};
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 
@@ -145,6 +148,8 @@ pub struct AppState {
     pub active_view: ActiveView,
     pub is_running: bool,
     pub playlists: Vec<Playlist>,
+    pub local_library: LocalLibrary,
+    pub local_playlists: LocalPlaylists,
     pub library_config: crate::config::LibraryConfig,
     pub library_view: Vec<crate::models::LibraryNode>,
     pub saved_albums: Vec<crate::models::Album>,
@@ -224,6 +229,12 @@ impl AppState {
         let config = crate::config::AppConfig::load();
         let condensed_lyrics_enabled = config.library.condensed_lyrics_enabled;
         let vis_bins = config.library.vis_bins;
+        let has_local_music_dir = config.library.local_music_dir.is_some();
+        let initial_mode = if config.spotify_credentials.is_none() && has_local_music_dir {
+            AppMode::Normal
+        } else {
+            AppMode::Setup
+        };
 
         let themes = crate::config::load_themes().unwrap_or_else(|_| {
             let mut fallback = std::collections::HashMap::new();
@@ -249,10 +260,12 @@ impl AppState {
         let active_theme = ResolvedTheme::from_theme(&active_theme_config);
 
         Self {
-            mode: AppMode::Setup,
+            mode: initial_mode,
             active_view: ActiveView::Library,
             is_running: true,
             playlists: vec![],
+            local_library: crate::config::AppConfig::load_local_library(),
+            local_playlists: crate::config::AppConfig::load_local_playlists(),
             library_config: config.library,
             library_view: Vec::new(),
             saved_albums: Vec::new(),
@@ -368,6 +381,19 @@ impl AppState {
             indent: 0,
         });
 
+        if self.library_config.local_music_dir.is_some() || !self.local_library.tracks.is_empty() {
+            view.push(LibraryNode::Playlist {
+                playlist: crate::models::Playlist {
+                    id: "local-library".to_string(),
+                    name: "Local Music".to_string(),
+                    owner: "Local".to_string(),
+                    owner_id: "local".to_string(),
+                    image_url: None,
+                },
+                indent: 0,
+            });
+        }
+
         let pinned_set: HashSet<String> = self.library_config.pinned.iter().cloned().collect();
         let mut folder_playlists: HashSet<String> = HashSet::new();
 
@@ -442,6 +468,17 @@ impl AppState {
     pub fn show_generated_tracks(&mut self, tracks: Vec<Track>, context: TrackListContext) {
         self.active_view = ActiveView::TrackList;
         self.tracks = tracks;
+        self.selected_track_index = 0;
+        self.active_tracklist_context = Some(context);
+        self.tracklist_image_url = None;
+        self.clear_header_image();
+        self.clear_pending_artist_page();
+    }
+
+    pub fn show_local_library(&mut self) {
+        let context = TrackListContext::local_library();
+        self.active_view = ActiveView::TrackList;
+        self.tracks = self.local_library.to_tracks();
         self.selected_track_index = 0;
         self.active_tracklist_context = Some(context);
         self.tracklist_image_url = None;
@@ -535,5 +572,29 @@ mod tests {
 
         assert_eq!(state.pending_artist_page_id, None);
         assert!(!state.artist_page_loading);
+    }
+
+    #[test]
+    fn local_music_entry_is_shown_when_library_has_tracks() {
+        let mut state = AppState::new();
+        state.local_library.tracks = vec![crate::models::LocalTrack {
+            id: "local:track".to_string(),
+            path: std::path::PathBuf::from("/music/track.mp3"),
+            title: "Track".to_string(),
+            artist: String::new(),
+            album: String::new(),
+            duration_ms: 0,
+            artwork_path: None,
+            file_size: 1,
+            modified_unix_secs: 1,
+        }];
+
+        state.compute_library_view();
+
+        assert!(state.library_view.iter().any(|node| matches!(
+            node,
+            crate::models::LibraryNode::Playlist { playlist, .. }
+                if playlist.id == "local-library"
+        )));
     }
 }

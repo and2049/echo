@@ -3,13 +3,14 @@ pub mod artist_page;
 pub mod audio;
 pub mod browse;
 pub mod errors;
+pub mod local_files;
 pub mod media;
 pub mod tracks;
 pub mod visualization;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
-use crate::models::PlaybackItem;
+use crate::models::{PlaybackItem, PlaybackTarget, TrackSource};
 use api::SpotifyWorker;
 use rspotify::clients::OAuthClient;
 use std::sync::{
@@ -372,14 +373,77 @@ impl Worker {
                                     spawn_refresh_library_lists(sp.clone(), self.tx.clone());
                                 }
                             }
-                            AppEvent::PlayTrack { context_id, track_id, is_album, title, artist, duration_ms, image_url, album_id } => {
+                            AppEvent::ScanLocalLibrary(path) => {
+                                let previous = AppConfig::load_local_library();
+                                match local_files::scan_local_library(&path, &previous) {
+                                    Ok((library, report)) => {
+                                        let _ = AppConfig::save_local_library(&library);
+                                        let _ = self.tx.send(WorkerEvent::LocalLibraryLoaded {
+                                            library,
+                                            report,
+                                        }).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                            label: "Local scan".to_string(),
+                                            message: e.to_string(),
+                                        }).await;
+                                    }
+                                }
+                            }
+                            AppEvent::RescanLocalLibrary => {
+                                let config = AppConfig::load();
+                                if let Some(path) = config.library.local_music_dir {
+                                    let previous = AppConfig::load_local_library();
+                                    match local_files::scan_local_library(&path, &previous) {
+                                        Ok((library, report)) => {
+                                            let _ = AppConfig::save_local_library(&library);
+                                            let _ = self.tx.send(WorkerEvent::LocalLibraryLoaded {
+                                                library,
+                                                report,
+                                            }).await;
+                                        }
+                                        Err(e) => {
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Local scan".to_string(),
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                } else {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Local scan".to_string(),
+                                        message: "no local music path configured".to_string(),
+                                    }).await;
+                                }
+                            }
+                            AppEvent::PlayTrack { target, track_id, title, artist, duration_ms, image_url, album_id } => {
+                                if matches!(target, PlaybackTarget::LocalTrack { .. }) {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Local playback".to_string(),
+                                        message: "not implemented yet".to_string(),
+                                    }).await;
+                                    continue;
+                                }
+
                                 if let Some(ref mut sp) = spotify_opt {
-                                    match sp.play_track(&context_id, &track_id, is_album).await {
+                                    let play_result = match &target {
+                                        PlaybackTarget::SpotifyContext { context_id, is_album } => {
+                                            sp.play_track(context_id, &track_id, *is_album).await
+                                        }
+                                        PlaybackTarget::SpotifyTrack { track_id } => {
+                                            sp.play_track("LIKED_SONGS", track_id, false).await
+                                        }
+                                        PlaybackTarget::LocalTrack { .. } => unreachable!(),
+                                    };
+                                    match play_result {
                                         Ok(_) => {
                                             is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
                                             current_track_id = Some(track_id.clone());
                                             let item = PlaybackItem {
                                                 id: track_id,
+                                                source: TrackSource::Spotify,
+                                                local_path: None,
                                                 title: title.clone(),
                                                 artist: artist.clone(),
                                                 duration_ms,

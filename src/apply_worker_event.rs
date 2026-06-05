@@ -36,6 +36,29 @@ pub async fn apply_worker_event(
         WorkerEvent::AlbumsLoaded(albums) => {
             state.saved_albums = albums;
         }
+        WorkerEvent::LocalLibraryLoaded { library, report } => {
+            state.local_library = library;
+            state.compute_library_view();
+            set_timed_status(
+                state,
+                format!(
+                    "Local scan: {} files, {} added, {} updated, {} removed, {} skipped.",
+                    report.files_found,
+                    report.tracks_added,
+                    report.tracks_updated,
+                    report.tracks_removed,
+                    report.skipped
+                ),
+                5,
+            );
+            if state
+                .active_tracklist_context
+                .as_ref()
+                .is_some_and(|context| context.kind == crate::models::TrackListContextKind::LocalLibrary)
+            {
+                state.show_local_library();
+            }
+        }
         WorkerEvent::TracksLoaded(tracks, context) => {
             let preserve_track_selection = state
                 .active_tracklist_context

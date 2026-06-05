@@ -34,6 +34,8 @@ impl SpotifyWorker {
                     let album_id = t.album.id.map(|id| id.id().to_string());
                     Some(crate::models::SearchTrack {
                         id,
+                        source: crate::models::TrackSource::Spotify,
+                        local_path: None,
                         name,
                         artist,
                         album,
