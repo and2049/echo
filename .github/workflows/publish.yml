@@ -95,15 +95,19 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          CHANGELOG: ${{ inputs.changelog }}
         run: |
           mkdir -p release-assets
           test -d artifacts
           find artifacts -type f -exec cp -v {} release-assets/ \;
           test "$(find release-assets -type f | wc -l)" -gt 0
 
-          if [ -n "$CHANGELOG" ]; then
-            printf '%b\n' "$CHANGELOG" > release_notes.txt
+          NOTES="${{ inputs.changelog }}"
+          if [ -n "$NOTES" ]; then
+            if printf '%s' "$NOTES" | base64 -d > release_notes.txt 2>/dev/null; then
+              :
+            else
+              printf '%s\n' "$NOTES" > release_notes.txt
+            fi
             gh release create v${{ inputs.version }} \
               --title "v${{ inputs.version }}" \
               --notes-file release_notes.txt \
