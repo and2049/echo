@@ -21,8 +21,9 @@ impl SpotifyWorker {
                 .filter_map(|t| {
                     let id = t.id?.id().to_string();
                     let name = t.name;
-                    let artist = t
-                        .artists
+                    let artists = t.artists;
+                    let artist_id = artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string());
+                    let artist = artists
                         .into_iter()
                         .map(|a| a.name)
                         .collect::<Vec<_>>()
@@ -39,6 +40,7 @@ impl SpotifyWorker {
                         duration_ms,
                         image_url,
                         album_id,
+                        artist_id,
                     })
                 })
                 .collect();

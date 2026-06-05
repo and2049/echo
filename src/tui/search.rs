@@ -40,9 +40,15 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
         )
     };
     let ar_title = if state.active_search_tab == SearchTab::Artists {
-        "[Artists]".to_string()
+        format!(
+            "[{}]",
+            crate::i18n::t("ui.artists", &state.library_config.language)
+        )
     } else {
-        " Artists ".to_string()
+        format!(
+            " {} ",
+            crate::i18n::t("ui.artists", &state.library_config.language)
+        )
     };
     let tab_title = format!("{} {} {}", t_title, a_title, ar_title);
 
@@ -186,7 +192,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             frame.render_stateful_widget(table, inner, &mut ts);
         }
         SearchTab::Artists => {
-            let header = Row::new(vec!["Artist"]).style(header_style).height(1);
+            let header = Row::new(vec![crate::i18n::t("ui.artist", &state.library_config.language)]).style(header_style).height(1);
             let rows: Vec<Row> = state
                 .search_results
                 .artists

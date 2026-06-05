@@ -390,7 +390,79 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
+    render_action_menu(frame, state);
     render_lyrics_modal(frame, state);
+}
+
+pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
+    if !state.action_menu_open {
+        return;
+    }
+
+    let ctx = match &state.action_menu_context {
+        Some(c) => c,
+        None => return,
+    };
+
+    // Define the 5 actions; mark unavailable ones (no album/artist id) as dimmed.
+    let is_liked = state.liked_tracks.contains(&ctx.track_id);
+    let lang = &state.library_config.language;
+    let lbl_album = crate::i18n::t("actions.go_to_album", lang);
+    let lbl_artist = crate::i18n::t("actions.go_to_artist", lang);
+    let lbl_playlist = crate::i18n::t("actions.add_to_playlist", lang);
+    let lbl_queue = crate::i18n::t("actions.add_to_queue", lang);
+    let lbl_unlike = crate::i18n::t("actions.unlike_track", lang);
+    let lbl_like = crate::i18n::t("actions.like_track", lang);
+
+    let actions: &[(String, bool)] = &[
+        (lbl_album, ctx.album_id.is_some()),
+        (lbl_artist, ctx.artist_id.is_some()),
+        (lbl_playlist, true),
+        (lbl_queue, true),
+        (if is_liked { lbl_unlike } else { lbl_like }, true),
+    ];
+
+    // Measure popup size — title + 2 border lines + 1 blank + N actions
+    let title_format = crate::i18n::t("actions.title", lang);
+    let track_label = title_format.replace("{}", &ctx.track_name);
+    let label_width = track_label.len() as u16;
+    let popup_w = label_width.max(32).min(50);
+    let popup_h = (actions.len() as u16) + 4; // border top/bottom + blank + actions
+
+    let area = frame.area();
+    let x = (area.width.saturating_sub(popup_w)) / 2;
+    let y = (area.height.saturating_sub(popup_h)) / 2;
+    let popup_area = Rect { x, y, width: popup_w, height: popup_h };
+
+    frame.render_widget(ratatui::widgets::Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(track_label)
+        .style(state.active_theme.base_style())
+        .border_style(state.active_theme.primary_style());
+
+    let items: Vec<ListItem> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, (label, available))| {
+            let style = if i == state.selected_action_index {
+                state.active_theme.selected_style()
+            } else if !available {
+                state.active_theme.muted_style()
+            } else {
+                state.active_theme.base_style()
+            };
+            let text = format!("  {}  ", label);
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_spacing(HighlightSpacing::Never);
+
+    frame.render_widget(list, popup_area);
 }
 
 pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {

@@ -92,30 +92,35 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     .filter(|p| Some(&p.owner_id) == state.user_id.as_ref())
                     .collect();
                 if let Some(playlist) = user_playlists.get(state.selected_playlist_modal_index) {
-                    let track_ids = match state.active_view {
-                        ActiveView::TrackList => state
-                            .tracks
-                            .get(state.selected_track_index)
-                            .map(|t| vec![t.id.clone()])
-                            .unwrap_or_default(),
-                        ActiveView::SearchResults => {
-                            if state.active_search_tab == crate::app::SearchTab::Tracks {
-                                state
-                                    .search_results
-                                    .tracks
-                                    .get(state.selected_search_index)
-                                    .map(|t| vec![t.id.clone()])
-                                    .unwrap_or_default()
-                            } else {
-                                vec![]
+                    // If operation_register was populated (e.g. from action menu), use it directly.
+                    let track_ids = if !state.operation_register.is_empty() {
+                        state.operation_register.drain(..).collect()
+                    } else {
+                        match state.active_view {
+                            ActiveView::TrackList => state
+                                .tracks
+                                .get(state.selected_track_index)
+                                .map(|t| vec![t.id.clone()])
+                                .unwrap_or_default(),
+                            ActiveView::SearchResults => {
+                                if state.active_search_tab == crate::app::SearchTab::Tracks {
+                                    state
+                                        .search_results
+                                        .tracks
+                                        .get(state.selected_search_index)
+                                        .map(|t| vec![t.id.clone()])
+                                        .unwrap_or_default()
+                                } else {
+                                    vec![]
+                                }
                             }
+                            ActiveView::Queue => state
+                                .queue
+                                .get(state.selected_queue_index)
+                                .map(|t| vec![t.id.clone()])
+                                .unwrap_or_default(),
+                            _ => vec![],
                         }
-                        ActiveView::Queue => state
-                            .queue
-                            .get(state.selected_queue_index)
-                            .map(|t| vec![t.id.clone()])
-                            .unwrap_or_default(),
-                        _ => vec![],
                     };
                     state.playlist_add_modal_open = false;
                     state.selected_playlist_modal_index = 0;
@@ -165,6 +170,93 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('L') => {
                 state.lyrics_modal_open = false;
+            }
+            _ => {}
+        }
+        return None;
+    }
+
+    // Action menu intercepts all input while open
+    if state.action_menu_open {
+        const ACTION_COUNT: usize = 5;
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                state.action_menu_open = false;
+                state.action_menu_context = None;
+                state.selected_action_index = 0;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if state.selected_action_index + 1 < ACTION_COUNT {
+                    state.selected_action_index += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if state.selected_action_index > 0 {
+                    state.selected_action_index -= 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(ctx) = state.action_menu_context.clone() {
+                    let action_idx = state.selected_action_index;
+                    state.action_menu_open = false;
+                    state.action_menu_context = None;
+                    state.selected_action_index = 0;
+                    match action_idx {
+                        0 => {
+                            // Go to Album
+                            if let Some(album_id) = ctx.album_id {
+                                return Some(AppEvent::LoadContextTracks(
+                                    crate::models::TrackListContext::album(
+                                        album_id,
+                                        String::new(),
+                                        String::new(),
+                                        None,
+                                    ),
+                                ));
+                            }
+                        }
+                        1 => {
+                            // Go to Artist
+                            if let Some(artist_id) = ctx.artist_id {
+                                // Must call begin_artist_page_load first — ArtistPageOpened
+                                // is gated on pending_artist_page_id matching the artist id.
+                                state.begin_artist_page_load(
+                                    artist_id.clone(),
+                                    ctx.artist_name.clone(),
+                                    None,
+                                );
+                                return Some(AppEvent::LoadArtistPage {
+                                    artist_id,
+                                    artist_name: Some(ctx.artist_name),
+                                    artist_image_url: None,
+                                });
+                            }
+                        }
+                        2 => {
+                            // Add to Playlist
+                            state.action_menu_context = None;
+                            // Store track id so the playlist modal can find it
+                            state.operation_register = vec![ctx.track_id];
+                            state.playlist_add_modal_open = true;
+                            state.selected_playlist_modal_index = 0;
+                        }
+                        3 => {
+                            // Add to Queue
+                            return Some(AppEvent::AddToQueue(vec![ctx.track_id]));
+                        }
+                        4 => {
+                            // Like / Unlike Track
+                            let is_liked = state.liked_tracks.contains(&ctx.track_id);
+                            if is_liked {
+                                state.liked_tracks.remove(&ctx.track_id);
+                            } else {
+                                state.liked_tracks.insert(ctx.track_id.clone());
+                            }
+                            return Some(AppEvent::ToggleTrackLike(ctx.track_id, !is_liked));
+                        }
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }
@@ -565,33 +657,59 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('A') => {
-            let mut album_id_opt = None;
-            if state.active_view == ActiveView::TrackList {
-                if state.selected_track_index < state.tracks.len() {
-                    album_id_opt = state.tracks[state.selected_track_index].album_id.clone();
-                }
-            } else if state.active_view == ActiveView::Queue {
-                if state.selected_track_index < state.queue.len() {
-                    album_id_opt = state.queue[state.selected_track_index].album_id.clone();
-                }
+            // Build context from the hovered track (if in a track-list view)
+            // or from the currently playing track (if in library/other views).
+            let ctx = if state.active_view == ActiveView::TrackList
+                && state.selected_track_index < state.tracks.len()
+            {
+                let t = &state.tracks[state.selected_track_index];
+                Some(crate::models::ActionMenuContext {
+                    track_id: t.id.clone(),
+                    track_name: t.name.clone(),
+                    album_id: t.album_id.clone(),
+                    artist_id: t.artist_id.clone(),
+                    artist_name: t.artist.clone(),
+                })
+            } else if state.active_view == ActiveView::Queue
+                && state.selected_queue_index < state.queue.len()
+            {
+                let t = &state.queue[state.selected_queue_index];
+                Some(crate::models::ActionMenuContext {
+                    track_id: t.id.clone(),
+                    track_name: t.name.clone(),
+                    album_id: t.album_id.clone(),
+                    artist_id: t.artist_id.clone(),
+                    artist_name: t.artist.clone(),
+                })
             } else if state.active_view == ActiveView::SearchResults
                 && state.active_search_tab == crate::app::SearchTab::Tracks
                 && state.selected_search_index < state.search_results.tracks.len()
             {
-                album_id_opt = state.search_results.tracks[state.selected_search_index]
-                    .album_id
-                    .clone();
-            }
+                let t = &state.search_results.tracks[state.selected_search_index];
+                Some(crate::models::ActionMenuContext {
+                    track_id: t.id.clone(),
+                    track_name: t.name.clone(),
+                    album_id: t.album_id.clone(),
+                    artist_id: t.artist_id.clone(),
+                    artist_name: t.artist.clone(),
+                })
+            } else if !state.playback.playing_track_id.is_none() {
+                // Library / other views — use the currently playing track
+                Some(crate::models::ActionMenuContext {
+                    track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
+                    track_name: state.playback.playing_track_title.clone(),
+                    album_id: state.playback.playing_track_album_id.clone(),
+                    artist_id: state.playback.playing_track_artist_id.clone(),
+                    artist_name: state.playback.playing_track_artist.clone(),
+                })
+            } else {
+                None
+            };
 
-            if let Some(album_id) = album_id_opt {
-                let context = TrackListContext::album(
-                    album_id.clone(),
-                    "Album".to_string(),
-                    String::new(),
-                    None,
-                );
-                state.begin_tracklist_load(context.clone());
-                return Some(AppEvent::LoadContextTracks(context));
+            if let Some(ctx) = ctx {
+                state.action_menu_context = Some(ctx);
+                state.action_menu_open = true;
+                state.selected_action_index = 0;
             }
         }
         KeyCode::Char('a') => {
@@ -681,6 +799,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 || state.active_view == ActiveView::ArtistList
             {
                 state.active_view = ActiveView::Library;
+                // If we're returning from ArtistList (where the header was cleared by ArtistPage),
+                // we need to reload the tracklist cover image if one exists.
+                if state.tracklist_image_url.is_some() {
+                    return Some(AppEvent::ReloadHeaderImage);
+                }
             } else if state.active_view == ActiveView::ArtistPage {
                 if search_has_results(state) {
                     state.active_view = ActiveView::SearchResults;
@@ -694,6 +817,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.search_results = crate::models::SearchResults::default();
                 state.search_context_query.clear();
                 state.status_message = None;
+                if state.tracklist_image_url.is_some() {
+                    return Some(AppEvent::ReloadHeaderImage);
+                }
             }
         }
         KeyCode::Char('q') => {

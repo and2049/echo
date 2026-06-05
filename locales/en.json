@@ -1,48 +1,58 @@
 {
-    "ui": {
-        "library": "Library",
-        "search": "Search",
-        "queue": "Queue",
-        "playlists": "Playlists",
-        "albums": "Albums",
-        "browse": "Browse",
-        "tracks": "Tracks",
-        "artist": "Artist",
-        "album": "Album",
-        "duration": "Duration",
-        "playing": " Playing (Device: {} | Shuffle: {} | Repeat: {} | Volume: {}%) ",
-        "on": "On",
-        "off": "Off"
-    },
-    "help": {
-        "press_help": "Press '?' for help",
-        "no_results": "No results found"
-    },
-    "messages": {
-        "visual_block": "VISUAL BLOCK",
-        "fetching": "Fetching...",
-        "fetching_album": "Fetching album...",
-        "fetching_playlist": "Fetching playlist...",
-        "saved_to_library": "Saved '{}' to library",
-        "removed_from_library": "Removed '{}' from library",
-        "created_playlist": "Created playlist '{}'",
-        "deleted_playlists": "Deleted {} playlists",
-        "unfollowed_playlist": "Unfollowed playlist",
-        "renamed_playlist": "Renamed to '{}'",
-        "added_to_playlist": "Added {} tracks to '{}'",
-        "removed_from_playlist": "Removed {} tracks from '{}'",
-        "added_to_queue": "Added {} items to queue",
-        "added_to_liked": "Added to Liked Songs",
-        "unknown_theme": "Unknown theme: {}",
-        "unknown_language": "Unknown language: {}",
-        "language_set": "Language set to {}"
-    },
-    "prompts": {
-        "search": "Search: ",
-        "create_playlist": "New Playlist Name: ",
-        "rename_playlist": "Rename Playlist: ",
-        "theme": "Theme: ",
-        "lang": "Lang: ",
-        "remove_from_liked": "Remove from Liked Songs? (y/n)"
-    }
+  "ui": {
+    "library": "Library",
+    "search": "Search",
+    "queue": "Queue",
+    "playlists": "Playlists",
+    "albums": "Albums",
+    "browse": "Browse",
+    "tracks": "Tracks",
+    "artist": "Artist",
+    "artists": "Artists",
+    "album": "Album",
+    "duration": "Duration",
+    "playing": " Playing (Device: {} | Shuffle: {} | Repeat: {} | Volume: {}%) ",
+    "on": "On",
+    "off": "Off"
+  },
+  "help": {
+    "press_help": "Press '?' for help",
+    "no_results": "No results found"
+  },
+  "messages": {
+    "visual_block": "VISUAL BLOCK",
+    "fetching": "Fetching...",
+    "fetching_album": "Fetching album...",
+    "fetching_playlist": "Fetching playlist...",
+    "saved_to_library": "Saved '{}' to library",
+    "removed_from_library": "Removed '{}' from library",
+    "created_playlist": "Created playlist '{}'",
+    "deleted_playlists": "Deleted {} playlists",
+    "unfollowed_playlist": "Unfollowed playlist",
+    "renamed_playlist": "Renamed to '{}'",
+    "added_to_playlist": "Added {} tracks to '{}'",
+    "removed_from_playlist": "Removed {} tracks from '{}'",
+    "added_to_queue": "Added {} items to queue",
+    "added_to_liked": "Added to Liked Songs",
+    "unknown_theme": "Unknown theme: {}",
+    "unknown_language": "Unknown language: {}",
+    "language_set": "Language set to {}"
+  },
+  "prompts": {
+    "search": "Search: ",
+    "create_playlist": "New Playlist Name: ",
+    "rename_playlist": "Rename Playlist: ",
+    "theme": "Theme: ",
+    "lang": "Lang: ",
+    "remove_from_liked": "Remove from Liked Songs? (y/n)"
+  },
+  "actions": {
+    "go_to_album": "Go to Album",
+    "go_to_artist": "Go to Artist",
+    "add_to_playlist": "Add to Playlist",
+    "add_to_queue": "Add to Queue",
+    "unlike_track": "Unlike Track",
+    "like_track": "Like Track",
+    "title": " Actions: {} "
+  }
 }

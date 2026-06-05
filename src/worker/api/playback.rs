@@ -82,6 +82,13 @@ impl SpotifyWorker {
                 .and_then(|a| a.get("id"))
                 .and_then(|i| i.as_str())
                 .map(str::to_string),
+            artist_id: value
+                .get("artists")
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.first())
+                .and_then(|a| a.get("id"))
+                .and_then(|i| i.as_str())
+                .map(str::to_string),
         })
     }
 
@@ -103,6 +110,7 @@ impl SpotifyWorker {
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.as_ref().map(|id| id.id().to_string()),
+                    artist_id: track.artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string()),
                 })
             }
             rspotify::model::PlayableItem::Episode(episode) => Some(PlaybackItem {
@@ -112,6 +120,7 @@ impl SpotifyWorker {
                 duration_ms: episode.duration.num_milliseconds() as u32,
                 image_url: episode.images.first().map(|img| img.url.clone()),
                 album_id: None,
+                artist_id: None,
             }),
             rspotify::model::PlayableItem::Unknown(value) => {
                 Self::playback_item_from_unknown(value)
@@ -394,11 +403,12 @@ impl SpotifyWorker {
                     if track.is_local {
                         continue;
                     }
+                    let artists = track.artists;
+                    let artist_id = artists.first().and_then(|a| a.id.as_ref()).map(|id| id.id().to_string());
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         name: track.name,
-                        artist: track
-                            .artists
+                        artist: artists
                             .into_iter()
                             .map(|a| a.name)
                             .collect::<Vec<_>>()
@@ -406,6 +416,7 @@ impl SpotifyWorker {
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
+                        artist_id,
                     });
                 }
                 rspotify::model::PlayableItem::Unknown(val) => {
@@ -457,6 +468,14 @@ impl SpotifyWorker {
                         .and_then(|i| i.as_str())
                         .map(|s| s.to_string());
 
+                    let artist_id = val
+                        .get("artists")
+                        .and_then(|a| a.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|a| a.get("id"))
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string());
+
                     out.push(Track {
                         id,
                         name,
@@ -464,6 +483,7 @@ impl SpotifyWorker {
                         duration_ms,
                         image_url,
                         album_id,
+                        artist_id,
                     });
                 }
                 _ => {}

@@ -41,6 +41,8 @@ pub struct Track {
     pub duration_ms: u32,
     pub image_url: Option<String>,
     pub album_id: Option<String>,
+    #[serde(default)]
+    pub artist_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -129,6 +131,17 @@ pub struct PlaybackItem {
     pub duration_ms: u32,
     pub image_url: Option<String>,
     pub album_id: Option<String>,
+    pub artist_id: Option<String>,
+}
+
+/// Context used by the action menu popup.
+#[derive(Clone, Debug)]
+pub struct ActionMenuContext {
+    pub track_id: String,
+    pub track_name: String,
+    pub album_id: Option<String>,
+    pub artist_id: Option<String>,
+    pub artist_name: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -140,6 +153,8 @@ pub struct SearchTrack {
     pub duration_ms: u32,
     pub image_url: Option<String>,
     pub album_id: Option<String>,
+    #[serde(default)]
+    pub artist_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

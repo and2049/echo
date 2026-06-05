@@ -71,6 +71,31 @@ mod tests {
     }
 
     #[test]
+    fn clicking_top_track_loads_artist_page() {
+        let mut state = AppState::new();
+        state.active_view = ActiveView::Library;
+        state.selected_playlist_index = 0; // The "Browse" node
+        state.top_tracks = vec![crate::models::Track {
+            id: "track1".to_string(),
+            name: "Test Track".to_string(),
+            artist: "Test Artist".to_string(),
+            artist_id: Some("artist1".to_string()),
+            album_id: None,
+            duration_ms: 60000,
+            image_url: None,
+        }];
+
+        assert!(enter_active_node(&mut state).is_none());
+        assert!(
+            !state
+                .active_tracklist_context
+                .as_ref()
+                .unwrap()
+                .requires_worker_load()
+        );
+    }
+
+    #[test]
     fn generated_top_tracks_do_not_request_worker_load() {
         let mut state = AppState::new();
         state.active_browse_node = BrowseNode::TopTracks;
@@ -78,6 +103,7 @@ mod tests {
             id: "track".to_string(),
             name: "Track".to_string(),
             artist: "Artist".to_string(),
+            artist_id: None,
             duration_ms: 1000,
             image_url: None,
             album_id: None,

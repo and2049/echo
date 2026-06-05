@@ -1,4 +1,4 @@
-use crate::models::{ArtistPageData, Playlist, SearchResults, Track, TrackListContext};
+use crate::models::{ActionMenuContext, ArtistPageData, Playlist, SearchResults, Track, TrackListContext};
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 
@@ -10,6 +10,8 @@ pub struct PlaybackState {
     pub playing_track_id: Option<String>,
     pub playing_track_title: String,
     pub playing_track_artist: String,
+    pub playing_track_album_id: Option<String>,
+    pub playing_track_artist_id: Option<String>,
     pub playing_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
     pub previous_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
     pub fetching_track_id: Option<String>,
@@ -89,6 +91,8 @@ impl Default for PlaybackState {
             playing_track_id: None,
             playing_track_title: String::new(),
             playing_track_artist: String::new(),
+            playing_track_album_id: None,
+            playing_track_artist_id: None,
             playing_track_image: None,
             previous_track_image: None,
             fetching_track_id: None,
@@ -209,6 +213,10 @@ pub struct AppState {
     pub artist_page_album_index: usize,
     pub artist_page_loading: bool,
     pub artist_albums_loading: bool,
+    // Action menu
+    pub action_menu_open: bool,
+    pub selected_action_index: usize,
+    pub action_menu_context: Option<ActionMenuContext>,
 }
 
 impl AppState {
@@ -312,6 +320,9 @@ impl AppState {
             artist_page_album_index: 0,
             artist_page_loading: false,
             artist_albums_loading: false,
+            action_menu_open: false,
+            selected_action_index: 0,
+            action_menu_context: None,
         }
     }
 

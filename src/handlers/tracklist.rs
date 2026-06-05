@@ -47,6 +47,7 @@ mod tests {
             id: "track".to_string(),
             name: "Track".to_string(),
             artist: "Artist".to_string(),
+            artist_id: None,
             duration_ms: 1000,
             image_url: None,
             album_id: None,

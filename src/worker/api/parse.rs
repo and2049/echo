@@ -10,12 +10,11 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     }
     let id = track.get("id")?.as_str()?.to_string();
     let album = track.get("album");
+    let artists = track.get("artists").and_then(|v| v.as_array());
     Some(Track {
         id,
         name: track.get("name")?.as_str()?.to_string(),
-        artist: track
-            .get("artists")
-            .and_then(|v| v.as_array())
+        artist: artists
             .map(|artists| {
                 artists
                     .iter()
@@ -24,6 +23,11 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
                     .join(", ")
             })
             .unwrap_or_default(),
+        artist_id: artists
+            .and_then(|a| a.first())
+            .and_then(|a| a.get("id"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string()),
         duration_ms: track
             .get("duration_ms")
             .and_then(|v| v.as_u64())

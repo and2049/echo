@@ -26,11 +26,34 @@ pub fn spawn_load_artist_page(
 
     tokio::spawn(async move {
         let known_artist_name = artist_name.unwrap_or_else(|| "Unknown Artist".to_string());
+
+        // If we already know the image URL, send it immediately; otherwise
+        // spawn a background fetch so the header can appear once resolved.
+        let resolved_image_url = if artist_image_url.is_some() {
+            artist_image_url.clone()
+        } else {
+            // Kick off a parallel fetch — we'll send ArtistImageResolved when done.
+            let api_clone = api.clone();
+            let tx_clone = tx.clone();
+            let id_clone = artist_id.clone();
+            tokio::spawn(async move {
+                if let Some(url) = api_clone.fetch_artist_image_url(&id_clone).await {
+                    let _ = tx_clone
+                        .send(WorkerEvent::ArtistImageResolved {
+                            artist_id: id_clone,
+                            image_url: url,
+                        })
+                        .await;
+                }
+            });
+            None
+        };
+
         let _ = tx
             .send(WorkerEvent::ArtistPageOpened {
                 artist_id: artist_id.clone(),
                 artist_name: known_artist_name.clone(),
-                artist_image_url,
+                artist_image_url: resolved_image_url,
             })
             .await;
         match api

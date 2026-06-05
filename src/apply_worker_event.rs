@@ -81,6 +81,8 @@ pub async fn apply_worker_event(
             state.playback.playing_track_id = Some(item.id.clone());
             state.playback.playing_track_title = item.title.clone();
             state.playback.playing_track_artist = item.artist.clone();
+            state.playback.playing_track_album_id = item.album_id.clone();
+            state.playback.playing_track_artist_id = item.artist_id.clone();
             state.playback.previous_track_image = state.playback.playing_track_image.take();
             state.playback.duration_ms = item.duration_ms;
             state.playback.progress_ms = 0;
@@ -279,6 +281,23 @@ pub async fn apply_worker_event(
                 );
             }
         }
+        WorkerEvent::ArtistImageResolved {
+            artist_id,
+            image_url,
+        } => {
+            if let Some(data) = state.artist_page_data.as_mut()
+                && data.artist_id == artist_id
+                && data.image_url.is_none()
+            {
+                data.image_url = Some(image_url.clone());
+                image_tasks::spawn_header_for_url(
+                    &image_url,
+                    state.image_picker.as_ref(),
+                    worker_tx.clone(),
+                    state.library_config.cover_img_pixels,
+                );
+            }
+        }
         WorkerEvent::ArtistAlbumsLoaded { artist_id, albums } => {
             if let Some(data) = state.artist_page_data.as_mut()
                 && data.artist_id == artist_id
@@ -346,6 +365,8 @@ async fn apply_synced_playback_item(
     state.playback.playing_track_id = Some(item.id.clone());
     state.playback.playing_track_title = item.title.clone();
     state.playback.playing_track_artist = item.artist.clone();
+    state.playback.playing_track_album_id = item.album_id.clone();
+    state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.duration_ms = item.duration_ms;
 
     if track_changed {

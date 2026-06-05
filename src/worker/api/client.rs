@@ -512,6 +512,19 @@ impl EchoSpotifyClient {
 
         Ok(albums)
     }
+
+    /// Fetch an artist's profile image URL via the standard third-party API.
+    /// Returns `None` if the request fails or the artist has no images.
+    pub async fn fetch_artist_image_url(&self, artist_id: &str) -> Option<String> {
+        let url = format!("https://api.spotify.com/v1/artists/{artist_id}");
+        let json = self.third_party_json(&url).await.ok()?;
+        json.get("images")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|img| img.get("url"))
+            .and_then(|u| u.as_str())
+            .map(|s| s.to_string())
+    }
 }
 
 const ARTIST_ALBUMS_PAGE_LIMIT: usize = 10;

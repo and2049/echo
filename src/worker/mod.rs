@@ -385,6 +385,7 @@ impl Worker {
                                                 duration_ms,
                                                 image_url: image_url.clone(),
                                                 album_id: album_id.clone(),
+                                                artist_id: None,
                                             };
                                             let _ = self.tx.send(WorkerEvent::PlaybackStarted {
                                                 item: item.clone(),

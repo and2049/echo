@@ -132,4 +132,10 @@ pub enum WorkerEvent {
         artist_id: String,
         retry_after_secs: u64,
     },
+    /// Fired when an artist's profile image has been resolved (e.g. from a
+    /// secondary API call when the image URL wasn't known at page-open time).
+    ArtistImageResolved {
+        artist_id: String,
+        image_url: String,
+    },
 }

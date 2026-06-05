@@ -84,11 +84,12 @@ impl SpotifyWorker {
                     if track.is_local {
                         continue;
                     }
+                    let artists = track.artists;
+                    let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         name: track.name,
-                        artist: track
-                            .artists
+                        artist: artists
                             .into_iter()
                             .map(|a| a.name)
                             .collect::<Vec<_>>()
@@ -96,6 +97,7 @@ impl SpotifyWorker {
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
+                        artist_id,
                     });
                 }
 
@@ -144,11 +146,12 @@ impl SpotifyWorker {
         let mut out = Vec::new();
         for item in page.items {
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
+                let artists = track.artists;
+                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     name: track.name,
-                    artist: track
-                        .artists
+                    artist: artists
                         .into_iter()
                         .map(|a| a.name)
                         .collect::<Vec<_>>()
@@ -156,6 +159,7 @@ impl SpotifyWorker {
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.map(|id| id.id().to_string()),
+                    artist_id,
                 });
             }
         }
@@ -187,11 +191,12 @@ impl SpotifyWorker {
             if track.is_local {
                 continue;
             }
+            let artists = track.artists;
+            let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
             out.push(Track {
                 id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                 name: track.name,
-                artist: track
-                    .artists
+                artist: artists
                     .into_iter()
                     .map(|a| a.name)
                     .collect::<Vec<_>>()
@@ -199,6 +204,7 @@ impl SpotifyWorker {
                 duration_ms: track.duration.num_milliseconds() as u32,
                 image_url: image_url.clone(), // Set the album's image on every track!
                 album_id: Some(album_id.to_string()),
+                artist_id,
             });
         }
         Ok((out, metadata))
@@ -213,11 +219,12 @@ impl SpotifyWorker {
                 if track.is_local {
                     continue;
                 }
+                let artists = track.artists;
+                let artist_id = artists.first().map(|a| a.id.as_ref().map(|id| id.id().to_string())).flatten();
                 out.push(Track {
                     id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                     name: track.name,
-                    artist: track
-                        .artists
+                    artist: artists
                         .into_iter()
                         .map(|a| a.name)
                         .collect::<Vec<_>>()
@@ -225,6 +232,7 @@ impl SpotifyWorker {
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.map(|id| id.id().to_string()),
+                    artist_id,
                 });
             }
         }
@@ -280,8 +288,14 @@ impl SpotifyWorker {
                             .and_then(|d| d.as_u64())
                             .unwrap_or_default() as u32;
 
+                        let artists_json = track.get("artists").and_then(|a| a.as_array());
+                        let artist_id = artists_json
+                            .and_then(|a| a.first())
+                            .and_then(|a| a.get("id"))
+                            .and_then(|id| id.as_str())
+                            .map(|s| s.to_string());
                         let mut artist_names = Vec::new();
-                        if let Some(artists) = track.get("artists").and_then(|a| a.as_array()) {
+                        if let Some(artists) = artists_json {
                             for a in artists {
                                 if let Some(aname) = a.get("name").and_then(|n| n.as_str()) {
                                     artist_names.push(aname.to_string());
@@ -309,6 +323,7 @@ impl SpotifyWorker {
                             duration_ms,
                             image_url,
                             album_id,
+                            artist_id,
                         });
                     }
                 }
