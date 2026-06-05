@@ -72,6 +72,23 @@ impl SpotifyWorker {
                 .collect();
         }
 
+        if let Ok(rspotify::model::SearchResult::Artists(page)) = self
+            .client
+            .search(query, SearchType::Artist, None, None, None, None)
+            .await
+        {
+            results.artists = page
+                .items
+                .into_iter()
+                .map(|a| crate::models::Artist {
+                    id: a.id.id().to_string(),
+                    name: a.name,
+                    followers: 0,
+                    image_url: a.images.first().map(|i| i.url.clone()),
+                })
+                .collect();
+        }
+
         Ok(results)
     }
 }

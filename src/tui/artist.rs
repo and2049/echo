@@ -9,7 +9,10 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, ListItem, ListState, StatefulWidget},
+    widgets::{
+        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, StatefulWidget, Table,
+        TableState,
+    },
 };
 
 pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
@@ -122,7 +125,20 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     let selected_idx = state.artist_page_album_index;
-    let items: Vec<ListItem> = albums
+    let show_track_count = albums.iter().any(|album| album.track_count.is_some());
+    let header_style = if is_active {
+        state
+            .active_theme
+            .secondary_style()
+            .add_modifier(Modifier::BOLD)
+    } else {
+        state
+            .active_theme
+            .primary_style()
+            .add_modifier(Modifier::BOLD)
+    };
+
+    let rows: Vec<Row> = albums
         .iter()
         .enumerate()
         .map(|(i, album)| {
@@ -131,28 +147,58 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
             } else {
                 state.active_theme.base_style()
             };
-            let year_part = if album.release_year.is_empty() {
-                String::new()
+            let album_name_width = if show_track_count {
+                albums_area.width.saturating_mul(70) / 100
             } else {
-                format!("  ({})", album.release_year)
+                albums_area.width.saturating_mul(82) / 100
             };
-            let text = format!(" {}{}", album.name, year_part);
-            let display =
-                truncate_to_width_with_ellipsis(&text, albums_area.width.saturating_sub(1));
-            ListItem::new(display).style(style)
+            let name_cell = Cell::from(truncate_to_width_with_ellipsis(
+                &stabilize_terminal_emoji_width(&album.name),
+                album_name_width.saturating_sub(1),
+            ));
+            let year_cell = Cell::from(album.release_year.clone());
+            let row = if show_track_count {
+                let track_count = album
+                    .track_count
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                Row::new(vec![name_cell, Cell::from(track_count), year_cell])
+            } else {
+                Row::new(vec![name_cell, year_cell])
+            };
+            row.style(style)
         })
         .collect();
 
-    let list = padded_library_list(items).highlight_style(
-        state
-            .active_theme
-            .selected_style()
-            .add_modifier(Modifier::BOLD),
-    );
+    let table = if show_track_count {
+        Table::new(
+            rows,
+            [
+                Constraint::Percentage(70),
+                Constraint::Length(8),
+                Constraint::Length(6),
+            ],
+        )
+        .header(
+            Row::new(vec!["Album", "Tracks", "Year"])
+                .style(header_style)
+                .height(1),
+        )
+    } else {
+        Table::new(rows, [Constraint::Percentage(82), Constraint::Length(6)]).header(
+            Row::new(vec!["Album", "Year"])
+                .style(header_style)
+                .height(1),
+        )
+    }
+    .column_spacing(1)
+    .row_highlight_style(state.active_theme.selected_style())
+    .highlight_symbol(" ")
+    .highlight_spacing(HighlightSpacing::Always);
 
-    let mut list_state = ListState::default();
-    list_state.select(Some(selected_idx));
-    frame.render_stateful_widget(list, albums_area, &mut list_state);
+    let mut table_state = TableState::default();
+    table_state.select(Some(selected_idx));
+    frame.render_stateful_widget(table, albums_area, &mut table_state);
 }
 
 fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, artist_name: &str) {

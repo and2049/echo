@@ -121,9 +121,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::SearchResults => {
-                if state.active_search_tab == crate::app::SearchTab::Tracks
-                    && state.selected_search_index + 1 < state.search_results.tracks.len()
-                {
+                let max = search_results_len(state);
+                if max > 0 && state.selected_search_index < max.saturating_sub(1) {
                     state.selected_search_index += 1;
                 }
             }
@@ -167,9 +166,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::SearchResults => {
-                if state.active_search_tab == crate::app::SearchTab::Tracks
-                    && state.selected_search_index > 0
-                {
+                if state.selected_search_index > 0 {
                     state.selected_search_index -= 1;
                 }
             }
@@ -362,4 +359,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         _ => {}
     }
     None
+}
+
+fn search_results_len(state: &AppState) -> usize {
+    match state.active_search_tab {
+        crate::app::SearchTab::Tracks => state.search_results.tracks.len(),
+        crate::app::SearchTab::Albums => state.search_results.albums.len(),
+        crate::app::SearchTab::Artists => state.search_results.artists.len(),
+    }
 }

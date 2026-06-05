@@ -69,6 +69,10 @@ pub(crate) fn album(album: &serde_json::Value) -> Option<Album> {
             .and_then(|v| v.as_str())
             .map(|v| v.to_string()),
         release_year: release_date.split('-').next().unwrap_or("").to_string(),
+        track_count: album
+            .get("total_tracks")
+            .and_then(|v| v.as_u64())
+            .map(|value| value as u32),
     })
 }
 
@@ -113,9 +117,12 @@ mod tests {
             "name": "Album",
             "artists": [{ "name": "Artist" }],
             "release_date": "2024-03-01",
-            "images": []
+            "images": [],
+            "total_tracks": 12
         });
 
-        assert_eq!(album(&value).unwrap().release_year, "2024");
+        let album = album(&value).unwrap();
+        assert_eq!(album.release_year, "2024");
+        assert_eq!(album.track_count, Some(12));
     }
 }

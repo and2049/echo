@@ -89,7 +89,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
             crate::i18n::t("ui.browse", &state.library_config.language)
         )
     };
-    let title_text = format!("{}{}{}", p_title, a_title, b_title);
+    let title_text = format!("{} {} {}", p_title, a_title, b_title);
 
     let library_border_style = if is_focused {
         state.active_theme.secondary_style()

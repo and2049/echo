@@ -19,27 +19,32 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
 
     let t_title = if state.active_search_tab == SearchTab::Tracks {
         format!(
-            "[ {} ]",
+            "[{}]",
             crate::i18n::t("ui.tracks", &state.library_config.language)
         )
     } else {
         format!(
-            "  {}  ",
+            " {} ",
             crate::i18n::t("ui.tracks", &state.library_config.language)
         )
     };
     let a_title = if state.active_search_tab == SearchTab::Albums {
         format!(
-            "[ {} ]",
+            "[{}]",
             crate::i18n::t("ui.albums", &state.library_config.language)
         )
     } else {
         format!(
-            "  {}  ",
+            " {} ",
             crate::i18n::t("ui.albums", &state.library_config.language)
         )
     };
-    let tab_title = format!("{} {}", t_title, a_title);
+    let ar_title = if state.active_search_tab == SearchTab::Artists {
+        "[Artists]".to_string()
+    } else {
+        " Artists ".to_string()
+    };
+    let tab_title = format!("{} {} {}", t_title, a_title, ar_title);
 
     let search_block = Block::default()
         .borders(Borders::ALL)
@@ -176,6 +181,36 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             .row_highlight_style(state.active_theme.selected_style())
             .highlight_symbol(" ")
             .highlight_spacing(HighlightSpacing::Always);
+            let mut ts = TableState::default();
+            ts.select(Some(sel));
+            frame.render_stateful_widget(table, inner, &mut ts);
+        }
+        SearchTab::Artists => {
+            let header = Row::new(vec!["Artist"]).style(header_style).height(1);
+            let rows: Vec<Row> = state
+                .search_results
+                .artists
+                .iter()
+                .enumerate()
+                .map(|(i, artist)| {
+                    let style = if i == sel {
+                        state.active_theme.selected_style()
+                    } else {
+                        state.active_theme.base_style()
+                    };
+                    Row::new(vec![Cell::from(truncate_to_width_with_ellipsis(
+                        &artist.name,
+                        inner.width.saturating_sub(1),
+                    ))])
+                    .style(style)
+                })
+                .collect();
+            let table = Table::new(rows, [Constraint::Percentage(100)])
+                .column_spacing(1)
+                .header(header)
+                .row_highlight_style(state.active_theme.selected_style())
+                .highlight_symbol(" ")
+                .highlight_spacing(HighlightSpacing::Always);
             let mut ts = TableState::default();
             ts.select(Some(sel));
             frame.render_stateful_widget(table, inner, &mut ts);

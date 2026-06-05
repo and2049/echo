@@ -16,6 +16,8 @@ pub struct Album {
     pub artists: String,
     pub image_url: Option<String>,
     pub release_year: String,
+    #[serde(default)]
+    pub track_count: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,6 +154,7 @@ pub struct SearchAlbum {
 pub struct SearchResults {
     pub tracks: Vec<SearchTrack>,
     pub albums: Vec<SearchAlbum>,
+    pub artists: Vec<Artist>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

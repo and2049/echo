@@ -450,6 +450,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             return Some(AppEvent::LoadContextTracks(context));
                         }
                     }
+                    crate::app::SearchTab::Artists => {
+                        return artist_page::enter_search_artist(state);
+                    }
                 }
             } else if state.active_view == ActiveView::ArtistList {
                 return artist_page::enter_followed_artist(state);
@@ -668,9 +671,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('h') | KeyCode::Esc | KeyCode::Backspace => {
             if state.active_view == ActiveView::TrackList {
-                if !state.search_results.tracks.is_empty()
-                    || !state.search_results.albums.is_empty()
-                {
+                if search_has_results(state) {
                     // Came from a search drill-down — go back to search results
                     state.active_view = ActiveView::SearchResults;
                 } else {
@@ -681,6 +682,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             {
                 state.active_view = ActiveView::Library;
             } else if state.active_view == ActiveView::ArtistPage {
+                if search_has_results(state) {
+                    state.active_view = ActiveView::SearchResults;
+                    state.clear_pending_artist_page();
+                    return Some(AppEvent::CancelArtistPageLoad);
+                }
                 return Some(artist_page::back_to_artist_list(state));
             } else if state.active_view == ActiveView::SearchResults {
                 // Clear search and return to Library
@@ -828,7 +834,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             } else if state.active_view == ActiveView::SearchResults {
                 state.active_search_tab = match state.active_search_tab {
                     crate::app::SearchTab::Tracks => crate::app::SearchTab::Albums,
-                    crate::app::SearchTab::Albums => crate::app::SearchTab::Tracks,
+                    crate::app::SearchTab::Albums => crate::app::SearchTab::Artists,
+                    crate::app::SearchTab::Artists => crate::app::SearchTab::Tracks,
                 };
                 state.selected_search_index = 0;
             }
@@ -842,5 +849,12 @@ fn search_results_len(state: &AppState) -> usize {
     match state.active_search_tab {
         crate::app::SearchTab::Tracks => state.search_results.tracks.len(),
         crate::app::SearchTab::Albums => state.search_results.albums.len(),
+        crate::app::SearchTab::Artists => state.search_results.artists.len(),
     }
+}
+
+fn search_has_results(state: &AppState) -> bool {
+    !state.search_results.tracks.is_empty()
+        || !state.search_results.albums.is_empty()
+        || !state.search_results.artists.is_empty()
 }

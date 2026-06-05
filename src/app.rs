@@ -116,6 +116,7 @@ pub enum ActiveView {
 pub enum SearchTab {
     Tracks,
     Albums,
+    Artists,
 }
 
 #[derive(PartialEq)]

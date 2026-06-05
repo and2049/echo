@@ -56,6 +56,7 @@ impl SpotifyWorker {
                             .join(", "),
                         image_url: album.images.first().map(|i| i.url.clone()),
                         release_year: album.release_date.chars().take(4).collect(),
+                        track_count: None,
                     });
                 }
                 Err(e) => {

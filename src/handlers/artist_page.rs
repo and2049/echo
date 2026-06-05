@@ -6,6 +6,18 @@ use crate::{
 
 pub fn enter_followed_artist(state: &mut AppState) -> Option<AppEvent> {
     let artist = state.followed_artists.get(state.selected_artist_index)?;
+    enter_artist(state, artist.clone())
+}
+
+pub fn enter_search_artist(state: &mut AppState) -> Option<AppEvent> {
+    let artist = state
+        .search_results
+        .artists
+        .get(state.selected_search_index)?;
+    enter_artist(state, artist.clone())
+}
+
+fn enter_artist(state: &mut AppState, artist: crate::models::Artist) -> Option<AppEvent> {
     let artist_id = artist.id.clone();
     let artist_name = artist.name.clone();
     let artist_image_url = artist.image_url.clone();
@@ -76,5 +88,24 @@ mod tests {
         assert_eq!(page.image_url.as_deref(), Some("image"));
         assert!(page.albums.is_empty());
         assert!(state.artist_albums_loading);
+    }
+
+    #[test]
+    fn selecting_search_artist_opens_partial_shell_with_image() {
+        let mut state = AppState::new();
+        state.search_results.artists.push(crate::models::Artist {
+            id: "artist".to_string(),
+            name: "Search Artist".to_string(),
+            followers: 0,
+            image_url: Some("search-image".to_string()),
+        });
+
+        let event = enter_search_artist(&mut state);
+
+        assert!(matches!(event, Some(AppEvent::LoadArtistPage { .. })));
+        assert!(matches!(state.active_view, ActiveView::ArtistPage));
+        let page = state.artist_page_data.as_ref().expect("artist shell");
+        assert_eq!(page.artist_name, "Search Artist");
+        assert_eq!(page.image_url.as_deref(), Some("search-image"));
     }
 }
