@@ -60,6 +60,11 @@ pub struct LocalPlaybackEngine {
     playing: bool,
 }
 
+// LocalPlaybackEngine is only ever used from a single tokio task.
+// The audio backend (rodio/cpal) reports non-Send on macOS due to
+// CoreAudio callback types, but is safe to move between threads when accessed exclusively from one task.
+unsafe impl Send for LocalPlaybackEngine {}
+
 impl Default for LocalPlaybackEngine {
     fn default() -> Self {
         Self {
