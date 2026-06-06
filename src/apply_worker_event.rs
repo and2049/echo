@@ -462,7 +462,7 @@ mod tests {
     async fn force_context_refresh_reuses_stored_context() {
         let (app_tx, mut app_rx) = mpsc::channel(1);
         let (worker_tx, _) = mpsc::channel(1);
-        let mut tui = Tui::new().unwrap();
+        let mut tui = Tui::test();
         let mut state = AppState::new();
         let context = crate::models::TrackListContext::playlist(
             "playlist".to_string(),
@@ -493,7 +493,7 @@ mod tests {
     async fn stale_artist_page_result_is_ignored() {
         let (app_tx, _) = mpsc::channel(1);
         let (worker_tx, _) = mpsc::channel(1);
-        let mut tui = Tui::new().unwrap();
+        let mut tui = Tui::test();
         let mut state = AppState::new();
         state.begin_artist_page_load("current".to_string(), "Current".to_string(), None);
 
@@ -537,7 +537,7 @@ mod tests {
     async fn artist_album_rate_limit_leaves_page_open() {
         let (app_tx, _) = mpsc::channel(1);
         let (worker_tx, _) = mpsc::channel(1);
-        let mut tui = Tui::new().unwrap();
+        let mut tui = Tui::test();
         let mut state = AppState::new();
         state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
 
