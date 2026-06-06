@@ -1,6 +1,6 @@
 # echo
 
-echo is a terminal-based Spotify client written in Rust. echo brings your entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
+echo is a terminal-based music player and Spotify client written in Rust. echo brings your local files and entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
 
 ![demo](demo.png)
 
