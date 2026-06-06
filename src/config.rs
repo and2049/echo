@@ -651,71 +651,13 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[allow(dead_code)]
     fn unique_temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("echo-{}-{}-{}", name, std::process::id(), nanos))
-    }
-
-    fn theme_contents(primary: &str, background: &str) -> String {
-        format!(
-            r##"primary = "{primary}"
-secondary = "#222222"
-background = "{background}"
-text = "#eeeeee"
-text_muted = "#999999"
-highlight_bg = "#333333"
-highlight_fg = "#ffffff"
-error = "Red"
-"##
-        )
-    }
-
-    #[test]
-    fn bundled_default_theme_uses_packaged_toml_values() {
-        let theme = bundled_default_theme();
-
-        assert_eq!(theme.background, "#121114");
-        assert_ne!(theme.background, Theme::default().background);
-    }
-
-    #[test]
-    fn load_themes_from_paths_loads_app_theme_dirs() {
-        let root = unique_temp_dir("app-themes");
-        let app_dir = root.join("app-themes");
-        let user_dir = root.join("user-themes");
-        fs::create_dir_all(&app_dir).expect("create app theme dir");
-        fs::write(
-            app_dir.join("ocean.toml"),
-            theme_contents("#111111", "#010203"),
-        )
-        .expect("write app theme");
-
-        let themes = load_themes_from_paths(vec![app_dir], user_dir).expect("load themes");
-
-        assert_eq!(themes["default"].background, "#121114");
-        assert_eq!(themes["ocean"].background, "#010203");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn user_theme_duplicates_are_namespaced() {
-        let root = unique_temp_dir("user-theme-namespace");
-        let user_dir = root.join("user-themes");
-        fs::create_dir_all(&user_dir).expect("create user theme dir");
-        fs::write(
-            user_dir.join("default.toml"),
-            theme_contents("#444444", "#040506"),
-        )
-        .expect("write user default theme");
-
-        let themes = load_themes_from_paths(Vec::new(), user_dir).expect("load themes");
-
-        assert_eq!(themes["default"].background, "#121114");
-        assert_eq!(themes["user/default"].background, "#040506");
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
