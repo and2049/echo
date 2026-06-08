@@ -165,14 +165,47 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         .or(state.playback.previous_track_image.as_mut());
 
     if let Some(protocol) = protocol {
-        let image = ratatui_image::StatefulImage::default();
         let mut image_area = track_info_chunks[1];
-        // Center vertically in the 7-row tall block (1 row top padding, 1 row bottom padding)
         if image_area.height >= 7 {
             image_area.y += 1;
             image_area.height = 5;
         }
-        frame.render_stateful_widget(image, image_area, protocol);
+        if image_area.width == 0 || image_area.height == 0 {
+            // Skip rendering if area is too small
+        } else {
+            let render_needed = state.playback.playing_track_image_cache.as_ref().map_or(true, |cached| {
+                cached.area != image_area
+            });
+            if render_needed {
+                let mut cached = ratatui::buffer::Buffer::empty(image_area);
+                ratatui::widgets::StatefulWidget::render(
+                    ratatui_image::StatefulImage::default(),
+                    image_area,
+                    &mut cached,
+                    protocol,
+                );
+                state.playback.playing_track_image_cache = Some(cached);
+            }
+            if let Some(ref cached) = state.playback.playing_track_image_cache {
+                let buf = frame.buffer_mut();
+                for y in 0..cached.area.height.min(image_area.height) {
+                    for x in 0..cached.area.width.min(image_area.width) {
+                        let src = &cached[(x, y)];
+                        let dst_x = image_area.x + x;
+                        let dst_y = image_area.y + y;
+                        if dst_x < buf.area.width && dst_y < buf.area.height {
+                            buf[(dst_x, dst_y)] = src.clone();
+                        }
+                    }
+                }
+            } else {
+                frame.render_stateful_widget(
+                    ratatui_image::StatefulImage::default(),
+                    image_area,
+                    protocol,
+                );
+            }
+        }
     }
 
     // Create Title & Artist Text
