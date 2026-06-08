@@ -20,6 +20,7 @@ use local_playback::{LocalPlaybackEngine, LocalPlaybackSnapshot, RepeatMode};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rspotify::clients::OAuthClient;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -28,6 +29,36 @@ use tokio::sync::mpsc;
 
 type LocalScanResult = std::result::Result<(LocalLibrary, crate::models::LocalScanReport), String>;
 
+const PLAY_DEBOUNCE: Duration = Duration::from_millis(300);
+
+#[derive(Clone, PartialEq)]
+enum PlayDebounceKey {
+    TogglePlayback,
+    PlayTrack(String),
+}
+
+struct PlayGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl PlayGuard {
+    fn try_acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
+        if flag.swap(true, Ordering::SeqCst) {
+            None
+        } else {
+            Some(Self {
+                flag: Arc::clone(flag),
+            })
+        }
+    }
+}
+
+impl Drop for PlayGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
 pub struct Worker {
     rx: mpsc::Receiver<AppEvent>,
     tx: mpsc::Sender<WorkerEvent>,
@@ -35,6 +66,8 @@ pub struct Worker {
     first_party: Option<api::first_party::SpotifyWebApi>,
     artist_page_generation: Arc<AtomicU64>,
     spotify_mixer: Arc<parking_lot::Mutex<Option<Arc<dyn librespot_playback::mixer::Mixer>>>>,
+    play_debounce: Option<(PlayDebounceKey, Instant)>,
+    play_in_flight: Arc<AtomicBool>,
 }
 
 fn save_playlists_cache(playlists: Vec<crate::models::Playlist>) {
@@ -243,7 +276,6 @@ async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
 
     #[test]
     fn resolves_local_queue_tracks_from_library_ids() {
@@ -424,6 +456,8 @@ impl Worker {
             first_party,
             artist_page_generation: Arc::new(AtomicU64::new(0)),
             spotify_mixer: Arc::new(parking_lot::Mutex::new(None)),
+            play_debounce: None,
+            play_in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -692,9 +726,10 @@ impl Worker {
                                         if let Some(ref mut sp) = spotify_opt {
                                             hydrate_library_lists(sp, self.tx.clone()).await;
                                             // Initial State Sync (Seamless Handoff)
-                                            // Try up to 5 times to sync, allowing the librespot daemon to authenticate
+                                            // Retry with exponential backoff to give the librespot daemon time to
+                                            // authenticate and register the device. 1s → 2s → 4s = ~7s total wait.
                                             let mut found_playback = false;
-                                            for _ in 0..5 {
+                                            for attempt in 0..4u32 {
                                                 if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
                                                     let mut actual_playing = playing;
 
@@ -715,7 +750,9 @@ impl Worker {
 
                                                 // If no active session exists, forcefully wake up our integrated device
                                                 let _ = sp.wake_up_device().await;
-                                                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                                if attempt < 3 {
+                                                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                                                }
                                             }
 
                                             // Set server-side volume to 100% so all attenuation is client-side via the mixer
@@ -859,6 +896,22 @@ impl Worker {
                                 }
 
                                 if let Some(ref mut sp) = spotify_opt {
+                                    let now = Instant::now();
+                                    let debounce_key = PlayDebounceKey::PlayTrack(track_id.clone());
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
+                                        if *last_key == debounce_key
+                                            && now.duration_since(*last_time) < PLAY_DEBOUNCE
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    self.play_debounce = Some((debounce_key, now));
+
+                                    let _guard = PlayGuard::try_acquire(&self.play_in_flight);
+                                    if _guard.is_none() {
+                                        continue;
+                                    }
+
                                     if active_playback_source == Some(ActivePlaybackSource::Local) {
                                         local_playback.stop();
                                     }
@@ -910,6 +963,21 @@ impl Worker {
                                     is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
                                     emit_local_snapshot(&self.tx, &self.media_tx, local_playback.snapshot(), false).await;
                                 } else if let Some(ref mut sp) = spotify_opt {
+                                    let now = Instant::now();
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
+                                        if matches!(last_key, PlayDebounceKey::TogglePlayback)
+                                            && now.duration_since(*last_time) < PLAY_DEBOUNCE
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    self.play_debounce = Some((PlayDebounceKey::TogglePlayback, now));
+
+                                    let _guard = PlayGuard::try_acquire(&self.play_in_flight);
+                                    if _guard.is_none() {
+                                        continue;
+                                    }
+
                                     if sp.toggle_playback(playing).await.is_ok() {
                                         is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
                                         let _ = self.media_tx.send(media::MediaUpdate::Playback(playing, 0)).await;
