@@ -718,6 +718,9 @@ impl Worker {
                                                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                                             }
 
+                                            // Set server-side volume to 100% so all attenuation is client-side via the mixer
+                                            let _ = sp.set_volume(100).await;
+
                                             // Fetch queue initially only if we have an active session
                                             if found_playback
                                                 && let Ok(queue) = sp.fetch_queue().await {
