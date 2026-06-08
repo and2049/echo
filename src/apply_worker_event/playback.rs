@@ -34,6 +34,7 @@ pub async fn handle_playback_started(
     state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.playing_track_source = Some(item.source);
     state.playback.previous_track_image = state.playback.playing_track_image.take();
+    state.playback.playing_track_image_cache = None;
     state.playback.duration_ms = item.duration_ms;
     state.playback.progress_ms = 0;
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
@@ -135,6 +136,7 @@ pub fn handle_track_image_processed(
     if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
         state.playback.playing_track_image = Some(protocol);
         state.playback.previous_track_image = None;
+        state.playback.playing_track_image_cache = None;
         if state.playback.fetching_track_id.as_deref() == Some(track_id.as_str()) {
             state.playback.fetching_track_id = None;
         }
@@ -177,6 +179,7 @@ async fn apply_synced_playback_item(
 
     if track_changed {
         state.playback.previous_track_image = state.playback.playing_track_image.take();
+        state.playback.playing_track_image_cache = None;
 
         if state.playback.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
             state.playback.current_lyric_track_id = Some(item.id.clone());
