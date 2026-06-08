@@ -25,6 +25,7 @@ pub struct EchoSpotifyClient {
     third_party: AuthCodeSpotify,
     first_party: Option<SpotifyWebApi>,
     cache: Arc<Mutex<SpotifyApiCache>>,
+    http: reqwest::Client,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,6 +47,7 @@ impl EchoSpotifyClient {
             third_party,
             first_party,
             cache: Arc::new(Mutex::new(SpotifyApiCache::default())),
+            http: reqwest::Client::new(),
         }
     }
 
@@ -442,7 +444,7 @@ impl EchoSpotifyClient {
             .context("Third-party Spotify token is unavailable")?;
         drop(token_guard);
 
-        let response = reqwest::Client::new()
+        let response = self.http
             .get(url)
             .bearer_auth(access_token)
             .send()
