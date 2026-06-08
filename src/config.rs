@@ -344,6 +344,12 @@ pub struct LibraryConfig {
     pub enable_visualizer: bool,
     #[serde(default)]
     pub local_music_dir: Option<PathBuf>,
+    #[serde(default = "default_volume")]
+    pub volume: u32,
+}
+
+fn default_volume() -> u32 {
+    100
 }
 
 fn default_enable_visualizer() -> bool {
@@ -368,6 +374,7 @@ impl Default for LibraryConfig {
             vis_bins: 7,
             enable_visualizer: false,
             local_music_dir: None,
+            volume: 100,
         }
     }
 }
