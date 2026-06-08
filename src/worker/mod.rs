@@ -968,15 +968,26 @@ impl Worker {
                                         if matches!(last_key, PlayDebounceKey::TogglePlayback)
                                             && now.duration_since(*last_time) < PLAY_DEBOUNCE
                                         {
+                                            let _ = self.tx.send(WorkerEvent::PlaybackControlState {
+                                                is_playing: !playing,
+                                            }).await;
                                             continue;
                                         }
                                     }
                                     self.play_debounce = Some((PlayDebounceKey::TogglePlayback, now));
 
-                                    let _guard = PlayGuard::try_acquire(&self.play_in_flight);
-                                    if _guard.is_none() {
-                                        continue;
-                                    }
+                                    let _guard = if playing {
+                                        let g = PlayGuard::try_acquire(&self.play_in_flight);
+                                        if g.is_none() {
+                                            let _ = self.tx.send(WorkerEvent::PlaybackControlState {
+                                                is_playing: !playing,
+                                            }).await;
+                                            continue;
+                                        }
+                                        g
+                                    } else {
+                                        None
+                                    };
 
                                     if sp.toggle_playback(playing).await.is_ok() {
                                         is_playing.store(playing, std::sync::atomic::Ordering::SeqCst);
