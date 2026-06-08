@@ -402,9 +402,13 @@ impl AppState {
                 vis_bins,
                 themes,
                 active_theme_config,
-                config.library,
+                config.library.clone(),
             ),
-            playback: PlaybackState::default(),
+            playback: {
+                let mut pb = PlaybackState::default();
+                pb.volume = config.library.volume;
+                pb
+            },
             data: DataState::new(),
         }
     }
@@ -531,6 +535,12 @@ impl AppState {
     pub fn save_library_config(&self) {
         let mut config = crate::config::AppConfig::load();
         config.library = self.ui.library_config.clone();
+        let _ = config.save();
+    }
+
+    pub fn save_volume(&self) {
+        let mut config = crate::config::AppConfig::load();
+        config.library.volume = self.playback.volume;
         let _ = config.save();
     }
 

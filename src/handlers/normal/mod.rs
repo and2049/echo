@@ -830,21 +830,25 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('=') => {
             let next_vol = (state.playback.volume + 1).min(100);
             state.playback.volume = next_vol;
+            state.save_volume();
             return Some(AppEvent::SetVolume(next_vol as u8));
         }
         KeyCode::Char('-') => {
             let next_vol = state.playback.volume.saturating_sub(1);
             state.playback.volume = next_vol;
+            state.save_volume();
             return Some(AppEvent::SetVolume(next_vol as u8));
         }
         KeyCode::Char('+') => {
             let next_vol = (state.playback.volume + 5).min(100);
             state.playback.volume = next_vol;
+            state.save_volume();
             return Some(AppEvent::SetVolume(next_vol as u8));
         }
         KeyCode::Char('_') => {
             let next_vol = state.playback.volume.saturating_sub(5);
             state.playback.volume = next_vol;
+            state.save_volume();
             return Some(AppEvent::SetVolume(next_vol as u8));
         }
         KeyCode::Tab => {
