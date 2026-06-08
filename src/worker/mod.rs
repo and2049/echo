@@ -598,7 +598,7 @@ impl Worker {
                         });
                     }
                     sync_dur = sync_interval_duration(is_playing.load(Ordering::Relaxed));
-                    sync_interval = tokio::time::interval(sync_dur);
+                    sync_interval.reset_after(sync_dur);
                 }
                 _ = interval.tick() => {
                     if active_playback_source == Some(ActivePlaybackSource::Local) {
