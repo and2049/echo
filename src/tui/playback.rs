@@ -173,14 +173,15 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         if image_area.width == 0 || image_area.height == 0 {
             // Skip rendering if area is too small
         } else {
+            let cache_area = ratatui::layout::Rect::new(0, 0, image_area.width, image_area.height);
             let render_needed = state.playback.playing_track_image_cache.as_ref().map_or(true, |cached| {
-                cached.area != image_area
+                cached.area != cache_area
             });
             if render_needed {
-                let mut cached = ratatui::buffer::Buffer::empty(image_area);
+                let mut cached = ratatui::buffer::Buffer::empty(cache_area);
                 ratatui::widgets::StatefulWidget::render(
                     ratatui_image::StatefulImage::default(),
-                    image_area,
+                    cache_area,
                     &mut cached,
                     protocol,
                 );
