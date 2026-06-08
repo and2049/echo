@@ -721,6 +721,13 @@ impl Worker {
                                             // Set server-side volume to 100% so all attenuation is client-side via the mixer
                                             let _ = sp.set_volume(100).await;
 
+                                            // Initialize mixer to saved client-side volume
+                                            let saved_volume = AppConfig::load().library.volume;
+                                            if let Some(mixer) = self.spotify_mixer.lock().as_ref() {
+                                                let mixer_vol = ((saved_volume as u32 * 65535) / 100) as u16;
+                                                mixer.set_volume(mixer_vol);
+                                            }
+
                                             // Fetch queue initially only if we have an active session
                                             if found_playback
                                                 && let Ok(queue) = sp.fetch_queue().await {
