@@ -7,13 +7,16 @@ use librespot_core::session::Session;
 use crate::events::WorkerEvent;
 use librespot_playback::audio_backend;
 use librespot_playback::config::PlayerConfig;
+use librespot_playback::mixer::Mixer;
 use librespot_playback::player::Player;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub async fn spawn_librespot_daemon(
     _access_token: String,
     device_name: String,
     tx: mpsc::Sender<WorkerEvent>,
+    mixer_holder: Arc<parking_lot::Mutex<Option<Arc<dyn Mixer>>>>,
 ) {
     tokio::spawn(async move {
         loop {
@@ -74,6 +77,7 @@ pub async fn spawn_librespot_daemon(
 
                 let mixer_fn = librespot_playback::mixer::find(None).unwrap();
                 let mixer = mixer_fn(librespot_playback::mixer::MixerConfig::default()).unwrap();
+                *mixer_holder.lock() = Some(mixer.clone());
 
                 let player = Player::new(
                     player_config,
