@@ -369,10 +369,28 @@ mod tests {
         assert_eq!(mixer_vol, 65535);
         assert_eq!(volume_to_mixer(vol.into()), 65535);
     }
+
+    #[test]
+    fn sync_interval_playing_is_30_seconds() {
+        assert_eq!(sync_interval_duration(true), std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn sync_interval_paused_is_5_minutes() {
+        assert_eq!(sync_interval_duration(false), std::time::Duration::from_secs(300));
+    }
 }
 
 fn volume_to_mixer(vol: u32) -> u16 {
     ((vol * 65535) / 100) as u16
+}
+
+fn sync_interval_duration(is_playing: bool) -> std::time::Duration {
+    if is_playing {
+        std::time::Duration::from_secs(30)
+    } else {
+        std::time::Duration::from_secs(300)
+    }
 }
 
 fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
@@ -500,7 +518,8 @@ impl Worker {
         let mut spotify_opt: Option<SpotifyWorker> = None;
         let mut api_client: Option<api::client::EchoSpotifyClient> = None;
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
-        let mut sync_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut sync_dur = sync_interval_duration(false);
+        let mut sync_interval = tokio::time::interval(sync_dur);
         let is_playing = Arc::new(AtomicBool::new(false));
         let sync_inflight = Arc::new(AtomicBool::new(false));
         let mut current_track_id: Option<String> = None;
@@ -578,6 +597,8 @@ impl Worker {
                             sync_inflight_clone.store(false, Ordering::SeqCst);
                         });
                     }
+                    sync_dur = sync_interval_duration(is_playing.load(Ordering::Relaxed));
+                    sync_interval = tokio::time::interval(sync_dur);
                 }
                 _ = interval.tick() => {
                     if active_playback_source == Some(ActivePlaybackSource::Local) {
