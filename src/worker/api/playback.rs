@@ -261,46 +261,103 @@ impl SpotifyWorker {
     }
 
     pub async fn toggle_playback(&mut self, is_playing: bool) -> Result<()> {
-        let device = self.get_device_id().await;
+        let device_id = self.get_device_id().await;
+        match self.try_toggle_playback(device_id.as_deref(), is_playing).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.try_toggle_playback(fresh.as_deref(), is_playing).await
+            }
+            other => other,
+        }
+    }
+
+    async fn try_toggle_playback(&self, device: Option<&str>, is_playing: bool) -> Result<()> {
         if is_playing {
-            self.client.resume_playback(device.as_deref(), None).await?;
+            self.client.resume_playback(device, None).await?;
         } else {
-            self.client.pause_playback(device.as_deref()).await?;
+            self.client.pause_playback(device).await?;
         }
         Ok(())
     }
 
     pub async fn next_track(&mut self) -> Result<()> {
-        let device = self.get_device_id().await;
-        self.client.next_track(device.as_deref()).await?;
-        Ok(())
+        let device_id = self.get_device_id().await;
+        match self.client.next_track(device_id.as_deref()).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.client.next_track(fresh.as_deref()).await.map_err(Into::into)
+            }
+            other => other.map_err(Into::into),
+        }
     }
 
     pub async fn previous_track(&mut self) -> Result<()> {
-        let device = self.get_device_id().await;
-        self.client.previous_track(device.as_deref()).await?;
-        Ok(())
+        let device_id = self.get_device_id().await;
+        match self.client.previous_track(device_id.as_deref()).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.client.previous_track(fresh.as_deref()).await.map_err(Into::into)
+            }
+            other => other.map_err(Into::into),
+        }
     }
 
     pub async fn toggle_shuffle(&mut self, is_shuffled: bool) -> Result<()> {
-        let device = self.get_device_id().await;
-        self.client.shuffle(is_shuffled, device.as_deref()).await?;
-        Ok(())
+        let device_id = self.get_device_id().await;
+        match self.client.shuffle(is_shuffled, device_id.as_deref()).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.client.shuffle(is_shuffled, fresh.as_deref()).await.map_err(Into::into)
+            }
+            other => other.map_err(Into::into),
+        }
     }
 
     pub async fn set_repeat_mode(&mut self, state: rspotify::model::RepeatState) -> Result<()> {
-        let device = self.get_device_id().await;
-        self.client.repeat(state, device.as_deref()).await?;
-        Ok(())
+        let device_id = self.get_device_id().await;
+        match self.client.repeat(state, device_id.as_deref()).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.client.repeat(state, fresh.as_deref()).await.map_err(Into::into)
+            }
+            other => other.map_err(Into::into),
+        }
     }
 
     pub async fn set_volume(&mut self, volume: u8) -> Result<()> {
-        let device = self.get_device_id().await;
-        self.client.volume(volume, device.as_deref()).await?;
-        Ok(())
+        let device_id = self.get_device_id().await;
+        match self.client.volume(volume, device_id.as_deref()).await {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                let fresh = self.get_device_id().await;
+                self.client.volume(volume, fresh.as_deref()).await.map_err(Into::into)
+            }
+            other => other.map_err(Into::into),
+        }
     }
 
     pub async fn play_track(
+        &mut self,
+        context_id: &str,
+        track_id: &str,
+        is_album: bool,
+    ) -> Result<()> {
+        let result = self.play_track_inner(context_id, track_id, is_album).await;
+        match result {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                self.play_track_inner(context_id, track_id, is_album).await
+            }
+            other => other,
+        }
+    }
+
+    async fn play_track_inner(
         &mut self,
         context_id: &str,
         track_id: &str,
@@ -529,4 +586,8 @@ impl SpotifyWorker {
         self.client.transfer_playback(device_id, Some(true)).await?;
         Ok(())
     }
+}
+
+fn is_device_not_found<E: std::fmt::Debug>(err: &E) -> bool {
+    format!("{err:?}").contains("404")
 }
