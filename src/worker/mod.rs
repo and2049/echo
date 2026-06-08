@@ -34,6 +34,7 @@ pub struct Worker {
     media_tx: mpsc::Sender<media::MediaUpdate>,
     first_party: Option<api::first_party::SpotifyWebApi>,
     artist_page_generation: Arc<AtomicU64>,
+    spotify_mixer: Arc<parking_lot::Mutex<Option<Arc<dyn librespot_playback::mixer::Mixer>>>>,
 }
 
 fn save_playlists_cache(playlists: Vec<crate::models::Playlist>) {
@@ -344,6 +345,34 @@ mod tests {
         assert!(!local_watch_path_relevant(Path::new("/music/notes.txt")));
         assert!(!local_watch_path_relevant(Path::new("/music/cover.gif")));
     }
+
+    #[test]
+    fn volume_0_maps_to_mixer_0() {
+        assert_eq!(volume_to_mixer(0), 0);
+    }
+
+    #[test]
+    fn volume_100_maps_to_mixer_max() {
+        assert_eq!(volume_to_mixer(100), 65535);
+    }
+
+    #[test]
+    fn volume_50_maps_to_half_range() {
+        let val = volume_to_mixer(50);
+        assert!(val > 32000 && val < 33000, "expected ~32767, got {val}");
+    }
+
+    #[test]
+    fn volume_boundary_u8_max_maps_without_overflow() {
+        let vol: u8 = 100;
+        let mixer_vol = ((vol as u32 * 65535) / 100) as u16;
+        assert_eq!(mixer_vol, 65535);
+        assert_eq!(volume_to_mixer(vol.into()), 65535);
+    }
+}
+
+fn volume_to_mixer(vol: u32) -> u16 {
+    ((vol * 65535) / 100) as u16
 }
 
 fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
@@ -376,6 +405,7 @@ impl Worker {
             media_tx,
             first_party,
             artist_page_generation: Arc::new(AtomicU64::new(0)),
+            spotify_mixer: Arc::new(parking_lot::Mutex::new(None)),
         }
     }
 
@@ -635,7 +665,7 @@ impl Worker {
                                             }
                                         }
 
-                                        audio::spawn_librespot_daemon(String::new(), "echo-rs".to_string(), self.tx.clone()).await;
+                                        audio::spawn_librespot_daemon(String::new(), "echo-rs".to_string(), self.tx.clone(), self.spotify_mixer.clone()).await;
 
                                         // Hydrate library lists from cache immediately, then refresh stale entries in background.
                                         if let Some(ref mut sp) = spotify_opt {
@@ -880,8 +910,17 @@ impl Worker {
                                 if active_playback_source == Some(ActivePlaybackSource::Local) {
                                     let snapshot = local_playback.set_volume(u32::from(vol));
                                     emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
-                                } else if let Some(ref mut sp) = spotify_opt {
-                                    let _ = sp.set_volume(vol).await;
+                                } else {
+                                    let mixer_used = self.spotify_mixer.lock().as_ref().map_or(false, |mixer| {
+                                        let mixer_vol = ((vol as u32 * 65535) / 100) as u16;
+                                        mixer.set_volume(mixer_vol);
+                                        true
+                                    });
+                                    if !mixer_used {
+                                        if let Some(ref mut sp) = spotify_opt {
+                                            let _ = sp.set_volume(vol).await;
+                                        }
+                                    }
                                 }
                             }
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
