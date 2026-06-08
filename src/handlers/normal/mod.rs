@@ -730,7 +730,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(AppEvent::FetchDevices);
         }
         KeyCode::Char(' ') => {
-            return Some(AppEvent::TogglePlayback(!state.playback.is_playing));
+            state.playback.is_playing = !state.playback.is_playing;
+            state.playback.playback_last_updated_at = Some(std::time::Instant::now());
+            return Some(AppEvent::TogglePlayback(state.playback.is_playing));
         }
         KeyCode::Char('c') if state.ui.active_view == ActiveView::Library => {
             state.ui.mode = crate::app::AppMode::Command;
@@ -778,6 +780,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char(']') | KeyCode::Char('>') => {
             state.playback.progress_ms = 0;
             state.playback.duration_ms = 0;
+            state.playback.playback_last_updated_at = Some(std::time::Instant::now());
             return Some(AppEvent::NextTrack {
                 current_track_id: state.playback.playing_track_id.clone(),
             });
@@ -785,6 +788,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('[') | KeyCode::Char('<') => {
             state.playback.progress_ms = 0;
             state.playback.duration_ms = 0;
+            state.playback.playback_last_updated_at = Some(std::time::Instant::now());
             return Some(AppEvent::PreviousTrack {
                 current_track_id: state.playback.playing_track_id.clone(),
             });
