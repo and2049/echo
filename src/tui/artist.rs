@@ -19,27 +19,27 @@ pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title("  Followed Artists  ")
-        .style(state.active_theme.base_style())
-        .border_style(if state.active_view == ActiveView::ArtistList {
-            state.active_theme.secondary_style()
+        .style(state.ui.active_theme.base_style())
+        .border_style(if state.ui.active_view == ActiveView::ArtistList {
+            state.ui.active_theme.secondary_style()
         } else {
-            state.active_theme.primary_style()
+            state.ui.active_theme.primary_style()
         });
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let items: Vec<ListItem> = state
+    let items: Vec<ListItem> = state.data
         .followed_artists
         .iter()
         .enumerate()
         .map(|(i, artist)| {
-            let style = if i == state.selected_artist_index
-                && state.active_view == ActiveView::ArtistList
+            let style = if i == state.ui.selected_artist_index
+                && state.ui.active_view == ActiveView::ArtistList
             {
-                state.active_theme.selected_style()
+                state.ui.active_theme.selected_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
 
             let text = format!(" {} ", stabilize_terminal_emoji_width(&artist.name));
@@ -48,57 +48,57 @@ pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .collect();
 
     let list = padded_library_list(items).highlight_style(
-        state
+        state.ui
             .active_theme
             .selected_style()
             .add_modifier(Modifier::BOLD),
     );
 
     let mut list_state = ListState::default();
-    list_state.select(Some(state.selected_artist_index));
+    list_state.select(Some(state.ui.selected_artist_index));
     frame.render_stateful_widget(list, inner_area, &mut list_state);
 }
 
 pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let artist_name = state
+    let artist_name = state.data
         .artist_page_data
         .as_ref()
         .map(|d| d.artist_name.clone())
         .unwrap_or_default();
 
-    let is_active = state.active_view == ActiveView::ArtistPage;
+    let is_active = state.ui.active_view == ActiveView::ArtistPage;
     let title = format!("  {}  ", artist_name);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .border_style(if is_active {
-            state.active_theme.secondary_style()
+            state.ui.active_theme.secondary_style()
         } else {
-            state.active_theme.primary_style()
+            state.ui.active_theme.primary_style()
         });
 
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let Some((artist_image_url, albums)) = state
+    let Some((artist_image_url, albums)) = state.data
         .artist_page_data
         .as_ref()
         .map(|data| (data.image_url.clone(), data.albums.clone()))
     else {
-        let message = if state.artist_page_loading {
+        let message = if state.data.artist_page_loading {
             "  Loading artist..."
         } else {
             "  Artist page unavailable."
         };
-        let p = ratatui::widgets::Paragraph::new(message).style(state.active_theme.muted_style());
+        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
         frame.render_widget(p, inner_area);
         return;
     };
 
     let has_image = artist_image_url.is_some()
-        && (state.active_library_header_image.is_some() || state.header_image_cache.is_some());
+        && (state.ui.active_library_header_image.is_some() || state.ui.header_image_cache.is_some());
     let (header_area, albums_area) = if has_image {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -114,25 +114,25 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     if albums.is_empty() {
-        let message = if state.artist_albums_loading {
+        let message = if state.data.artist_albums_loading {
             "  Loading albums..."
         } else {
             "  No albums loaded."
         };
-        let p = ratatui::widgets::Paragraph::new(message).style(state.active_theme.muted_style());
+        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
         frame.render_widget(p, albums_area);
         return;
     }
 
-    let selected_idx = state.artist_page_album_index;
+    let selected_idx = state.ui.artist_page_album_index;
     let show_track_count = albums.iter().any(|album| album.track_count.is_some());
     let header_style = if is_active {
-        state
+        state.ui
             .active_theme
             .secondary_style()
             .add_modifier(Modifier::BOLD)
     } else {
-        state
+        state.ui
             .active_theme
             .primary_style()
             .add_modifier(Modifier::BOLD)
@@ -143,9 +143,9 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .enumerate()
         .map(|(i, album)| {
             let style = if i == selected_idx && is_active {
-                state.active_theme.selected_style()
+                state.ui.active_theme.selected_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
             let album_name_width = if show_track_count {
                 albums_area.width.saturating_mul(70) / 100
@@ -192,7 +192,7 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         )
     }
     .column_spacing(1)
-    .row_highlight_style(state.active_theme.selected_style())
+    .row_highlight_style(state.ui.active_theme.selected_style())
     .highlight_symbol(" ")
     .highlight_spacing(HighlightSpacing::Always);
 
@@ -214,18 +214,18 @@ fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, art
         height: 5,
     };
 
-    if state.header_image_dirty {
-        if let Some(ref mut protocol) = state.active_library_header_image {
+    if state.ui.header_image_dirty {
+        if let Some(ref mut protocol) = state.ui.active_library_header_image {
             let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
             let mut cached = Buffer::empty(cache_area);
             let image = ratatui_image::StatefulImage::default();
             StatefulWidget::render(image, cache_area, &mut cached, protocol);
-            state.header_image_cache = Some(cached);
+            state.ui.header_image_cache = Some(cached);
         }
-        state.header_image_dirty = false;
+        state.ui.header_image_dirty = false;
     }
 
-    if let Some(ref cached) = state.header_image_cache {
+    if let Some(ref cached) = state.ui.header_image_cache {
         let buf = frame.buffer_mut();
         for y in 0..cached.area.height.min(img_area.height) {
             for x in 0..cached.area.width.min(img_area.width) {
@@ -249,7 +249,7 @@ fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, art
 
     let title_para = ratatui::widgets::Paragraph::new(artist_name.to_string()).style(
         Style::default()
-            .fg(state.active_theme.primary)
+            .fg(state.ui.active_theme.primary)
             .add_modifier(Modifier::BOLD),
     );
     frame.render_widget(title_para, text_chunks[1]);

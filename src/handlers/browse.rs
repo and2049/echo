@@ -9,38 +9,38 @@ pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
 }
 
 pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
-    match state.active_browse_node {
+    match state.ui.active_browse_node {
         BrowseNode::TopTracks => {
-            if state.top_tracks.is_empty() {
+            if state.data.top_tracks.is_empty() {
                 return Some(AppEvent::FetchTopTracks);
             }
             state.show_generated_tracks(
-                state.top_tracks.clone(),
+                state.data.top_tracks.clone(),
                 TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
             );
         }
         BrowseNode::RecentlyPlayed => {
-            if state.recently_played.is_empty() {
+            if state.data.recently_played.is_empty() {
                 return Some(AppEvent::FetchRecentlyPlayed);
             }
             state.show_generated_tracks(
-                state.recently_played.clone(),
+                state.data.recently_played.clone(),
                 TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
             );
         }
         BrowseNode::FollowedArtists => {
-            if state.followed_artists.is_empty() {
+            if state.data.followed_artists.is_empty() {
                 return Some(AppEvent::FetchFollowedArtists);
             }
-            state.active_view = ActiveView::ArtistList;
-            state.selected_artist_index = 0;
+            state.ui.active_view = ActiveView::ArtistList;
+            state.ui.selected_artist_index = 0;
         }
     }
     None
 }
 
 pub fn select_node_from_library_index(state: &mut AppState) {
-    state.active_browse_node = match state.selected_playlist_index {
+    state.ui.active_browse_node = match state.ui.selected_playlist_index {
         0 => BrowseNode::TopTracks,
         1 => BrowseNode::RecentlyPlayed,
         _ => BrowseNode::FollowedArtists,
@@ -54,7 +54,7 @@ mod tests {
     #[test]
     fn top_tracks_selection_does_not_request_fetch() {
         let mut state = AppState::new();
-        state.active_browse_node = BrowseNode::TopTracks;
+        state.ui.active_browse_node = BrowseNode::TopTracks;
 
         assert!(load_event_if_needed(&state).is_none());
     }
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn entering_empty_top_tracks_requests_fetch() {
         let mut state = AppState::new();
-        state.active_browse_node = BrowseNode::TopTracks;
+        state.ui.active_browse_node = BrowseNode::TopTracks;
 
         assert!(matches!(
             enter_active_node(&mut state),
@@ -73,9 +73,9 @@ mod tests {
     #[test]
     fn clicking_top_track_loads_artist_page() {
         let mut state = AppState::new();
-        state.active_view = ActiveView::Library;
-        state.selected_playlist_index = 0; // The "Browse" node
-        state.top_tracks = vec![crate::models::Track {
+        state.ui.active_view = ActiveView::Library;
+        state.ui.selected_playlist_index = 0; // The "Browse" node
+        state.data.top_tracks = vec![crate::models::Track {
             id: "track1".to_string(),
             source: crate::models::TrackSource::Spotify,
             local_path: None,
@@ -89,7 +89,7 @@ mod tests {
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
-            !state
+            !state.data
                 .active_tracklist_context
                 .as_ref()
                 .unwrap()
@@ -100,8 +100,8 @@ mod tests {
     #[test]
     fn generated_top_tracks_do_not_request_worker_load() {
         let mut state = AppState::new();
-        state.active_browse_node = BrowseNode::TopTracks;
-        state.top_tracks = vec![crate::models::Track {
+        state.ui.active_browse_node = BrowseNode::TopTracks;
+        state.data.top_tracks = vec![crate::models::Track {
             id: "track".to_string(),
             source: crate::models::TrackSource::Spotify,
             local_path: None,
@@ -115,7 +115,7 @@ mod tests {
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
-            !state
+            !state.data
                 .active_tracklist_context
                 .as_ref()
                 .unwrap()

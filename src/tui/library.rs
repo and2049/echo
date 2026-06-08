@@ -55,64 +55,64 @@ fn lerp_color(c1: Color, c2: Color, t: f32) -> Color {
 }
 
 pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area: Rect) {
-    let is_focused = state.active_view == ActiveView::Library;
-    let p_title = if state.active_library_tab == crate::app::LibraryTab::Playlists {
+    let is_focused = state.ui.active_view == ActiveView::Library;
+    let p_title = if state.ui.active_library_tab == crate::app::LibraryTab::Playlists {
         format!(
             "[{}]",
-            crate::i18n::t("ui.playlists", &state.library_config.language)
+            crate::i18n::t("ui.playlists", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.playlists", &state.library_config.language)
+            crate::i18n::t("ui.playlists", &state.ui.library_config.language)
         )
     };
-    let a_title = if state.active_library_tab == crate::app::LibraryTab::Albums {
+    let a_title = if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
         format!(
             "[{}]",
-            crate::i18n::t("ui.albums", &state.library_config.language)
+            crate::i18n::t("ui.albums", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.albums", &state.library_config.language)
+            crate::i18n::t("ui.albums", &state.ui.library_config.language)
         )
     };
-    let b_title = if state.active_library_tab == crate::app::LibraryTab::Browse {
+    let b_title = if state.ui.active_library_tab == crate::app::LibraryTab::Browse {
         format!(
             "[{}]",
-            crate::i18n::t("ui.browse", &state.library_config.language)
+            crate::i18n::t("ui.browse", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.browse", &state.library_config.language)
+            crate::i18n::t("ui.browse", &state.ui.library_config.language)
         )
     };
     let title_text = format!("{} {} {}", p_title, a_title, b_title);
 
     let library_border_style = if is_focused {
-        state.active_theme.secondary_style()
+        state.ui.active_theme.secondary_style()
     } else {
-        state.active_theme.primary_style()
+        state.ui.active_theme.primary_style()
     };
 
     let library_block = Block::default()
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .border_style(library_border_style)
         .title(title_text);
     let library_list_area = library_block.inner(library_area);
     let library_text_width = row_text_width(library_list_area);
     frame.render_widget(library_block, library_area);
 
-    let visual_range = if is_focused && state.mode == AppMode::Visual {
+    let visual_range = if is_focused && state.ui.mode == AppMode::Visual {
         state.get_visual_selection_range()
     } else {
         None
     };
 
-    let library_items: Vec<ListItem> = state
+    let library_items: Vec<ListItem> = state.data
         .library_view
         .iter()
         .enumerate()
@@ -124,14 +124,14 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
             };
 
             let style = if is_in_visual {
-                state
+                state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.active_theme.primary)
-            } else if i == state.selected_playlist_index {
-                state.active_theme.selected_style()
+                    .bg(state.ui.active_theme.primary)
+            } else if i == state.ui.selected_playlist_index {
+                state.ui.active_theme.selected_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
 
             match node {
@@ -141,10 +141,10 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                         &format!("{} {}", prefix, stabilize_terminal_emoji_width(&f.name)),
                         library_text_width,
                     );
-                    let folder_style = if i == state.selected_playlist_index {
+                    let folder_style = if i == state.ui.selected_playlist_index {
                         style
                     } else {
-                        state.active_theme.primary_style()
+                        state.ui.active_theme.primary_style()
                     };
                     ListItem::new(text).style(folder_style.add_modifier(Modifier::BOLD))
                 }
@@ -153,7 +153,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                     for _ in 0..*indent {
                         prefix.push_str("  ");
                     }
-                    if state.library_config.pinned.contains(&playlist.id) {
+                    if state.ui.library_config.pinned.contains(&playlist.id) {
                         prefix.push_str("📌 ");
                     }
 
@@ -165,8 +165,8 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                     let text = truncate_to_width_with_ellipsis(&text, library_text_width);
 
                     // Mark as ghosted if it is in the cut register
-                    let list_style = if state.operation_register.contains(&playlist.id) {
-                        style.fg(state.active_theme.text_muted)
+                    let list_style = if state.ui.operation_register.contains(&playlist.id) {
+                        style.fg(state.ui.active_theme.text_muted)
                     } else {
                         style
                     };
@@ -177,8 +177,8 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         })
         .collect();
 
-    if state.active_library_tab == crate::app::LibraryTab::Albums {
-        let items: Vec<ListItem> = state
+    if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
+        let items: Vec<ListItem> = state.data
             .saved_albums
             .iter()
             .enumerate()
@@ -188,15 +188,15 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                 } else {
                     false
                 };
-                let style = if is_in_visual {
-                    state
-                        .active_theme
-                        .selected_style()
-                        .bg(state.active_theme.primary)
-                } else if is_focused && i == state.selected_playlist_index {
-                    state.active_theme.selected_style()
+                    let style = if is_in_visual {
+                        state.ui
+                            .active_theme
+                            .selected_style()
+                            .bg(state.ui.active_theme.primary)
+                } else if is_focused && i == state.ui.selected_playlist_index {
+                    state.ui.active_theme.selected_style()
                 } else {
-                    state.active_theme.base_style()
+                    state.ui.active_theme.base_style()
                 };
                 ListItem::new(truncate_to_width_with_ellipsis(
                     &stabilize_terminal_emoji_width(&album.name),
@@ -207,17 +207,17 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
             .collect();
 
         let list = padded_library_list(items).highlight_style(
-            state
+            state.ui
                 .active_theme
                 .selected_style()
                 .add_modifier(Modifier::BOLD),
         );
 
         let mut list_state = ListState::default();
-        list_state.select(Some(state.selected_playlist_index));
+        list_state.select(Some(state.ui.selected_playlist_index));
         frame.render_stateful_widget(list, library_list_area, &mut list_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
-    } else if state.active_library_tab == crate::app::LibraryTab::Browse {
+    } else if state.ui.active_library_tab == crate::app::LibraryTab::Browse {
         let items: Vec<ListItem> =
             vec!["📈 Top Tracks", "🕒 Recently Played", "👤 Followed Artists"]
                 .into_iter()
@@ -228,15 +228,15 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                     } else {
                         false
                     };
-                    let style = if is_in_visual {
-                        state
-                            .active_theme
-                            .selected_style()
-                            .bg(state.active_theme.primary)
-                    } else if is_focused && i == state.selected_playlist_index {
-                        state.active_theme.selected_style()
+                let style = if is_in_visual {
+                    state.ui
+                        .active_theme
+                        .selected_style()
+                        .bg(state.ui.active_theme.primary)
+                    } else if is_focused && i == state.ui.selected_playlist_index {
+                        state.ui.active_theme.selected_style()
                     } else {
-                        state.active_theme.base_style()
+                        state.ui.active_theme.base_style()
                     };
                     let text = stabilize_terminal_emoji_width(name);
                     ListItem::new(truncate_to_width_with_ellipsis(&text, library_text_width))
@@ -245,49 +245,49 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                 .collect();
 
         let list = padded_library_list(items).highlight_style(
-            state
+            state.ui
                 .active_theme
                 .selected_style()
                 .add_modifier(Modifier::BOLD),
         );
 
         let mut list_state = ListState::default();
-        list_state.select(Some(state.selected_playlist_index));
+        list_state.select(Some(state.ui.selected_playlist_index));
         frame.render_stateful_widget(list, library_list_area, &mut list_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else {
         let playlist_list = padded_library_list(library_items);
         let mut playlist_state = ListState::default();
-        playlist_state.select(Some(state.selected_playlist_index));
+        playlist_state.select(Some(state.ui.selected_playlist_index));
         frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     }
 }
 
 pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
-    let is_album_context = state
+    let is_album_context = state.data
         .active_tracklist_context
         .as_ref()
         .map(|context| context.is_album())
         .unwrap_or(false);
 
-    let visual_range = if state.active_view == ActiveView::TrackList {
+    let visual_range = if state.ui.active_view == ActiveView::TrackList {
         state.get_visual_selection_range()
     } else {
         None
     };
 
-    let is_liked_songs = state
+    let is_liked_songs = state.data
         .active_tracklist_context
         .as_ref()
         .map_or(false, |context| context.id == "LIKED_SONGS");
 
-    let track_rows: Vec<Row> = state
+    let track_rows: Vec<Row> = state.data
         .tracks
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let is_match = state.mode == AppMode::Search && state.search_matches.contains(&i);
+            let is_match = state.ui.mode == AppMode::Search && state.ui.search_matches.contains(&i);
 
             let is_in_visual = if let Some((start, end)) = visual_range {
                 i >= start && i <= end
@@ -296,19 +296,19 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             };
 
             let style = if is_in_visual {
-                state
+                state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.active_theme.primary)
-            } else if i == state.selected_track_index {
-                state.active_theme.selected_style()
+                    .bg(state.ui.active_theme.primary)
+            } else if i == state.ui.selected_track_index {
+                state.ui.active_theme.selected_style()
             } else if is_match {
-                state
+                state.ui
                     .active_theme
                     .base_style()
-                    .fg(state.active_theme.secondary)
+                    .fg(state.ui.active_theme.secondary)
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
 
             let prefix = if Some(t.id.clone()) == state.playback.playing_track_id {
@@ -317,28 +317,28 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 ""
             };
 
-            let number_cell = if state.library_config.track_index_base < 0 {
+            let number_cell = if state.ui.library_config.track_index_base < 0 {
                 Cell::from("")
             } else {
                 Cell::from(format!(
                     "{:>3}",
-                    (i as isize) + state.library_config.track_index_base
+                    (i as isize) + state.ui.library_config.track_index_base
                 ))
             };
 
             let liked_str = if is_liked_songs {
                 ""
-            } else if state.liked_tracks.contains(&t.id) {
+            } else if state.data.liked_tracks.contains(&t.id) {
                 "♥"
             } else {
                 " "
             };
 
-            let is_selected = is_in_visual || i == state.selected_track_index;
+            let is_selected = is_in_visual || i == state.ui.selected_track_index;
             let liked_cell = if is_selected {
                 Cell::from(liked_str)
             } else {
-                Cell::from(liked_str).style(Style::default().fg(state.active_theme.secondary))
+                Cell::from(liked_str).style(Style::default().fg(state.ui.active_theme.secondary))
             };
 
             let title_cell = Cell::from(format!(
@@ -366,17 +366,17 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         })
         .collect();
 
-    let is_track_focused = state.active_view == ActiveView::TrackList;
+    let is_track_focused = state.ui.active_view == ActiveView::TrackList;
     let track_border_style = if is_track_focused {
-        state.active_theme.secondary_style()
+        state.ui.active_theme.secondary_style()
     } else {
-        state.active_theme.primary_style()
+        state.ui.active_theme.primary_style()
     };
 
     let track_block = Block::default()
-        .title(crate::i18n::t("ui.tracks", &state.library_config.language))
+        .title(crate::i18n::t("ui.tracks", &state.ui.library_config.language))
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .border_style(track_border_style);
     let track_inner_area = track_block.inner(tracks_area);
 
@@ -385,7 +385,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     let liked_width = if is_liked_songs { 0 } else { 2 };
 
     let table = if is_album_context {
-        let number_header = if state.library_config.track_index_base < 0 {
+        let number_header = if state.ui.library_config.track_index_base < 0 {
             ""
         } else {
             "  #"
@@ -393,7 +393,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         let header = Row::new(vec![number_header, "", "Track", "Duration "])
             .style(header_style)
             .height(1);
-        let number_width = if state.library_config.track_index_base < 0 {
+        let number_width = if state.ui.library_config.track_index_base < 0 {
             0
         } else {
             4
@@ -408,16 +408,16 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             ],
         )
         .column_spacing(1)
-        .row_highlight_style(state.active_theme.selected_style())
+        .row_highlight_style(state.ui.active_theme.selected_style())
         .highlight_symbol(" ")
         .highlight_spacing(HighlightSpacing::Always);
 
-        if !state.tracks.is_empty() {
+        if !state.data.tracks.is_empty() {
             t = t.header(header);
         }
         t
     } else {
-        let number_header = if state.library_config.track_index_base < 0 {
+        let number_header = if state.ui.library_config.track_index_base < 0 {
             ""
         } else {
             "  #"
@@ -425,7 +425,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         let header = Row::new(vec![number_header, "", "Track", "Artist", "Duration "])
             .style(header_style)
             .height(1);
-        let number_width = if state.library_config.track_index_base < 0 {
+        let number_width = if state.ui.library_config.track_index_base < 0 {
             0
         } else {
             4
@@ -441,11 +441,11 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             ],
         )
         .column_spacing(1)
-        .row_highlight_style(state.active_theme.selected_style())
+        .row_highlight_style(state.ui.active_theme.selected_style())
         .highlight_symbol(" ")
         .highlight_spacing(HighlightSpacing::Always);
 
-        if !state.tracks.is_empty() {
+        if !state.data.tracks.is_empty() {
             t = t.header(header);
         }
         t
@@ -454,8 +454,8 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     frame.render_widget(track_block, tracks_area);
 
     let mut header_info: Option<(String, String)> = None;
-    if !state.tracks.is_empty() {
-        header_info = state
+    if !state.data.tracks.is_empty() {
+        header_info = state.data
             .active_tracklist_context
             .as_ref()
             .map(|context| (context.title.clone(), context.subtitle.clone()));
@@ -478,7 +478,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         && let Some((title, author)) = header_info
     {
         let has_image =
-            state.active_library_header_image.is_some() || state.header_image_cache.is_some();
+            state.ui.active_library_header_image.is_some() || state.ui.header_image_cache.is_some();
         let image_width = if has_image { 14 } else { 2 };
 
         let chunks = ratatui::layout::Layout::default()
@@ -496,18 +496,18 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             height: if has_image { 5 } else { 0 },
         };
 
-        if state.header_image_dirty {
-            if let Some(ref mut protocol) = state.active_library_header_image {
+        if state.ui.header_image_dirty {
+            if let Some(ref mut protocol) = state.ui.active_library_header_image {
                 let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
                 let mut cached = Buffer::empty(cache_area);
                 let image = ratatui_image::StatefulImage::default();
                 StatefulWidget::render(image, cache_area, &mut cached, protocol);
-                state.header_image_cache = Some(cached);
+                state.ui.header_image_cache = Some(cached);
             }
-            state.header_image_dirty = false;
+            state.ui.header_image_dirty = false;
         }
 
-        if let Some(ref cached) = state.header_image_cache {
+        if let Some(ref cached) = state.ui.header_image_cache {
             let buf = frame.buffer_mut();
             for y in 0..cached.area.height.min(img_area.height) {
                 for x in 0..cached.area.width.min(img_area.width) {
@@ -533,15 +533,15 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
         let title_para = ratatui::widgets::Paragraph::new(title).style(
             Style::default()
-                .fg(state.active_theme.primary)
+                .fg(state.ui.active_theme.primary)
                 .add_modifier(Modifier::BOLD),
         );
         let author_para = ratatui::widgets::Paragraph::new(author)
-            .style(Style::default().fg(state.active_theme.secondary));
+            .style(Style::default().fg(state.ui.active_theme.secondary));
         let count_para = ratatui::widgets::Paragraph::new(format!(
             "{} {}",
-            state.tracks.len(),
-            crate::i18n::t("ui.tracks", &state.library_config.language)
+            state.data.tracks.len(),
+            crate::i18n::t("ui.tracks", &state.ui.library_config.language)
         ))
         .style(Style::default().fg(Color::DarkGray));
 
@@ -551,15 +551,15 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     }
 
     let mut ts = TableState::default();
-    let sel = if state.tracks.is_empty() {
+    let sel = if state.data.tracks.is_empty() {
         0
     } else {
-        state.selected_track_index.min(state.tracks.len() - 1)
+        state.ui.selected_track_index.min(state.data.tracks.len() - 1)
     };
     ts.select(Some(sel));
     frame.render_stateful_widget(table, table_area, &mut ts);
 
-    if state.tracks.is_empty() {
+    if state.data.tracks.is_empty() {
         let logo_height = ECHO_LOGO.len() as u16;
         let logo_width = 63; // Width of the longest line in ECHO_LOGO
 
@@ -574,13 +574,13 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                     for (i, c) in line.chars().enumerate() {
                         let t = i as f32 / logo_width as f32;
                         let base_color =
-                            lerp_color(state.active_theme.secondary, state.active_theme.primary, t);
+                            lerp_color(state.ui.active_theme.secondary, state.ui.active_theme.primary, t);
 
                         let style = if c == '█' {
                             Style::default().fg(base_color)
                         } else if c != ' ' {
                             let (r, g, b) = color_to_rgb(base_color);
-                            let (bg_r, bg_g, bg_b) = color_to_rgb(state.active_theme.background);
+                            let (bg_r, bg_g, bg_b) = color_to_rgb(state.ui.active_theme.background);
                             let alpha = 0.4;
                             let shadow_color = Color::Rgb(
                                 (r * alpha + bg_r * (1.0 - alpha)) as u8,

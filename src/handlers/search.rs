@@ -5,22 +5,22 @@ use crossterm::event::{KeyCode, KeyEvent};
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
         KeyCode::Esc => {
-            state.mode = AppMode::Normal;
-            state.search_query.clear();
-            state.search_matches.clear();
+            state.ui.mode = AppMode::Normal;
+            state.ui.search_query.clear();
+            state.ui.search_matches.clear();
         }
         KeyCode::Backspace => {
-            state.search_query.pop();
+            state.ui.search_query.pop();
             update_search_matches(state);
         }
         KeyCode::Char(c) => {
-            state.search_query.push(c);
+            state.ui.search_query.push(c);
             update_search_matches(state);
         }
         KeyCode::Enter => {
-            state.mode = AppMode::Normal;
-            if !state.search_matches.is_empty() {
-                state.selected_track_index = state.search_matches[0];
+            state.ui.mode = AppMode::Normal;
+            if !state.ui.search_matches.is_empty() {
+                state.ui.selected_track_index = state.ui.search_matches[0];
             }
         }
         _ => {}
@@ -29,26 +29,26 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
 }
 
 fn update_search_matches(state: &mut AppState) {
-    state.search_matches.clear();
-    if state.search_query.is_empty() {
+    state.ui.search_matches.clear();
+    if state.ui.search_query.is_empty() {
         return;
     }
 
-    let query = state.search_query.to_lowercase();
+    let query = state.ui.search_query.to_lowercase();
 
     // We only search tracks if we are in TrackList view
-    if state.active_view == ActiveView::TrackList {
-        for (i, track) in state.tracks.iter().enumerate() {
+    if state.ui.active_view == ActiveView::TrackList {
+        for (i, track) in state.data.tracks.iter().enumerate() {
             if track.name.to_lowercase().contains(&query)
                 || track.artist.to_lowercase().contains(&query)
             {
-                state.search_matches.push(i);
+                state.ui.search_matches.push(i);
             }
         }
 
         // Implement incsearch logic: jump cursor to the first match immediately
-        if !state.search_matches.is_empty() {
-            state.selected_track_index = state.search_matches[0];
+        if !state.ui.search_matches.is_empty() {
+            state.ui.selected_track_index = state.ui.search_matches[0];
         }
     }
 }

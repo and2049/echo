@@ -10,18 +10,18 @@ use ratatui::{
 
 pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let shuffle_str = if state.playback.is_shuffled {
-        crate::i18n::t("ui.on", &state.library_config.language)
+        crate::i18n::t("ui.on", &state.ui.library_config.language)
     } else {
-        crate::i18n::t("ui.off", &state.library_config.language)
+        crate::i18n::t("ui.off", &state.ui.library_config.language)
     };
 
     let repeat_str = if state.playback.repeat_mode == "Off" {
-        crate::i18n::t("ui.off", &state.library_config.language)
+        crate::i18n::t("ui.off", &state.ui.library_config.language)
     } else {
         state.playback.repeat_mode.clone()
     };
 
-    let mut border_title = crate::i18n::t("ui.playing", &state.library_config.language);
+    let mut border_title = crate::i18n::t("ui.playing", &state.ui.library_config.language);
     border_title = border_title.replacen("{}", &state.playback.device_name, 1);
     border_title = border_title.replacen("{}", &format!("{:<7}", shuffle_str), 1);
     border_title = border_title.replacen("{}", &format!("{:<7}", repeat_str), 1);
@@ -29,8 +29,8 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     let playback_block = Block::default()
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style())
+        .style(state.ui.active_theme.base_style())
+        .border_style(state.ui.active_theme.primary_style())
         .title(border_title);
 
     let playback_inner = playback_block.inner(area);
@@ -77,17 +77,17 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     let play_icon_p = Paragraph::new(play_icon)
         .alignment(Alignment::Left)
-        .style(state.active_theme.primary_style());
+        .style(state.ui.active_theme.primary_style());
 
     let current_time_p = Paragraph::new(progress_str)
         .alignment(Alignment::Right)
-        .style(state.active_theme.base_style());
+        .style(state.ui.active_theme.base_style());
     let total_time_p = Paragraph::new(duration_str)
         .alignment(Alignment::Left)
-        .style(state.active_theme.base_style());
+        .style(state.ui.active_theme.base_style());
 
     let gauge = Gauge::default()
-        .gauge_style(state.active_theme.gauge_style())
+        .gauge_style(state.ui.active_theme.gauge_style())
         .ratio(ratio)
         .label(""); // hide inner text
 
@@ -109,7 +109,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         .enable_visualizer
         .as_ref()
         .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
-        .unwrap_or(state.library_config.enable_visualizer);
+        .unwrap_or(state.ui.library_config.enable_visualizer);
 
     let mut main_constraints = vec![Constraint::Length(38), Constraint::Min(0)];
     if is_vis_enabled {
@@ -185,19 +185,19 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     let text_lines = vec![
         Line::from(Span::styled(
             track_title,
-            state.active_theme.base_style().add_modifier(Modifier::BOLD),
+            state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(track_artist, state.active_theme.muted_style())),
+        Line::from(Span::styled(track_artist, state.ui.active_theme.muted_style())),
     ];
     let track_text_p = Paragraph::new(text_lines)
         .alignment(Alignment::Left)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         // Add top padding to vertically align with the center of the image
         .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
     frame.render_widget(track_text_p, track_info_chunks[text_idx]);
 
     // Render Condensed Lyrics perfectly centered
-    if state.condensed_lyrics_enabled {
+    if state.ui.condensed_lyrics_enabled {
         let center_width = main_layout[1].width;
         let total_width = playback_chunks[0].width;
         let center_x = main_layout[1].x;
@@ -219,11 +219,11 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
             Line::from(vec![Span::raw(pad_str), Span::styled(trunc_line, style)])
         };
 
-        let lyrics_lines = if let Some(lyrics) = &state.current_lyrics {
+        let lyrics_lines = if let Some(lyrics) = &state.playback.current_lyrics {
             if lyrics.lines.is_empty() {
                 vec![format_lyric(
                     "No lyrics found.",
-                    state.active_theme.muted_style(),
+                    state.ui.active_theme.muted_style(),
                 )]
             } else {
                 let mut current_lyric_idx = 0;
@@ -250,18 +250,18 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
                 vec![
                     format_lyric(
                         current_line,
-                        state
+                        state.ui
                             .active_theme
                             .primary_style()
                             .add_modifier(Modifier::BOLD),
                     ),
-                    format_lyric(next_line, state.active_theme.muted_style()),
+                    format_lyric(next_line, state.ui.active_theme.muted_style()),
                 ]
             }
         } else if !state.playback.playing_track_title.is_empty() {
             vec![format_lyric(
                 "No lyrics found.",
-                state.active_theme.muted_style(),
+                state.ui.active_theme.muted_style(),
             )]
         } else {
             vec![]
@@ -270,7 +270,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         if !lyrics_lines.is_empty() {
             let lyrics_p = Paragraph::new(lyrics_lines)
                 .alignment(Alignment::Left)
-                .style(state.active_theme.base_style())
+                .style(state.ui.active_theme.base_style())
                 .block(Block::default().padding(ratatui::widgets::Padding::new(0, 0, 2, 0)));
             frame.render_widget(lyrics_p, main_layout[1]);
         }
@@ -281,12 +281,12 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         && let Some(bands) = shared_bands.try_lock()
     {
         use ratatui::widgets::{Bar, BarChart, BarGroup};
-        let c_primary = state.active_theme.primary;
-        let c_secondary = state.active_theme.secondary;
+        let c_primary = state.ui.active_theme.primary;
+        let c_secondary = state.ui.active_theme.secondary;
         let c_mid_low = interpolate_color(c_secondary, c_primary, 0.33);
         let c_mid_high = interpolate_color(c_secondary, c_primary, 0.66);
 
-        let num_bins = state.vis_bins.clamp(5, 32);
+        let num_bins = state.ui.vis_bins.clamp(5, 32);
         let mut bars = Vec::with_capacity(num_bins);
         let chunk_size = 32.0 / num_bins as f32;
 

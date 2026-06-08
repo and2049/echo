@@ -17,12 +17,12 @@ pub const DURATION_COLUMN_WIDTH: u16 = 9;
 pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     fill_background(frame, state);
 
-    if state.mode == AppMode::Setup {
+    if state.ui.mode == AppMode::Setup {
         render_setup(frame, state);
         return;
     }
 
-    if state.mode == AppMode::Authenticating {
+    if state.ui.mode == AppMode::Authenticating {
         render_authenticating(frame, state);
         return;
     }
@@ -53,13 +53,13 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     crate::tui::library::render_library_list(frame, state, library_area);
 
-    if state.active_view == ActiveView::SearchResults {
+    if state.ui.active_view == ActiveView::SearchResults {
         crate::tui::search::render_search_results(frame, state, tracks_area);
-    } else if state.active_view == ActiveView::Queue {
+    } else if state.ui.active_view == ActiveView::Queue {
         crate::tui::queue::render_queue(frame, state, tracks_area);
-    } else if state.active_view == ActiveView::ArtistList {
+    } else if state.ui.active_view == ActiveView::ArtistList {
         crate::tui::library::render_artist_list(frame, state, tracks_area);
-    } else if state.active_view == ActiveView::ArtistPage {
+    } else if state.ui.active_view == ActiveView::ArtistPage {
         crate::tui::library::render_artist_page(frame, state, tracks_area);
     } else {
         crate::tui::library::render_track_list(frame, state, tracks_area);
@@ -68,32 +68,32 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     crate::tui::playback::render_playback_bar(frame, state, playback_bar_area);
 
     // Render Command Bar
-    let (cmd_text, cmd_style) = match state.mode {
+    let (cmd_text, cmd_style) = match state.ui.mode {
         AppMode::Command => (
-            format!(":{}", state.command_buffer),
-            state.active_theme.base_style(),
+            format!(":{}", state.ui.command_buffer),
+            state.ui.active_theme.base_style(),
         ),
         AppMode::Search => (
-            format!("/{}", state.search_query),
-            state.active_theme.base_style(),
+            format!("/{}", state.ui.search_query),
+            state.ui.active_theme.base_style(),
         ),
         _ => (
-            state.status_message.clone().unwrap_or_default(),
-            state.active_theme.muted_style(),
+            state.ui.status_message.clone().unwrap_or_default(),
+            state.ui.active_theme.muted_style(),
         ),
     };
     let cmd_bar = Paragraph::new(cmd_text).style(cmd_style);
     frame.render_widget(cmd_bar, command_bar_area);
 
-    if state.mode == AppMode::Command && !state.command_suggestions.is_empty() {
-        let max_len = state
+    if state.ui.mode == AppMode::Command && !state.ui.command_suggestions.is_empty() {
+        let max_len = state.ui
             .command_suggestions
             .iter()
             .map(|s| s.len())
             .max()
             .unwrap_or(10) as u16;
         let width = max_len + 4;
-        let height = state.command_suggestions.len() as u16 + 2;
+        let height = state.ui.command_suggestions.len() as u16 + 2;
         let x = 2;
         let y = command_bar_area.y.saturating_sub(height);
         let popup_area = Rect {
@@ -103,17 +103,17 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             height,
         };
 
-        let items: Vec<ratatui::widgets::ListItem> = state
+        let items: Vec<ratatui::widgets::ListItem> = state.ui
             .command_suggestions
             .iter()
             .enumerate()
             .map(|(i, s)| {
-                let style = if Some(i) == state.command_suggestion_index {
+                let style = if Some(i) == state.ui.command_suggestion_index {
                     ratatui::style::Style::default()
-                        .bg(state.active_theme.highlight_bg)
-                        .fg(state.active_theme.highlight_fg)
+                        .bg(state.ui.active_theme.highlight_bg)
+                        .fg(state.ui.active_theme.highlight_fg)
                 } else {
-                    state.active_theme.base_style()
+                    state.ui.active_theme.base_style()
                 };
                 ratatui::widgets::ListItem::new(s.clone()).style(style)
             })
@@ -122,14 +122,14 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         let list = ratatui::widgets::List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
-                .style(state.active_theme.base_style()),
+                .style(state.ui.active_theme.base_style()),
         );
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(list, popup_area);
     }
 
-    if let Some(playlist_ids) = &state.playlist_delete_prompt {
+    if let Some(playlist_ids) = &state.ui.playlist_delete_prompt {
         let count = playlist_ids.len();
         let popup_area = centered_rect(60, 20, frame.area());
         let popup = Paragraph::new(vec![
@@ -139,27 +139,27 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 } else {
                     format!("Are you sure you want to delete these {} playlists?", count)
                 },
-                state.active_theme.error_style(),
+                state.ui.active_theme.error_style(),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
             )),
         ])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Delete Playlist ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.error_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.error_style()),
         );
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
     }
 
-    if let Some(album_ids) = &state.album_mass_delete_prompt {
+    if let Some(album_ids) = &state.ui.album_mass_delete_prompt {
         let count = album_ids.len();
         let popup_area = centered_rect(60, 20, frame.area());
         let popup = Paragraph::new(vec![
@@ -172,27 +172,27 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                         count
                     )
                 },
-                state.active_theme.error_style(),
+                state.ui.active_theme.error_style(),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
             )),
         ])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Remove Album ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.error_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.error_style()),
         );
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_widget(popup, popup_area);
     }
 
-    if let Some(folder_name) = &state.folder_delete_prompt {
+    if let Some(folder_name) = &state.ui.folder_delete_prompt {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![
             Line::from(Span::styled(
@@ -200,23 +200,23 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                     "Are you sure you want to delete the folder '{}'?",
                     folder_name
                 ),
-                state.active_theme.error_style(),
+                state.ui.active_theme.error_style(),
             )),
             Line::from(""),
             Line::from("Any playlists inside will be safely returned to the main library."),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
             )),
         ])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Delete Folder ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.error_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.error_style()),
         )
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(ratatui::widgets::Wrap { trim: true });
@@ -225,7 +225,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
-    if let Some((_, track_ids)) = &state.track_delete_prompt {
+    if let Some((_, track_ids)) = &state.ui.track_delete_prompt {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![
             Line::from(Span::styled(
@@ -237,21 +237,21 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                         track_ids.len()
                     )
                 },
-                state.active_theme.error_style(),
+                state.ui.active_theme.error_style(),
             )),
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
             )),
         ])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Remove From Playlist ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.error_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.error_style()),
         )
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(ratatui::widgets::Wrap { trim: true });
@@ -260,19 +260,19 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
-    if state.liked_track_remove_prompt.is_some() {
+    if state.ui.liked_track_remove_prompt.is_some() {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![Line::from(Span::styled(
-            crate::i18n::t("prompts.remove_from_liked", &state.library_config.language),
-            state.active_theme.error_style(),
+            crate::i18n::t("prompts.remove_from_liked", &state.ui.library_config.language),
+            state.ui.active_theme.error_style(),
         ))])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Remove Liked Song ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.error_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.error_style()),
         )
         .alignment(ratatui::layout::Alignment::Center)
         .wrap(ratatui::widgets::Wrap { trim: true });
@@ -281,7 +281,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         frame.render_widget(popup, popup_area);
     }
 
-    if state.playlist_add_modal_open {
+    if state.ui.playlist_add_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
 
         let user_playlists = crate::handlers::normal::playlist_modal_choices(state);
@@ -290,10 +290,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             .iter()
             .enumerate()
             .map(|(i, p)| {
-                let style = if i == state.selected_playlist_modal_index {
-                    state.active_theme.selected_style()
+                let style = if i == state.ui.selected_playlist_modal_index {
+                    state.ui.active_theme.selected_style()
                 } else {
-                    state.active_theme.base_style()
+                    state.ui.active_theme.base_style()
                 };
                 let label = if p.owner_id == "local" {
                     format!("{} · Local", p.name)
@@ -309,37 +309,37 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(" Add to Playlist ")
-                    .style(state.active_theme.base_style())
-                    .border_style(state.active_theme.primary_style()),
+                    .style(state.ui.active_theme.base_style())
+                    .border_style(state.ui.active_theme.primary_style()),
             )
-            .highlight_style(state.active_theme.selected_style());
+            .highlight_style(state.ui.active_theme.selected_style());
 
         let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(state.selected_playlist_modal_index));
+        list_state.select(Some(state.ui.selected_playlist_modal_index));
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_stateful_widget(list, popup_area, &mut list_state);
     }
 
-    if state.device_modal_open {
+    if state.ui.device_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
 
-        let items: Vec<ratatui::widgets::ListItem> = state
+        let items: Vec<ratatui::widgets::ListItem> = state.data
             .devices
             .iter()
             .enumerate()
             .map(|(i, d)| {
-                let mut style = if i == state.selected_device_index {
-                    state.active_theme.selected_style()
+                let mut style = if i == state.ui.selected_device_index {
+                    state.ui.active_theme.selected_style()
                 } else {
-                    state.active_theme.base_style()
+                    state.ui.active_theme.base_style()
                 };
 
                 let active_marker = if d.is_active { " [Active]" } else { "" };
                 let text = format!("{} ({}%){}", d.name, d.volume_percent, active_marker);
 
-                if d.is_active && i != state.selected_device_index {
-                    style = style.fg(state.active_theme.primary);
+                if d.is_active && i != state.ui.selected_device_index {
+                    style = style.fg(state.ui.active_theme.primary);
                 }
 
                 ratatui::widgets::ListItem::new(text).style(style)
@@ -351,13 +351,13 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(" Switch Device ")
-                    .style(state.active_theme.base_style())
-                    .border_style(state.active_theme.primary_style()),
+                    .style(state.ui.active_theme.base_style())
+                    .border_style(state.ui.active_theme.primary_style()),
             )
-            .highlight_style(state.active_theme.selected_style());
+            .highlight_style(state.ui.active_theme.selected_style());
 
         let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(state.selected_device_index));
+        list_state.select(Some(state.ui.selected_device_index));
 
         frame.render_widget(ratatui::widgets::Clear, popup_area);
         frame.render_stateful_widget(list, popup_area, &mut list_state);
@@ -368,7 +368,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         let popup_area = centered_rect(72, 32, frame.area());
         let popup = Paragraph::new(vec![
             Line::from("Spotify Connect Onboarding Required")
-                .style(state.active_theme.secondary_style()),
+                .style(state.ui.active_theme.secondary_style()),
             Line::from(""),
             Line::from("1. Open Spotify on your phone or desktop."),
             Line::from("2. Open the Devices picker."),
@@ -376,13 +376,13 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from(""),
             Line::from("Echo will continue once the device connects."),
         ])
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(" Setup ")
-                .style(state.active_theme.base_style())
-                .border_style(state.active_theme.secondary_style()),
+                .style(state.ui.active_theme.base_style())
+                .border_style(state.ui.active_theme.secondary_style()),
         )
         .alignment(ratatui::layout::Alignment::Left)
         .wrap(ratatui::widgets::Wrap { trim: true });
@@ -396,18 +396,18 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 }
 
 pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
-    if !state.action_menu_open {
+    if !state.ui.action_menu_open {
         return;
     }
 
-    let ctx = match &state.action_menu_context {
+    let ctx = match &state.ui.action_menu_context {
         Some(c) => c,
         None => return,
     };
 
     // Define the 5 actions; mark unavailable ones (no album/artist id) as dimmed.
-    let is_liked = state.liked_tracks.contains(&ctx.track_id);
-    let lang = &state.library_config.language;
+    let is_liked = state.data.liked_tracks.contains(&ctx.track_id);
+    let lang = &state.ui.library_config.language;
     let lbl_album = crate::i18n::t("actions.go_to_album", lang);
     let lbl_artist = crate::i18n::t("actions.go_to_artist", lang);
     let lbl_playlist = crate::i18n::t("actions.add_to_playlist", lang);
@@ -416,7 +416,7 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let lbl_like = crate::i18n::t("actions.like_track", lang);
 
     let has_local_album = ctx.source == crate::models::TrackSource::Local
-        && state
+        && state.data
             .local_library
             .tracks
             .iter()
@@ -457,19 +457,19 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(track_label)
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style());
+        .style(state.ui.active_theme.base_style())
+        .border_style(state.ui.active_theme.primary_style());
 
     let items: Vec<ListItem> = actions
         .iter()
         .enumerate()
         .map(|(i, (label, available))| {
-            let style = if i == state.selected_action_index {
-                state.active_theme.selected_style()
+            let style = if i == state.ui.selected_action_index {
+                state.ui.active_theme.selected_style()
             } else if !available {
-                state.active_theme.muted_style()
+                state.ui.active_theme.muted_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
             let text = format!("  {}  ", label);
             ListItem::new(text).style(style)
@@ -484,7 +484,7 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
 }
 
 pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
-    if !state.lyrics_modal_open {
+    if !state.ui.lyrics_modal_open {
         return;
     }
 
@@ -493,21 +493,21 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Lyrics ")
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style());
+        .style(state.ui.active_theme.base_style())
+        .border_style(state.ui.active_theme.primary_style());
 
     frame.render_widget(ratatui::widgets::Clear, popup_area);
 
-    if state.is_fetching_lyrics {
+    if state.playback.is_fetching_lyrics {
         let p = Paragraph::new("Loading lyrics...")
             .alignment(Alignment::Center)
             .block(block)
-            .style(state.active_theme.base_style());
+            .style(state.ui.active_theme.base_style());
         frame.render_widget(p, popup_area);
         return;
     }
 
-    if let Some(lyrics) = &state.current_lyrics {
+    if let Some(lyrics) = &state.playback.current_lyrics {
         let pb = &state.playback;
         let mut current_idx = 0;
 
@@ -522,14 +522,14 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
         let mut items = Vec::new();
         for (i, line) in lyrics.lines.iter().enumerate() {
             let style = if i == current_idx {
-                state
+                state.ui
                     .active_theme
                     .primary_style()
                     .add_modifier(Modifier::BOLD)
             } else if i > current_idx {
-                state.active_theme.muted_style()
+                state.ui.active_theme.muted_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
             items.push(ratatui::widgets::ListItem::new(line.text.clone()).style(style));
         }
@@ -537,7 +537,7 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
         let list = ratatui::widgets::List::new(items)
             .block(block)
             .highlight_style(
-                state
+                state.ui
                     .active_theme
                     .primary_style()
                     .add_modifier(Modifier::BOLD),
@@ -558,14 +558,14 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
         let p = Paragraph::new("No lyrics found.")
             .alignment(Alignment::Center)
             .block(block)
-            .style(state.active_theme.base_style());
+            .style(state.ui.active_theme.base_style());
         frame.render_widget(p, popup_area);
     }
 }
 
 pub fn fill_background(frame: &mut Frame, state: &AppState) {
     let area = frame.area();
-    let style = state.active_theme.base_style();
+    let style = state.ui.active_theme.base_style();
     let buffer = frame.buffer_mut();
 
     for y in area.top()..area.bottom() {
@@ -701,8 +701,8 @@ pub fn render_authenticating(frame: &mut Frame, state: &AppState) {
     let block = Block::default()
         .title(" Authenticating ")
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style());
+        .style(state.ui.active_theme.base_style())
+        .border_style(state.ui.active_theme.primary_style());
     let text = vec![
         Line::from("Waiting for Spotify authentication..."),
         Line::from(
@@ -710,7 +710,7 @@ pub fn render_authenticating(frame: &mut Frame, state: &AppState) {
         ),
     ];
     let paragraph = Paragraph::new(text)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .block(block)
         .alignment(Alignment::Center);
     frame.render_widget(paragraph, frame.area());
@@ -741,19 +741,19 @@ pub fn render_setup(frame: &mut Frame, state: &AppState) {
     let block = Block::default()
         .title(" BYOK Setup (Bring Your Own Key) ")
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
-        .border_style(state.active_theme.primary_style());
+        .style(state.ui.active_theme.base_style())
+        .border_style(state.ui.active_theme.primary_style());
 
-    let id_style = if !state.setup_focus_secret {
-        state.active_theme.secondary_style()
+    let id_style = if !state.ui.setup_focus_secret {
+        state.ui.active_theme.secondary_style()
     } else {
-        state.active_theme.base_style()
+        state.ui.active_theme.base_style()
     };
 
-    let secret_style = if state.setup_focus_secret {
-        state.active_theme.secondary_style()
+    let secret_style = if state.ui.setup_focus_secret {
+        state.ui.active_theme.secondary_style()
     } else {
-        state.active_theme.base_style()
+        state.ui.active_theme.base_style()
     };
 
     let text = vec![
@@ -763,16 +763,16 @@ pub fn render_setup(frame: &mut Frame, state: &AppState) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Client ID: ", id_style),
-            Span::raw(&state.setup_client_id),
+            Span::raw(&state.ui.setup_client_id),
         ]),
         Line::from(vec![
             Span::styled("Client Secret: ", secret_style),
-            Span::raw(&state.setup_client_secret),
+            Span::raw(&state.ui.setup_client_secret),
         ]),
     ];
 
     let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Left);
-    let paragraph = paragraph.style(state.active_theme.base_style());
+    let paragraph = paragraph.style(state.ui.active_theme.base_style());
     frame.render_widget(paragraph, setup_area);
 }
 

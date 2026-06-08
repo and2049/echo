@@ -26,14 +26,14 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "rename",
         "pixelate",
     ];
-    let mut parts = state.command_buffer.splitn(2, ' ');
+    let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
 
     if let Some(arg_str) = arg {
         match cmd {
             "theme" => {
-                let mut themes: Vec<String> = state.themes.keys().cloned().collect();
+                let mut themes: Vec<String> = state.ui.themes.keys().cloned().collect();
                 themes.sort();
                 themes
                     .into_iter()
@@ -81,75 +81,75 @@ fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
         KeyCode::Tab | KeyCode::BackTab => {
-            if state.command_suggestions.is_empty() {
-                state.command_suggestions = generate_command_suggestions(state);
-                state.command_suggestion_index = if state.command_suggestions.is_empty() {
+            if state.ui.command_suggestions.is_empty() {
+                state.ui.command_suggestions = generate_command_suggestions(state);
+                state.ui.command_suggestion_index = if state.ui.command_suggestions.is_empty() {
                     None
                 } else {
                     Some(0)
                 };
-                state.command_base_buffer = state.command_buffer.clone();
-            } else if let Some(idx) = state.command_suggestion_index {
+                state.ui.command_base_buffer = state.ui.command_buffer.clone();
+            } else if let Some(idx) = state.ui.command_suggestion_index {
                 if key.code == KeyCode::Tab {
-                    state.command_suggestion_index =
-                        Some((idx + 1) % state.command_suggestions.len());
+                    state.ui.command_suggestion_index =
+                        Some((idx + 1) % state.ui.command_suggestions.len());
                 } else {
-                    state.command_suggestion_index = Some(
-                        (idx + state.command_suggestions.len() - 1)
-                            % state.command_suggestions.len(),
+                    state.ui.command_suggestion_index = Some(
+                        (idx + state.ui.command_suggestions.len() - 1)
+                            % state.ui.command_suggestions.len(),
                     );
                 }
             }
 
-            if let Some(idx) = state.command_suggestion_index {
-                let suggestion = &state.command_suggestions[idx];
-                let mut parts = state.command_base_buffer.splitn(2, ' ');
+            if let Some(idx) = state.ui.command_suggestion_index {
+                let suggestion = &state.ui.command_suggestions[idx];
+                let mut parts = state.ui.command_base_buffer.splitn(2, ' ');
                 let cmd = parts.next().unwrap_or("");
                 let arg = parts.next();
 
                 if arg.is_some() {
-                    state.command_buffer = format!("{} {}", cmd, suggestion);
+                    state.ui.command_buffer = format!("{} {}", cmd, suggestion);
                 } else {
-                    state.command_buffer = suggestion.clone();
+                    state.ui.command_buffer = suggestion.clone();
                 }
             }
             return None;
         }
         _ => {
-            state.command_suggestions.clear();
-            state.command_suggestion_index = None;
-            state.command_base_buffer.clear();
+            state.ui.command_suggestions.clear();
+            state.ui.command_suggestion_index = None;
+            state.ui.command_base_buffer.clear();
         }
     }
 
     match key.code {
         KeyCode::Esc => {
-            state.mode = AppMode::Normal;
-            state.command_buffer.clear();
-            state.needs_terminal_clear = true;
+            state.ui.mode = AppMode::Normal;
+            state.ui.command_buffer.clear();
+            state.ui.needs_terminal_clear = true;
         }
         KeyCode::Backspace => {
-            state.command_buffer.pop();
+            state.ui.command_buffer.pop();
         }
         KeyCode::Char(c) => {
-            state.command_buffer.push(c);
+            state.ui.command_buffer.push(c);
         }
         KeyCode::Enter => {
-            let cmd = state.command_buffer.clone();
-            state.command_buffer.clear();
-            state.mode = AppMode::Normal;
-            state.needs_terminal_clear = true;
+            let cmd = state.ui.command_buffer.clone();
+            state.ui.command_buffer.clear();
+            state.ui.mode = AppMode::Normal;
+            state.ui.needs_terminal_clear = true;
 
             let mut args = cmd.split_whitespace();
             if let Some(cmd_name) = args.next() {
                 match cmd_name {
                     "q" | "qa" | "wq" => {
-                        state.is_running = false;
+                        state.ui.is_running = false;
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
-                            state.library_config.folders.push(crate::config::Folder {
+                            state.ui.library_config.folders.push(crate::config::Folder {
                                 name,
                                 is_open: true,
                                 playlists: vec![],
@@ -162,15 +162,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         if let Some(mode) = args.next() {
                             match mode {
                                 "alpha" => {
-                                    state.library_config.sort_mode =
+                                    state.ui.library_config.sort_mode =
                                         crate::config::SortMode::Alphabetical
                                 }
                                 "creator" => {
-                                    state.library_config.sort_mode =
+                                    state.ui.library_config.sort_mode =
                                         crate::config::SortMode::Creator
                                 }
                                 _ => {
-                                    state.library_config.sort_mode =
+                                    state.ui.library_config.sort_mode =
                                         crate::config::SortMode::Default
                                 }
                             }
@@ -181,49 +181,49 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "index" => {
                         if let Some(base_str) = args.next() {
                             if let Ok(base) = base_str.parse::<isize>() {
-                                state.library_config.track_index_base = base;
+                                state.ui.library_config.track_index_base = base;
                                 state.save_library_config();
-                                state.status_message =
+                                state.ui.status_message =
                                     Some(format!("Track index base set to {}", base));
                             } else {
-                                state.status_message =
+                                state.ui.status_message =
                                     Some("Invalid index base, must be a number".to_string());
                             }
                         } else {
-                            state.status_message = Some(format!(
+                            state.ui.status_message = Some(format!(
                                 "Current index base: {}",
-                                state.library_config.track_index_base
+                                state.ui.library_config.track_index_base
                             ));
                         }
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "delfolder" => {
                         // Deletes currently selected folder
-                        if state.active_view == crate::app::ActiveView::Library
-                            && state.selected_playlist_index < state.library_view.len()
+                        if state.ui.active_view == crate::app::ActiveView::Library
+                            && state.ui.selected_playlist_index < state.data.library_view.len()
                             && let crate::models::LibraryNode::Folder(f) =
-                                &state.library_view[state.selected_playlist_index]
+                                &state.data.library_view[state.ui.selected_playlist_index]
                         {
                             let name = f.name.clone();
-                            state.library_config.folders.retain(|fd| fd.name != name);
+                            state.ui.library_config.folders.retain(|fd| fd.name != name);
                             state.save_library_config();
                             state.compute_library_view();
                         }
                     }
                     "theme" => {
                         if let Some(theme_name) = args.next() {
-                            if let Some(theme_config) = state.themes.get(theme_name) {
-                                state.active_theme =
+                            if let Some(theme_config) = state.ui.themes.get(theme_name) {
+                                state.ui.active_theme =
                                     crate::app::ResolvedTheme::from_theme(theme_config);
-                                state.library_config.active_theme = Some(theme_name.to_string());
-                                state.needs_terminal_clear = true;
+                                state.ui.library_config.active_theme = Some(theme_name.to_string());
+                                state.ui.needs_terminal_clear = true;
                                 state.save_library_config();
-                                state.status_message = Some(format!("Theme: {}", theme_name));
+                                state.ui.status_message = Some(format!("Theme: {}", theme_name));
                             } else {
-                                let mut theme_names: Vec<&String> = state.themes.keys().collect();
+                                let mut theme_names: Vec<&String> = state.ui.themes.keys().collect();
                                 theme_names.sort();
-                                state.status_message = Some(format!(
+                                state.ui.status_message = Some(format!(
                                     "Unknown theme '{}'. Available: {}",
                                     theme_name,
                                     theme_names
@@ -235,7 +235,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             }
                         } else {
                         }
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
                     }
                     "lang" => {
@@ -245,35 +245,35 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 || lang_code == "zh-CN"
                                 || lang_code == "zh-TW"
                             {
-                                state.library_config.language = lang_code.to_string();
+                                state.ui.library_config.language = lang_code.to_string();
                                 state.save_library_config();
-                                state.status_message = Some(
+                                state.ui.status_message = Some(
                                     crate::i18n::t(
                                         "messages.language_set",
-                                        &state.library_config.language,
+                                        &state.ui.library_config.language,
                                     )
                                     .replace("{}", lang_code),
                                 );
                             } else {
-                                state.status_message = Some(
+                                state.ui.status_message = Some(
                                     crate::i18n::t(
                                         "messages.unknown_language",
-                                        &state.library_config.language,
+                                        &state.ui.library_config.language,
                                     )
                                     .replace("{}", lang_code),
                                 );
                             }
                         } else {
                         }
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(4));
                     }
                     "pixelate" => {
                         if let Some(pixel_str) = args.next() {
                             if let Ok(pixels) = pixel_str.parse::<u32>() {
-                                state.library_config.cover_img_pixels = pixels;
+                                state.ui.library_config.cover_img_pixels = pixels;
                                 state.save_library_config();
-                                state.status_message =
+                                state.ui.status_message =
                                     Some(format!("Pixelate effect set to {}", pixels));
 
                                 // Transfer current track image to previous to prevent blanking during re-fetch
@@ -281,54 +281,54 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     state.playback.playing_track_image.take();
                                 state.playback.fetching_track_id = None;
 
-                                if state.active_view == crate::app::ActiveView::TrackList {
+                                if state.ui.active_view == crate::app::ActiveView::TrackList {
                                     return Some(crate::events::AppEvent::ReloadHeaderImage);
                                 }
                             } else {
-                                state.status_message =
+                                state.ui.status_message =
                                     Some("Invalid pixel value, must be a number".to_string());
                             }
                         } else {
-                            state.status_message = Some(format!(
+                            state.ui.status_message = Some(format!(
                                 "Current pixelate value: {}",
-                                state.library_config.cover_img_pixels
+                                state.ui.library_config.cover_img_pixels
                             ));
                         }
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");
                         if !query.is_empty() {
-                            state.search_context_query = query.clone();
-                            state.status_message = Some(format!("Searching for '{}'...", query));
-                            state.status_message_expiry =
+                            state.ui.search_context_query = query.clone();
+                            state.ui.status_message = Some(format!("Searching for '{}'...", query));
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(crate::events::AppEvent::GlobalSearch(query));
                         } else {
-                            state.status_message = Some("Usage: search <query>".to_string());
-                            state.status_message_expiry =
+                            state.ui.status_message = Some("Usage: search <query>".to_string());
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }
                     "album" => {
                         use crate::app::ActiveView;
                         let mut album_id_opt = None;
-                        if state.active_view == ActiveView::TrackList {
-                            if state.selected_track_index < state.tracks.len() {
+                        if state.ui.active_view == ActiveView::TrackList {
+                            if state.ui.selected_track_index < state.data.tracks.len() {
                                 album_id_opt =
-                                    state.tracks[state.selected_track_index].album_id.clone();
+                                    state.data.tracks[state.ui.selected_track_index].album_id.clone();
                             }
-                        } else if state.active_view == ActiveView::Queue {
-                            if state.selected_track_index < state.queue.len() {
+                        } else if state.ui.active_view == ActiveView::Queue {
+                            if state.ui.selected_track_index < state.data.queue.len() {
                                 album_id_opt =
-                                    state.queue[state.selected_track_index].album_id.clone();
+                                    state.data.queue[state.ui.selected_track_index].album_id.clone();
                             }
-                        } else if state.active_view == ActiveView::SearchResults
-                            && state.active_search_tab == crate::app::SearchTab::Tracks
-                            && state.selected_search_index < state.search_results.tracks.len()
+                        } else if state.ui.active_view == ActiveView::SearchResults
+                            && state.ui.active_search_tab == crate::app::SearchTab::Tracks
+                            && state.ui.selected_search_index < state.data.search_results.tracks.len()
                         {
-                            album_id_opt = state.search_results.tracks[state.selected_search_index]
+                            album_id_opt = state.data.search_results.tracks[state.ui.selected_search_index]
                                 .album_id
                                 .clone();
                         }
@@ -343,17 +343,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.begin_tracklist_load(context.clone());
                             return Some(AppEvent::LoadContextTracks(context));
                         } else {
-                            state.status_message =
+                            state.ui.status_message =
                                 Some("No album available for this track".to_string());
-                            state.status_message_expiry =
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }
                     "newplaylist" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
-                            state.status_message = Some(format!("Creating playlist '{}'...", name));
-                            state.status_message_expiry =
+                            state.ui.status_message = Some(format!("Creating playlist '{}'...", name));
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(AppEvent::CreatePlaylist(name));
                         }
@@ -361,9 +361,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "newlocalplaylist" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
-                            state.status_message =
+                            state.ui.status_message =
                                 Some(format!("Creating local playlist '{}'...", name));
-                            state.status_message_expiry =
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(AppEvent::CreateLocalPlaylist(name));
                         }
@@ -371,31 +371,31 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "localpath" => {
                         let path_text = command_remainder(&cmd, "localpath");
                         if path_text.is_empty() {
-                            state.status_message =
+                            state.ui.status_message =
                                 Some("Usage: localpath <absolute-folder-path>".to_string());
-                            state.status_message_expiry =
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         } else {
                             let path = std::path::PathBuf::from(path_text);
                             if !path.is_absolute() {
-                                state.status_message =
+                                state.ui.status_message =
                                     Some("Local path must be absolute".to_string());
-                                state.status_message_expiry = Some(
+                                state.ui.status_message_expiry = Some(
                                     std::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );
                             } else if !path.is_dir() {
-                                state.status_message =
+                                state.ui.status_message =
                                     Some("Local path must be an existing directory".to_string());
-                                state.status_message_expiry = Some(
+                                state.ui.status_message_expiry = Some(
                                     std::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );
                             } else {
-                                state.library_config.local_music_dir = Some(path.clone());
+                                state.ui.library_config.local_music_dir = Some(path.clone());
                                 state.save_library_config();
                                 state.compute_library_view();
-                                state.status_message =
+                                state.ui.status_message =
                                     Some(format!("Scanning local music in {}...", path.display()));
-                                state.status_message_expiry = Some(
+                                state.ui.status_message_expiry = Some(
                                     std::time::Instant::now() + std::time::Duration::from_secs(3),
                                 );
                                 return Some(AppEvent::ScanLocalLibrary(path));
@@ -403,25 +403,25 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
                     }
                     "rescanlocal" => {
-                        if let Some(path) = state.library_config.local_music_dir.clone() {
-                            state.status_message =
+                        if let Some(path) = state.ui.library_config.local_music_dir.clone() {
+                            state.ui.status_message =
                                 Some(format!("Rescanning local music in {}...", path.display()));
-                            state.status_message_expiry =
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(AppEvent::RescanLocalLibrary);
                         } else {
-                            state.status_message =
+                            state.ui.status_message =
                                 Some("No local music path configured".to_string());
-                            state.status_message_expiry =
+                            state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }
                     "rename" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty()
-                            && state.active_view == crate::app::ActiveView::Library
+                            && state.ui.active_view == crate::app::ActiveView::Library
                             && let Some(node) =
-                                state.library_view.get(state.selected_playlist_index)
+                                state.data.library_view.get(state.ui.selected_playlist_index)
                         {
                             match node {
                                 crate::models::LibraryNode::Playlist { playlist, .. } => {
@@ -432,19 +432,19 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 }
                                 crate::models::LibraryNode::Folder(f) => {
                                     let old_name = f.name.clone();
-                                    if let Some(idx) = state
+                                    if let Some(idx) = state.ui
                                         .library_config
                                         .folders
                                         .iter()
                                         .position(|fd| fd.name == old_name)
                                     {
-                                        state.library_config.folders[idx].name = name.clone();
+                                        state.ui.library_config.folders[idx].name = name.clone();
                                     }
                                     state.save_library_config();
                                     state.compute_library_view();
-                                    state.status_message =
+                                    state.ui.status_message =
                                         Some(format!("Renamed folder to '{}'", name));
-                                    state.status_message_expiry = Some(
+                                    state.ui.status_message_expiry = Some(
                                         std::time::Instant::now()
                                             + std::time::Duration::from_secs(3),
                                     );
@@ -453,48 +453,48 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
                     }
                     "queue" => {
-                        state.active_view = crate::app::ActiveView::Queue;
-                        state.selected_queue_index = 0;
+                        state.ui.active_view = crate::app::ActiveView::Queue;
+                        state.ui.selected_queue_index = 0;
                         return Some(crate::events::AppEvent::FetchQueue);
                     }
                     "vis" => {
-                        let mut next_val = !state.library_config.enable_visualizer;
+                        let mut next_val = !state.ui.library_config.enable_visualizer;
                         if let Some(flag) = &state.playback.enable_visualizer {
                             let current = flag.load(std::sync::atomic::Ordering::Relaxed);
                             next_val = !current;
                             flag.store(next_val, std::sync::atomic::Ordering::Relaxed);
                         }
-                        state.library_config.enable_visualizer = next_val;
+                        state.ui.library_config.enable_visualizer = next_val;
                         state.save_library_config();
-                        state.status_message = Some(if next_val {
+                        state.ui.status_message = Some(if next_val {
                             "Visualizer: on".to_string()
                         } else {
                             "Visualizer: off".to_string()
                         });
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "visbins" => {
                         if let Some(bins_str) = args.next() {
                             if let Ok(bins) = bins_str.parse::<usize>() {
                                 if bins >= 5 && bins <= 32 {
-                                    state.vis_bins = bins;
-                                    state.library_config.vis_bins = bins;
+                                    state.ui.vis_bins = bins;
+                                    state.ui.library_config.vis_bins = bins;
                                     state.save_library_config();
-                                    state.status_message =
+                                    state.ui.status_message =
                                         Some(format!("Visualizer bins set to {}", bins));
                                 } else {
-                                    state.status_message =
+                                    state.ui.status_message =
                                         Some("Bins must be between 5 and 32".to_string());
                                 }
                             } else {
-                                state.status_message = Some("Invalid number".to_string());
+                                state.ui.status_message = Some("Invalid number".to_string());
                             }
                         } else {
-                            state.status_message =
-                                Some(format!("Current visbins: {}", state.vis_bins));
+                            state.ui.status_message =
+                                Some(format!("Current visbins: {}", state.ui.vis_bins));
                         }
-                        state.status_message_expiry =
+                        state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     _ => {}
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn newlocalplaylist_command_emits_local_playlist_event() {
         let mut state = AppState::new();
-        state.command_buffer = "newlocalplaylist Road Mix".to_string();
+        state.ui.command_buffer = "newlocalplaylist Road Mix".to_string();
         let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
 
         let Some(AppEvent::CreateLocalPlaylist(name)) = handle_key(&mut state, &key) else {
