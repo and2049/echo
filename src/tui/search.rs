@@ -10,84 +10,84 @@ use ratatui::{
 };
 
 pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
-    let is_focused = state.active_view == ActiveView::SearchResults;
+    let is_focused = state.ui.active_view == ActiveView::SearchResults;
     let border_style = if is_focused {
-        state.active_theme.secondary_style()
+        state.ui.active_theme.secondary_style()
     } else {
-        state.active_theme.primary_style()
+        state.ui.active_theme.primary_style()
     };
 
-    let t_title = if state.active_search_tab == SearchTab::Tracks {
+    let t_title = if state.ui.active_search_tab == SearchTab::Tracks {
         format!(
             "[{}]",
-            crate::i18n::t("ui.tracks", &state.library_config.language)
+            crate::i18n::t("ui.tracks", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.tracks", &state.library_config.language)
+            crate::i18n::t("ui.tracks", &state.ui.library_config.language)
         )
     };
-    let a_title = if state.active_search_tab == SearchTab::Albums {
+    let a_title = if state.ui.active_search_tab == SearchTab::Albums {
         format!(
             "[{}]",
-            crate::i18n::t("ui.albums", &state.library_config.language)
+            crate::i18n::t("ui.albums", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.albums", &state.library_config.language)
+            crate::i18n::t("ui.albums", &state.ui.library_config.language)
         )
     };
-    let ar_title = if state.active_search_tab == SearchTab::Artists {
+    let ar_title = if state.ui.active_search_tab == SearchTab::Artists {
         format!(
             "[{}]",
-            crate::i18n::t("ui.artists", &state.library_config.language)
+            crate::i18n::t("ui.artists", &state.ui.library_config.language)
         )
     } else {
         format!(
             " {} ",
-            crate::i18n::t("ui.artists", &state.library_config.language)
+            crate::i18n::t("ui.artists", &state.ui.library_config.language)
         )
     };
     let tab_title = format!("{} {} {}", t_title, a_title, ar_title);
 
     let search_block = Block::default()
         .borders(Borders::ALL)
-        .style(state.active_theme.base_style())
+        .style(state.ui.active_theme.base_style())
         .border_style(border_style)
         .title(format!(
             " {}: {} — {} ",
-            crate::i18n::t("ui.search", &state.library_config.language),
-            state.search_context_query,
+            crate::i18n::t("ui.search", &state.ui.library_config.language),
+            state.ui.search_context_query,
             tab_title
         ));
 
     let inner = search_block.inner(area);
     frame.render_widget(search_block, area);
 
-    let sel = state.selected_search_index;
+    let sel = state.ui.selected_search_index;
     let header_style = border_style.add_modifier(Modifier::BOLD);
 
-    match state.active_search_tab {
+    match state.ui.active_search_tab {
         SearchTab::Tracks => {
             let header = Row::new(vec![
                 "".to_string(), // liked col
-                crate::i18n::t("ui.tracks", &state.library_config.language),
-                crate::i18n::t("ui.artist", &state.library_config.language),
-                crate::i18n::t("ui.album", &state.library_config.language),
-                crate::i18n::t("ui.source", &state.library_config.language),
-                crate::i18n::t("ui.duration", &state.library_config.language),
+                crate::i18n::t("ui.tracks", &state.ui.library_config.language),
+                crate::i18n::t("ui.artist", &state.ui.library_config.language),
+                crate::i18n::t("ui.album", &state.ui.library_config.language),
+                crate::i18n::t("ui.source", &state.ui.library_config.language),
+                crate::i18n::t("ui.duration", &state.ui.library_config.language),
             ])
             .style(header_style)
             .height(1);
-            let visual_range = if state.active_view == ActiveView::SearchResults {
+            let visual_range = if state.ui.active_view == ActiveView::SearchResults {
                 state.get_visual_selection_range()
             } else {
                 None
             };
 
-            let rows: Vec<Row> = state
+            let rows: Vec<Row> = state.data
                 .search_results
                 .tracks
                 .iter()
@@ -100,14 +100,14 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     };
 
                     let style = if is_in_visual {
-                        state
+                        state.ui
                             .active_theme
                             .selected_style()
-                            .bg(state.active_theme.primary)
+                            .bg(state.ui.active_theme.primary)
                     } else if i == sel {
-                        state.active_theme.selected_style()
+                        state.ui.active_theme.selected_style()
                     } else {
-                        state.active_theme.base_style()
+                        state.ui.active_theme.base_style()
                     };
                     let dur = format!(
                         "{}:{:02}",
@@ -119,20 +119,20 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     let w_album = (inner.width * 26 / 100).saturating_sub(1);
                     let source = match t.source {
                         crate::models::TrackSource::Local => {
-                            crate::i18n::t("ui.local", &state.library_config.language)
+                            crate::i18n::t("ui.local", &state.ui.library_config.language)
                         }
                         crate::models::TrackSource::Spotify => {
-                            crate::i18n::t("ui.spotify", &state.library_config.language)
+                            crate::i18n::t("ui.spotify", &state.ui.library_config.language)
                         }
                     };
 
-                    let liked_str = if state.liked_tracks.contains(&t.id) {
+                    let liked_str = if state.data.liked_tracks.contains(&t.id) {
                         "♥"
                     } else {
                         " "
                     };
                     let liked_cell =
-                        Cell::from(liked_str).style(state.active_theme.secondary_style());
+                        Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
 
                     Row::new(vec![
                         liked_cell,
@@ -158,7 +158,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             )
             .column_spacing(1)
             .header(header)
-            .row_highlight_style(state.active_theme.selected_style())
+            .row_highlight_style(state.ui.active_theme.selected_style())
             .highlight_symbol(" ")
             .highlight_spacing(HighlightSpacing::Always);
             let mut ts = TableState::default();
@@ -169,16 +169,16 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             let header = Row::new(vec!["Album", "Artist"])
                 .style(header_style)
                 .height(1);
-            let rows: Vec<Row> = state
+            let rows: Vec<Row> = state.data
                 .search_results
                 .albums
                 .iter()
                 .enumerate()
                 .map(|(i, a)| {
                     let style = if i == sel {
-                        state.active_theme.selected_style()
+                        state.ui.active_theme.selected_style()
                     } else {
-                        state.active_theme.base_style()
+                        state.ui.active_theme.base_style()
                     };
                     let w_album = (inner.width * 50 / 100).saturating_sub(1);
                     let w_artist = (inner.width * 50 / 100).saturating_sub(1);
@@ -195,7 +195,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             )
             .column_spacing(1)
             .header(header)
-            .row_highlight_style(state.active_theme.selected_style())
+            .row_highlight_style(state.ui.active_theme.selected_style())
             .highlight_symbol(" ")
             .highlight_spacing(HighlightSpacing::Always);
             let mut ts = TableState::default();
@@ -205,20 +205,20 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
         SearchTab::Artists => {
             let header = Row::new(vec![crate::i18n::t(
                 "ui.artist",
-                &state.library_config.language,
+                &state.ui.library_config.language,
             )])
             .style(header_style)
             .height(1);
-            let rows: Vec<Row> = state
+            let rows: Vec<Row> = state.data
                 .search_results
                 .artists
                 .iter()
                 .enumerate()
                 .map(|(i, artist)| {
                     let style = if i == sel {
-                        state.active_theme.selected_style()
+                        state.ui.active_theme.selected_style()
                     } else {
-                        state.active_theme.base_style()
+                        state.ui.active_theme.base_style()
                     };
                     Row::new(vec![Cell::from(truncate_to_width_with_ellipsis(
                         &artist.name,
@@ -230,7 +230,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             let table = Table::new(rows, [Constraint::Percentage(100)])
                 .column_spacing(1)
                 .header(header)
-                .row_highlight_style(state.active_theme.selected_style())
+                .row_highlight_style(state.ui.active_theme.selected_style())
                 .highlight_symbol(" ")
                 .highlight_spacing(HighlightSpacing::Always);
             let mut ts = TableState::default();

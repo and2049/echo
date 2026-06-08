@@ -5,10 +5,10 @@ use crate::{
 };
 
 pub fn play_selected(state: &AppState) -> Option<AppEvent> {
-    let track = state.tracks.get(state.selected_track_index)?;
-    let context = state.active_tracklist_context.as_ref()?;
+    let track = state.data.tracks.get(state.ui.selected_track_index)?;
+    let context = state.data.active_tracklist_context.as_ref()?;
     let target = if track.source == TrackSource::Local {
-        let tracks: Vec<_> = state
+        let tracks: Vec<_> = state.data
             .tracks
             .iter()
             .filter(|track| track.source == TrackSource::Local)
@@ -46,15 +46,15 @@ fn play_event_with_target(track: &Track, target: PlaybackTarget) -> Option<AppEv
 }
 
 pub fn mark_selected_for_delete(state: &mut AppState) {
-    if let Some(track) = state.tracks.get(state.selected_track_index)
-        && let Some(context) = &state.active_tracklist_context
-        && context.can_modify_playlist(state.user_id.as_ref())
+    if let Some(track) = state.data.tracks.get(state.ui.selected_track_index)
+        && let Some(context) = &state.data.active_tracklist_context
+        && context.can_modify_playlist(state.data.user_id.as_ref())
     {
-        if state.pending_d_press {
-            state.track_delete_prompt = Some((context.id.clone(), vec![track.id.clone()]));
-            state.pending_d_press = false;
+        if state.ui.pending_d_press {
+            state.ui.track_delete_prompt = Some((context.id.clone(), vec![track.id.clone()]));
+            state.ui.pending_d_press = false;
         } else {
-            state.pending_d_press = true;
+            state.ui.pending_d_press = true;
         }
     }
 }
@@ -96,13 +96,13 @@ mod tests {
     #[test]
     fn selected_local_track_uses_ordered_local_context_target() {
         let mut state = AppState::new();
-        state.active_tracklist_context = Some(TrackListContext::local_library());
-        state.tracks = vec![
+        state.data.active_tracklist_context = Some(TrackListContext::local_library());
+        state.data.tracks = vec![
             local_track("local:a", "/music/a.wav"),
             local_track("local:b", "/music/b.wav"),
             local_track("local:c", "/music/c.wav"),
         ];
-        state.selected_track_index = 1;
+        state.ui.selected_track_index = 1;
 
         let Some(AppEvent::PlayTrack {
             target, track_id, ..
@@ -127,16 +127,16 @@ mod tests {
     #[test]
     fn selected_local_track_context_excludes_spotify_entries() {
         let mut state = AppState::new();
-        state.active_tracklist_context = Some(TrackListContext::local_playlist(
+        state.data.active_tracklist_context = Some(TrackListContext::local_playlist(
             "local-playlist:a".to_string(),
             "Mixed".to_string(),
         ));
-        state.tracks = vec![
+        state.data.tracks = vec![
             local_track("local:a", "/music/a.wav"),
             spotify_track("spotify:a"),
             local_track("local:b", "/music/b.wav"),
         ];
-        state.selected_track_index = 2;
+        state.ui.selected_track_index = 2;
 
         let Some(AppEvent::PlayTrack { target, .. }) = play_selected(&state) else {
             panic!("expected local play event");

@@ -43,37 +43,37 @@ async fn main() -> Result<()> {
     let config = config::AppConfig::load();
     let mut state = AppState::new();
     let cache = config::AppConfig::load_cache();
-    state.liked_tracks = cache.liked_tracks.clone();
+    state.data.liked_tracks = cache.liked_tracks.clone();
     if let Some(playlists) = cache.get_playlists() {
-        state.playlists = playlists;
+        state.data.playlists = playlists;
         state.compute_library_view();
     }
     if let Some(albums) = cache.get_saved_albums() {
-        state.saved_albums = albums;
+        state.data.saved_albums = albums;
     }
     if let Some(tracks) = cache.get_top_tracks() {
-        state.top_tracks = tracks;
+        state.data.top_tracks = tracks;
     }
     if let Some(tracks) = cache.get_recently_played() {
-        state.recently_played = tracks;
+        state.data.recently_played = tracks;
     }
     if let Some(artists) = cache.get_followed_artists() {
-        state.followed_artists = artists;
+        state.data.followed_artists = artists;
     }
-    state.library_config = config.library.clone();
+    state.ui.library_config = config.library.clone();
 
     // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
     if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
-        state.image_picker = Some(picker);
+        state.ui.image_picker = Some(picker);
     }
 
     if config.spotify_credentials.is_some() {
-        state.mode = app::AppMode::Authenticating;
+        state.ui.mode = app::AppMode::Authenticating;
         let _ = app_tx.send(AppEvent::StartAuth).await;
     } else if config.library.local_music_dir.is_some() {
-        state.mode = app::AppMode::Normal;
+        state.ui.mode = app::AppMode::Normal;
     } else {
-        state.mode = app::AppMode::Setup;
+        state.ui.mode = app::AppMode::Setup;
     }
     if let Some(path) = startup_local_auto_refresh_path(&config) {
         let _ = app_tx
@@ -86,20 +86,20 @@ async fn main() -> Result<()> {
 
     let mut is_first_frame = true;
 
-    while state.is_running {
+    while state.ui.is_running {
         let mut needs_draw = is_first_frame;
         is_first_frame = false;
 
-        if let Some(expiry) = state.status_message_expiry
+        if let Some(expiry) = state.ui.status_message_expiry
             && std::time::Instant::now() >= expiry
         {
-            state.status_message = None;
-            state.status_message_expiry = None;
-            state.recent_queue_count = 0;
+            state.ui.status_message = None;
+            state.ui.status_message_expiry = None;
+            state.ui.recent_queue_count = 0;
             needs_draw = true;
         }
 
-        if state.needs_terminal_clear {
+        if state.ui.needs_terminal_clear {
             needs_draw = true;
         }
 
@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
                 outgoing_event = Some(cmd);
             }
 
-            if !state.is_running {
+            if !state.ui.is_running {
                 let _ = app_tx.send(AppEvent::Quit).await;
             } else {
                 let _ = app_tx.send(event).await;
@@ -122,22 +122,22 @@ async fn main() -> Result<()> {
                 if let Some(ev) = outgoing_event {
                     if let AppEvent::LoadContextTracks(ref context) = ev {
                         if let Some(url) = context.image_url.as_ref() {
-                            state.tracklist_image_url = Some(url.clone());
+                            state.data.tracklist_image_url = Some(url.clone());
                             image_tasks::spawn_header_for_url(
                                 url,
-                                state.image_picker.as_ref(),
+                                state.ui.image_picker.as_ref(),
                                 worker_tx_clone.clone(),
-                                state.library_config.cover_img_pixels,
+                                state.ui.library_config.cover_img_pixels,
                             );
                         }
                         let _ = app_tx.send(ev).await;
                     } else if let AppEvent::ReloadHeaderImage = ev {
-                        if let Some(url) = &state.tracklist_image_url {
+                        if let Some(url) = &state.data.tracklist_image_url {
                             image_tasks::spawn_header_for_url(
                                 url,
-                                state.image_picker.as_ref(),
+                                state.ui.image_picker.as_ref(),
                                 worker_tx_clone.clone(),
-                                state.library_config.cover_img_pixels,
+                                state.ui.library_config.cover_img_pixels,
                             );
                         }
                     } else {
@@ -160,9 +160,9 @@ async fn main() -> Result<()> {
         }
 
         if needs_draw {
-            let force_clear = state.needs_terminal_clear;
-            tui.apply_background(state.active_theme.background, force_clear)?;
-            state.needs_terminal_clear = false;
+            let force_clear = state.ui.needs_terminal_clear;
+            tui.apply_background(state.ui.active_theme.background, force_clear)?;
+            state.ui.needs_terminal_clear = false;
             tui.terminal.draw(|f| {
                 tui::render::render_app(f, &mut state);
             })?;

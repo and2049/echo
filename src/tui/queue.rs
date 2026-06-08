@@ -10,22 +10,22 @@ use ratatui::{
 };
 
 pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
-    let header_style = state.active_theme.muted_style();
+    let header_style = state.ui.active_theme.muted_style();
     let title = format!(
         " {} ({} upcoming) ",
-        crate::i18n::t("ui.queue", &state.library_config.language),
-        state.queue.len()
+        crate::i18n::t("ui.queue", &state.ui.library_config.language),
+        state.data.queue.len()
     );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(state.active_theme.primary_style());
+        .border_style(state.ui.active_theme.primary_style());
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if state.queue.is_empty() {
+    if state.data.queue.is_empty() {
         let msg = Paragraph::new("Queue is empty. Press q on any track to add it.")
-            .style(state.active_theme.muted_style())
+            .style(state.ui.active_theme.muted_style())
             .alignment(Alignment::Center);
         frame.render_widget(msg, inner);
         return;
@@ -36,21 +36,21 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
 
     let header = Row::new(vec![
         "".to_string(), // liked col
-        crate::i18n::t("ui.tracks", &state.library_config.language),
-        crate::i18n::t("ui.artist", &state.library_config.language),
-        crate::i18n::t("ui.duration", &state.library_config.language),
+        crate::i18n::t("ui.tracks", &state.ui.library_config.language),
+        crate::i18n::t("ui.artist", &state.ui.library_config.language),
+        crate::i18n::t("ui.duration", &state.ui.library_config.language),
     ])
     .style(header_style)
     .height(1);
 
-    let visual_range = if state.active_view == crate::app::ActiveView::Queue {
+    let visual_range = if state.ui.active_view == crate::app::ActiveView::Queue {
         state.get_visual_selection_range()
     } else {
         None
     };
 
-    let sel = state.selected_queue_index;
-    let rows: Vec<Row> = state
+    let sel = state.ui.selected_queue_index;
+    let rows: Vec<Row> = state.data
         .queue
         .iter()
         .enumerate()
@@ -62,14 +62,14 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
             };
 
             let style = if is_in_visual {
-                state
+                state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.active_theme.primary)
+                    .bg(state.ui.active_theme.primary)
             } else if i == sel {
-                state.active_theme.selected_style()
+                state.ui.active_theme.selected_style()
             } else {
-                state.active_theme.base_style()
+                state.ui.active_theme.base_style()
             };
             let name = truncate_to_width_with_ellipsis(
                 &stabilize_terminal_emoji_width(&track.name),
@@ -80,18 +80,18 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
                 w_artist,
             );
             let dur = format_duration_text(format_time(track.duration_ms / 1000));
-            let liked_str = if state.liked_tracks.contains(&track.id) {
+            let liked_str = if state.data.liked_tracks.contains(&track.id) {
                 "♥"
             } else {
                 " "
             };
-            let liked_cell = Cell::from(liked_str).style(state.active_theme.secondary_style());
+            let liked_cell = Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
 
             Row::new(vec![
                 liked_cell,
                 Cell::from(name),
-                Cell::from(artist).style(style.fg(state.active_theme.text_muted)),
-                Cell::from(dur).style(style.fg(state.active_theme.text_muted)),
+                Cell::from(artist).style(style.fg(state.ui.active_theme.text_muted)),
+                Cell::from(dur).style(style.fg(state.ui.active_theme.text_muted)),
             ])
             .style(style)
         })
@@ -108,7 +108,7 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     )
     .column_spacing(1)
     .header(header)
-    .row_highlight_style(state.active_theme.selected_style())
+    .row_highlight_style(state.ui.active_theme.selected_style())
     .highlight_symbol(" ")
     .highlight_spacing(HighlightSpacing::Always);
 

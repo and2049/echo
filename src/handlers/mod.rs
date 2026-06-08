@@ -13,10 +13,10 @@ use crate::events::AppEvent;
 pub fn handle_event(state: &mut AppState, event: &AppEvent) -> Option<AppEvent> {
     match event {
         AppEvent::Quit => {
-            state.is_running = false;
+            state.ui.is_running = false;
             None
         }
-        AppEvent::Key(key_event) => match state.mode {
+        AppEvent::Key(key_event) => match state.ui.mode {
             AppMode::Setup => setup::handle_key(state, key_event),
             AppMode::Normal => normal::handle_key(state, key_event),
             AppMode::Command => command::handle_key(state, key_event),
