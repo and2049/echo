@@ -160,10 +160,10 @@ pub struct PlaybackState {
     pub volume: u32,
     pub audio_visualization: Option<std::sync::Arc<parking_lot::Mutex<[f32; 32]>>>,
     pub enable_visualizer: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    // Lyrics (loaded from worker, rendered by UI)
     pub current_lyrics: Option<crate::models::Lyrics>,
     pub current_lyric_track_id: Option<String>,
     pub is_fetching_lyrics: bool,
+    pub playback_last_updated_at: Option<std::time::Instant>,
 }
 
 impl Default for PlaybackState {
@@ -190,6 +190,7 @@ impl Default for PlaybackState {
             current_lyrics: None,
             current_lyric_track_id: None,
             is_fetching_lyrics: false,
+            playback_last_updated_at: None,
         }
     }
 }
@@ -708,5 +709,79 @@ mod tests {
             crate::models::LibraryNode::Playlist { playlist, .. }
                 if playlist.id == "local-playlist:one" && playlist.owner_id == "local"
         )));
+    }
+
+    #[test]
+    fn progress_estimation_when_playing() {
+        let state = AppState::new();
+        let pb = &state.playback;
+        let effective = effective_progress_ms(pb);
+        assert_eq!(effective, 0);
+    }
+
+    #[test]
+    fn progress_capped_at_duration() {
+        let mut state = AppState::new();
+        state.playback.duration_ms = 5000;
+        state.playback.progress_ms = 4900;
+        state.playback.is_playing = true;
+        state.playback.playback_last_updated_at = Some(
+            std::time::Instant::now() - std::time::Duration::from_secs(10),
+        );
+        let effective = effective_progress_ms(&state.playback);
+        assert_eq!(effective, 5000);
+    }
+
+    #[test]
+    fn progress_paused_uses_stored_value() {
+        let mut state = AppState::new();
+        state.playback.duration_ms = 10000;
+        state.playback.progress_ms = 3000;
+        state.playback.is_playing = false;
+        state.playback.playback_last_updated_at = Some(
+            std::time::Instant::now() - std::time::Duration::from_secs(5),
+        );
+        let effective = effective_progress_ms(&state.playback);
+        assert_eq!(effective, 3000);
+    }
+
+    #[test]
+    fn progress_no_timestamp_defaults_to_stored() {
+        let mut state = AppState::new();
+        state.playback.duration_ms = 10000;
+        state.playback.progress_ms = 5000;
+        state.playback.is_playing = true;
+        state.playback.playback_last_updated_at = None;
+        let effective = effective_progress_ms(&state.playback);
+        assert_eq!(effective, 5000);
+    }
+
+    #[test]
+    fn progress_advances_with_elapsed_time() {
+        let mut state = AppState::new();
+        state.playback.duration_ms = 300000;
+        state.playback.progress_ms = 10000;
+        state.playback.is_playing = true;
+        state.playback.playback_last_updated_at =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        let effective = effective_progress_ms(&state.playback);
+        // 10000 + ~3000ms = ~13000, allow 120ms tolerance
+        assert!(
+            effective >= 12940 && effective <= 13060,
+            "expected ~13000, got {effective}"
+        );
+    }
+}
+
+fn effective_progress_ms(pb: &PlaybackState) -> u32 {
+    if pb.is_playing {
+        if let Some(last_updated) = pb.playback_last_updated_at {
+            let elapsed = last_updated.elapsed().as_millis() as u32;
+            (pb.progress_ms + elapsed).min(pb.duration_ms)
+        } else {
+            pb.progress_ms
+        }
+    } else {
+        pb.progress_ms
     }
 }

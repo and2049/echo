@@ -10,6 +10,7 @@ use crate::{
 pub fn handle_tick(state: &mut AppState, app_tx: &mpsc::Sender<AppEvent>) {
     if state.playback.is_playing {
         state.playback.progress_ms += 100;
+        state.playback.playback_last_updated_at = Some(std::time::Instant::now());
         if state.playback.duration_ms > 0
             && state.playback.progress_ms >= state.playback.duration_ms
         {
@@ -35,6 +36,7 @@ pub async fn handle_playback_started(
     state.playback.previous_track_image = state.playback.playing_track_image.take();
     state.playback.duration_ms = item.duration_ms;
     state.playback.progress_ms = 0;
+    state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if state.playback.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
         state.playback.current_lyric_track_id = Some(item.id.clone());
@@ -85,6 +87,7 @@ pub async fn handle_sync_playback_state(
     }
     state.playback.device_name = device_name;
     state.playback.progress_ms = progress_ms;
+    state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if let Some(item) = item {
         apply_synced_playback_item(item, state, app_tx, worker_tx).await;
@@ -93,6 +96,7 @@ pub async fn handle_sync_playback_state(
 
 pub fn handle_playback_control_state(state: &mut AppState, is_playing: bool) {
     state.playback.is_playing = is_playing;
+    state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 }
 
 pub fn handle_track_metadata_loaded(
