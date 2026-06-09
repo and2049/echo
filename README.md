@@ -8,7 +8,7 @@
 <p align="center">
     <a href="README.md">English</a> |
     <a href="README.zh.md">简体中文</a> |
-    <a href="README.zht.md">繁體中文</a> |
+    <a href="README.zht.md">繁體中文</a>
 </p>
 
 echo is a terminal-based music player and Spotify client written in Rust. echo brings your local files and entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
