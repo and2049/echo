@@ -8,7 +8,7 @@
 <p align="center">
     <a href="README.md">English</a> |
     <a href="README.zh.md">简体中文</a> |
-    <a href="README.zht.md">繁體中文</a> |
+    <a href="README.zht.md">繁體中文</a>
 </p>
 
 echo 是一款用 Rust 編寫的終端音樂播放器和 Spotify 用戶端。echo 將您的本地檔案以及整個 Spotify 庫、喜歡的歌曲、播放清單和播放控制直接帶到終端中，並配備美觀、動態的 TUI，支援原生影像渲染。
