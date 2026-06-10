@@ -545,7 +545,7 @@ pub fn workspace_theme_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("themes")
 }
 
-const BUNDLED_DEFAULT_THEME: &str = include_str!("../themes/default.toml");
+const BUNDLED_DEFAULT_THEME: &str = include_str!("../themes/echo.toml");
 
 pub fn bundled_default_theme() -> Theme {
     toml::from_str::<Theme>(BUNDLED_DEFAULT_THEME).unwrap_or_else(|_| Theme::default())
