@@ -69,6 +69,13 @@ pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sen
             }
         });
 
+        // media playback needs to be initialized with `Playing`
+        // or an active state for the track metadata to be reliably shown on OS media controls (Windows/macOS).
+        let _ = controls.set_playback(MediaPlayback::Playing { progress: None });
+
+        #[cfg(target_os = "windows")]
+        windows::pump_event_queue();
+
         let mut last_title = String::new();
         loop {
             while let Ok(update) = rx.try_recv() {
