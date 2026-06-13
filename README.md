@@ -127,7 +127,7 @@ Local playlists are stored locally and are not Spotify playlists. They can conta
 Embedded artwork is used when available. If a track has no embedded artwork, echo looks for folder artwork such as `cover.jpg`, `folder.jpg`, or `front.png`.
 
 ## Troubleshooting
-
+- **Theme color rendering issues (Windows)**: Disable "Adjust indistinguishable text" in the Appearance settings of the Defaults profile. 
 - **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). echo will fall back to block rendering if neither is supported.
 - **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
 - **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
