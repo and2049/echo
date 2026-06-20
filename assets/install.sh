@@ -50,6 +50,7 @@ DESKTOP_PATH="$APP_DIR/$BINARY_NAME.desktop"
 
 TMP_DIR=""
 REMOTE=0
+DOWNLOADED_APPIMAGE=""
 
 usage() {
     cat <<EOF
@@ -123,19 +124,20 @@ setup_remote_assets() {
 
 download_latest_appimage() {
     info "Finding latest echo AppImage from GitHub releases..."
-    API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-    API_JSON="$TMP_DIR/release.json"
-    download "$API_URL" "$API_JSON" || err "Failed to query GitHub releases API."
+    _api_json=$(mktemp)
+    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    download "$_api_url" "$_api_json" || { rm -f "$_api_json"; err "Failed to query GitHub releases API."; }
 
-    APPIMAGE_URL=$(grep "browser_download_url.*AppImage" "$API_JSON" | head -n1 | cut -d'"' -f4)
+    _appimage_url=$(grep "browser_download_url.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
+    rm -f "$_api_json"
 
-    if [ -z "$APPIMAGE_URL" ]; then
+    if [ -z "$_appimage_url" ]; then
         err "Could not find an AppImage in the latest release."
     fi
 
-    info "Downloading $APPIMAGE_URL"
-    download "$APPIMAGE_URL" "$REPO_ROOT/echo-latest.AppImage"
-    echo "$REPO_ROOT/echo-latest.AppImage"
+    info "Downloading $_appimage_url"
+    DOWNLOADED_APPIMAGE="$REPO_ROOT/echo-latest.AppImage"
+    download "$_appimage_url" "$DOWNLOADED_APPIMAGE"
 }
 
 # --- Uninstall -------------------------------------------------------------
@@ -179,12 +181,15 @@ install() {
             SRC=$(ls "$REPO_ROOT"/echo-*.AppImage | head -n1)
         elif [ -f "$REPO_ROOT/$BINARY_NAME" ]; then
             SRC="$REPO_ROOT/$BINARY_NAME"
+        elif [ -f "$REPO_ROOT/target/release/$BINARY_NAME" ]; then
+            SRC="$REPO_ROOT/target/release/$BINARY_NAME"
         else
-            err "Could not find an AppImage or binary to install.
-Pass the path explicitly:  $0 /path/to/Echo.AppImage"
+            download_latest_appimage
+            SRC="$DOWNLOADED_APPIMAGE"
         fi
     elif [ "$REMOTE" -eq 1 ]; then
-        SRC=$(download_latest_appimage)
+        download_latest_appimage
+        SRC="$DOWNLOADED_APPIMAGE"
     else
         err "Could not find an AppImage or binary to install.
 Pass the path explicitly:  $0 /path/to/Echo.AppImage"
