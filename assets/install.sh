@@ -116,7 +116,6 @@ setup_remote_assets() {
     download "$RAW_BASE/icons/64x64.png"        "$TMP_DIR/icons/64x64.png"        || true
     download "$RAW_BASE/icons/128x128.png"      "$TMP_DIR/icons/128x128.png"      || true
     download "$RAW_BASE/icons/128x128@2x.png"   "$TMP_DIR/icons/128x128@2x.png"   || true
-    download "$RAW_BASE/assets/echo-rs.svg"     "$TMP_DIR/assets/echo-rs.svg"     || true
     download "$RAW_BASE/assets/echo.desktop"    "$TMP_DIR/assets/echo.desktop"    || err "Failed to download desktop entry."
 
     REPO_ROOT="$TMP_DIR"
@@ -220,15 +219,13 @@ Install it with:  sudo apt-get install libfuse2
     mkdir -p "$ICON_DIR/32x32/apps" \
              "$ICON_DIR/64x64/apps" \
              "$ICON_DIR/128x128/apps" \
-             "$ICON_DIR/256x256/apps" \
-             "$ICON_DIR/scalable/apps"
+             "$ICON_DIR/256x256/apps"
 
     info "Installing binary to $BIN_PATH"
     cp -f "$SRC" "$BIN_PATH"
     chmod +x "$BIN_PATH"
 
     ICONS_SRC="$REPO_ROOT/icons"
-    SVG_SRC="$REPO_ROOT/assets/echo-rs.svg"
 
     if [ -f "$ICONS_SRC/32x32.png" ]; then
         cp -f "$ICONS_SRC/32x32.png" "$ICON_DIR/32x32/apps/$ICON_NAME.png"
@@ -241,9 +238,6 @@ Install it with:  sudo apt-get install libfuse2
     fi
     if [ -f "$ICONS_SRC/128x128@2x.png" ]; then
         cp -f "$ICONS_SRC/128x128@2x.png" "$ICON_DIR/256x256/apps/$ICON_NAME.png"
-    fi
-    if [ -f "$SVG_SRC" ]; then
-        cp -f "$SVG_SRC" "$ICON_DIR/scalable/apps/$ICON_NAME.svg"
     fi
 
     info "Installing desktop entry to $DESKTOP_PATH"
@@ -262,6 +256,7 @@ Type=Application
 Categories=Audio;Music;Player;
 EOF
     fi
+    sed -i "s|^Exec=.*|Exec=$BIN_PATH|" "$DESKTOP_PATH"
 
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$APP_DIR" 2>/dev/null || true
