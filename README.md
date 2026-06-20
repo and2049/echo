@@ -46,7 +46,19 @@ On Ubuntu 22.04+ the AppImage runtime requires `libfuse2`:
 sudo apt-get install libfuse2
 ```
 
-To add Echo to your applications menu with the correct icon, run the included install script:
+**Install with one command** (downloads the latest AppImage and sets up desktop integration):
+
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
+```
+
+To uninstall:
+
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --uninstall
+```
+
+**Or** if you already have the AppImage downloaded, run the included install script:
 
 ```bash
 ./install.sh /path/to/Echo.AppImage
