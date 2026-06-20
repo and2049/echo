@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exe="$dir/echo"
+
+if [ ! -x "$exe" ]; then
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --title=Echo --text="echo binary not found at $exe"
+    fi
+    exit 1
+fi
+
+try_terminal() {
+    term=$1; shift
+    if command -v "$term" >/dev/null 2>&1; then
+        exec "$term" "$@" "$exe"
+    fi
+}
+
+if [ -n "${TERMINAL:-}" ]; then
+    exec "$TERMINAL" -e "$exe"
+fi
+
+try_terminal ghostty           -e
+try_terminal x-terminal-emulator -e
+try_terminal gnome-terminal    --
+try_terminal konsole           -e
+try_terminal xfce4-terminal    -e
+try_terminal mate-terminal     -e
+try_terminal alacritty         -e
+try_terminal kitty             --
+try_terminal wezterm           start --
+try_terminal terminator        -e
+try_terminal xterm             -e
+
+if command -v zenity >/dev/null 2>&1; then
+    zenity --error --title=Echo --text="No terminal emulator found. Please install one."
+fi
+exit 1

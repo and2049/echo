@@ -46,6 +46,7 @@ BIN_HOME="${HOME}/.local/bin"
 ICON_DIR="$DATA_HOME/icons/hicolor"
 APP_DIR="$DATA_HOME/applications"
 BIN_PATH="$BIN_HOME/$BINARY_NAME"
+LAUNCHER_PATH="$BIN_HOME/echo-launcher"
 DESKTOP_PATH="$APP_DIR/$BINARY_NAME.desktop"
 
 TMP_DIR=""
@@ -117,6 +118,7 @@ setup_remote_assets() {
     download "$RAW_BASE/icons/128x128.png"      "$TMP_DIR/icons/128x128.png"      || true
     download "$RAW_BASE/icons/128x128@2x.png"   "$TMP_DIR/icons/128x128@2x.png"   || true
     download "$RAW_BASE/assets/echo.desktop"    "$TMP_DIR/assets/echo.desktop"    || err "Failed to download desktop entry."
+    download "$RAW_BASE/assets/echo-launcher"   "$TMP_DIR/assets/echo-launcher"   || true
 
     REPO_ROOT="$TMP_DIR"
 }
@@ -144,6 +146,7 @@ download_latest_appimage() {
 uninstall() {
     info "Removing echo desktop integration..."
     rm -f "$BIN_PATH"
+    rm -f "$LAUNCHER_PATH"
     rm -f "$DESKTOP_PATH"
     rm -f "$ICON_DIR/32x32/apps/$ICON_NAME.png"
     rm -f "$ICON_DIR/64x64/apps/$ICON_NAME.png"
@@ -225,6 +228,50 @@ Install it with:  sudo apt-get install libfuse2
     cp -f "$SRC" "$BIN_PATH"
     chmod +x "$BIN_PATH"
 
+    info "Installing launcher to $LAUNCHER_PATH"
+    LAUNCHER_SRC="$REPO_ROOT/assets/echo-launcher"
+    if [ -f "$LAUNCHER_SRC" ]; then
+        cp -f "$LAUNCHER_SRC" "$LAUNCHER_PATH"
+    else
+        cat > "$LAUNCHER_PATH" <<'LAUNCHEREOF'
+#!/bin/sh
+set -eu
+dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exe="$dir/echo"
+if [ ! -x "$exe" ]; then
+    if command -v zenity >/dev/null 2>&1; then
+        zenity --error --title=Echo --text="echo binary not found at $exe"
+    fi
+    exit 1
+fi
+try_terminal() {
+    term=$1; shift
+    if command -v "$term" >/dev/null 2>&1; then
+        exec "$term" "$@" "$exe"
+    fi
+}
+if [ -n "${TERMINAL:-}" ]; then
+    exec "$TERMINAL" -e "$exe"
+fi
+try_terminal ghostty           -e
+try_terminal x-terminal-emulator -e
+try_terminal gnome-terminal    --
+try_terminal konsole           -e
+try_terminal xfce4-terminal    -e
+try_terminal mate-terminal     -e
+try_terminal alacritty         -e
+try_terminal kitty             --
+try_terminal wezterm           start --
+try_terminal terminator        -e
+try_terminal xterm             -e
+if command -v zenity >/dev/null 2>&1; then
+    zenity --error --title=Echo --text="No terminal emulator found. Please install one."
+fi
+exit 1
+LAUNCHEREOF
+    fi
+    chmod +x "$LAUNCHER_PATH"
+
     ICONS_SRC="$REPO_ROOT/icons"
 
     if [ -f "$ICONS_SRC/32x32.png" ]; then
@@ -256,7 +303,7 @@ Type=Application
 Categories=Audio;Music;Player;
 EOF
     fi
-    sed -i "s|^Exec=.*|Exec=$BIN_PATH|" "$DESKTOP_PATH"
+    sed -i "s|^Exec=.*|Exec=$LAUNCHER_PATH|" "$DESKTOP_PATH"
 
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database "$APP_DIR" 2>/dev/null || true
@@ -268,9 +315,10 @@ EOF
     info ""
     info "echo has been installed!"
     info "  Binary:   $BIN_PATH"
-    info "  Launcher: $DESKTOP_PATH"
+    info "  Launcher: $LAUNCHER_PATH"
+    info "  Desktop:  $DESKTOP_PATH"
     info ""
-    info "Search for '$APP_NAME' in your applications menu, or run '$BINARY_NAME' from a terminal."
+    info "Search for '$APP_NAME' in your applications menu to launch it."
     info "Make sure $BIN_HOME is in your PATH (it usually is on modern Linux distributions)."
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_HOME"; then
         warn "$BIN_HOME is not in your PATH. Add it with:
