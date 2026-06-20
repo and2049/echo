@@ -95,6 +95,7 @@ jobs:
           mkdir -p release-assets
           test -d artifacts
           find artifacts -type f -exec cp -v {} release-assets/ \;
+          cp -v assets/install.sh release-assets/install.sh
           test "$(find release-assets -type f | wc -l)" -gt 0
 
           if [ -f release.md ] && [ -s release.md ]; then
