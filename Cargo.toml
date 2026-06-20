@@ -58,5 +58,14 @@ icons = [
     "icons/icon.png",
     "icons/128x128@2x.png"
 ]
-resources = [{ src = "themes", target = "themes" }]
+resources = [
+    { src = "themes", target = "themes" },
+    { src = "assets/install.sh", target = "install.sh" },
+    { src = "assets/echo.desktop", target = "echo.desktop" },
+    { src = "assets/echo-rs.svg", target = "echo.svg" },
+]
 before-packaging-command = "cargo build --release"
+
+[package.metadata.packager.deb]
+desktop_template = "assets/echo.desktop.hbs"
+depends = ["libssl3", "libasound2", "libdbus-1-3"]

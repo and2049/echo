@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Echo
+Comment=Terminal-based Spotify client and music player
+Exec=echo
+Icon=echo
+Terminal=true
+Type=Application
+Categories=Audio;Music;Player;

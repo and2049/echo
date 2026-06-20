@@ -22,6 +22,14 @@ use worker::Worker;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::IsTerminal;
+        if !std::io::stdout().is_terminal() {
+            launch_in_terminal();
+        }
+    }
+
     i18n::init();
 
     let original_hook = panic::take_hook();
@@ -175,6 +183,63 @@ async fn main() -> Result<()> {
 
 fn startup_local_auto_refresh_path(config: &config::AppConfig) -> Option<std::path::PathBuf> {
     config.library.local_music_dir.clone()
+}
+
+#[cfg(target_os = "linux")]
+fn launch_in_terminal() -> ! {
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(_) => std::process::exit(1),
+    };
+    let exe_str = exe.display().to_string();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    let terminals: &[&[&str]] = &[
+        &["x-terminal-emulator", "-e"],
+        &["gnome-terminal", "--"],
+        &["konsole", "-e"],
+        &["xfce4-terminal", "-e"],
+        &["mate-terminal", "-e"],
+        &["ghostty", "-e"],
+        &["alacritty", "-e"],
+        &["kitty", "--"],
+        &["wezterm", "start", "--"],
+        &["terminator", "-e"],
+        &["xterm", "-e"],
+    ];
+
+    if let Ok(term) = std::env::var("TERMINAL") {
+        let mut cmd = std::process::Command::new(&term);
+        cmd.arg("-e").arg(&exe_str);
+        for a in &args {
+            cmd.arg(a);
+        }
+        if let Ok(mut child) = cmd.spawn() {
+            let _ = child.wait();
+            std::process::exit(0);
+        }
+    }
+
+    for entry in terminals {
+        let mut cmd = std::process::Command::new(entry[0]);
+        cmd.args(&entry[1..]).arg(&exe_str);
+        for a in &args {
+            cmd.arg(a);
+        }
+        if let Ok(mut child) = cmd.spawn() {
+            let _ = child.wait();
+            std::process::exit(0);
+        }
+    }
+
+    let _ = std::process::Command::new("zenity")
+        .args([
+            "--error",
+            "--title=Echo",
+            "--text=Echo is a terminal application but no terminal emulator was found.\nPlease run it from a terminal.",
+        ])
+        .spawn();
+    std::process::exit(1);
 }
 
 #[cfg(test)]
