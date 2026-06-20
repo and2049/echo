@@ -38,9 +38,36 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 Download and run installer:
 https://github.com/and2049/echo/releases
 
-Or
+### AppImage Setup (Linux)
+
+On Ubuntu 22.04+ the AppImage runtime requires `libfuse2`:
+
+```bash
+sudo apt-get install libfuse2
+```
+
+To add Echo to your applications menu with the correct icon, run the included install script:
+
+```bash
+./install.sh /path/to/Echo.AppImage
+```
+
+To remove:
+
+```bash
+./install.sh --uninstall
+```
+
+### Build from Source
 
 Clone the repository and build using Cargo:
+
+**Linux dependencies** (Ubuntu/Debian):
+
+```bash
+sudo apt-get install -y --no-install-recommends \
+  libasound2-dev libdbus-1-dev pkg-config libssl-dev
+```
 
 ```bash
 git clone https://github.com/and2049/echo.git
