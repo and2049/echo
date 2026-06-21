@@ -298,7 +298,7 @@ Name=$APP_NAME
 Comment=Terminal-based Spotify client and music player
 Exec=$BINARY_NAME
 Icon=$ICON_NAME
-Terminal=true
+Terminal=false
 Type=Application
 Categories=Audio;Music;Player;
 EOF
