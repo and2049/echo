@@ -80,6 +80,7 @@ impl SpotifyWorker {
             let mut stream = Box::pin(stream);
             while let Some(item) = stream.next().await {
                 if let Ok(saved_track) = item {
+                    let added_at = Some(saved_track.added_at.to_rfc3339());
                     let track = saved_track.track;
                     if track.is_local {
                         continue;
@@ -99,6 +100,8 @@ impl SpotifyWorker {
                             .map(|a| a.name)
                             .collect::<Vec<_>>()
                             .join(", "),
+                        album: track.album.name,
+                        added_at,
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
@@ -150,6 +153,7 @@ impl SpotifyWorker {
         };
         let mut out = Vec::new();
         for item in page.items {
+            let added_at = item.added_at.map(|value| value.to_rfc3339());
             if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
                 let artists = track.artists;
                 let artist_id = artists
@@ -166,6 +170,8 @@ impl SpotifyWorker {
                         .map(|a| a.name)
                         .collect::<Vec<_>>()
                         .join(", "),
+                    album: track.album.name,
+                    added_at,
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.map(|id| id.id().to_string()),
@@ -187,7 +193,7 @@ impl SpotifyWorker {
         let image_url = album.images.first().map(|i| i.url.clone());
         let metadata = Some((
             album.id.id().to_string(),
-            album.name,
+            album.name.clone(),
             album
                 .artists
                 .into_iter()
@@ -216,6 +222,8 @@ impl SpotifyWorker {
                     .map(|a| a.name)
                     .collect::<Vec<_>>()
                     .join(", "),
+                album: album.name.clone(),
+                added_at: None,
                 duration_ms: track.duration.num_milliseconds() as u32,
                 image_url: image_url.clone(), // Set the album's image on every track!
                 album_id: Some(album_id.to_string()),
@@ -249,6 +257,8 @@ impl SpotifyWorker {
                         .map(|a| a.name)
                         .collect::<Vec<_>>()
                         .join(", "),
+                    album: track.album.name,
+                    added_at: None,
                     duration_ms: track.duration.num_milliseconds() as u32,
                     image_url: track.album.images.first().map(|img| img.url.clone()),
                     album_id: track.album.id.map(|id| id.id().to_string()),
@@ -328,6 +338,11 @@ impl SpotifyWorker {
                             .and_then(|a| a.get("id"))
                             .and_then(|id| id.as_str())
                             .map(|s| s.to_string());
+                        let album_name = album
+                            .and_then(|a| a.get("name"))
+                            .and_then(|name| name.as_str())
+                            .unwrap_or_default()
+                            .to_string();
                         let image_url = album
                             .and_then(|a| a.get("images"))
                             .and_then(|imgs| imgs.as_array())
@@ -342,6 +357,11 @@ impl SpotifyWorker {
                             local_path: None,
                             name,
                             artist: artist_names.join(", "),
+                            album: album_name,
+                            added_at: history
+                                .get("played_at")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
                             duration_ms,
                             image_url,
                             album_id,

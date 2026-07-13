@@ -8,7 +8,8 @@ pub fn play_selected(state: &AppState) -> Option<AppEvent> {
     let track = state.data.tracks.get(state.ui.selected_track_index)?;
     let context = state.data.active_tracklist_context.as_ref()?;
     let target = if track.source == TrackSource::Local {
-        let tracks: Vec<_> = state.data
+        let tracks: Vec<_> = state
+            .data
             .tracks
             .iter()
             .filter(|track| track.source == TrackSource::Local)
@@ -73,6 +74,8 @@ mod tests {
             local_path: None,
             name: "Track".to_string(),
             artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             artist_id: None,
             duration_ms: 1000,
             image_url: None,
@@ -165,6 +168,8 @@ mod tests {
             local_path: Some(PathBuf::from(path)),
             name: id.to_string(),
             artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             artist_id: None,
             duration_ms: 1000,
             image_url: None,
@@ -179,6 +184,8 @@ mod tests {
             local_path: None,
             name: id.to_string(),
             artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             artist_id: None,
             duration_ms: 1000,
             image_url: None,

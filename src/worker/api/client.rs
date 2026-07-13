@@ -444,11 +444,7 @@ impl EchoSpotifyClient {
             .context("Third-party Spotify token is unavailable")?;
         drop(token_guard);
 
-        let response = self.http
-            .get(url)
-            .bearer_auth(access_token)
-            .send()
-            .await?;
+        let response = self.http.get(url).bearer_auth(access_token).send().await?;
         let status = response.status();
         let retry_after = response
             .headers()

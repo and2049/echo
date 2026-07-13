@@ -406,6 +406,8 @@ mod tests {
             local_path: Some(PathBuf::from(format!("/music/{id}.wav"))),
             name: id.to_string(),
             artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             duration_ms: 1_000,
             image_url: None,
             album_id: None,

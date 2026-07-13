@@ -11,15 +11,12 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
                 state.ui.selected_playlist_modal_index = 0;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if state.ui.selected_playlist_modal_index + 1
-                    < playlist_modal_choices(state).len()
+                if state.ui.selected_playlist_modal_index + 1 < playlist_modal_choices(state).len()
                 {
                     state.ui.selected_playlist_modal_index += 1;
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up
-                if state.ui.selected_playlist_modal_index > 0 =>
-            {
+            KeyCode::Char('k') | KeyCode::Up if state.ui.selected_playlist_modal_index > 0 => {
                 state.ui.selected_playlist_modal_index -= 1;
             }
             KeyCode::Enter => {
@@ -36,10 +33,7 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
                     if !tracks.is_empty() {
                         return (
                             true,
-                            Some(AppEvent::AddTracksToPlaylist(
-                                playlist.id.clone(),
-                                tracks,
-                            )),
+                            Some(AppEvent::AddTracksToPlaylist(playlist.id.clone(), tracks)),
                         );
                     }
                 }
@@ -159,10 +153,7 @@ fn handle_action_menu_action(
                     if !tracks.is_empty() {
                         state.show_generated_tracks(
                             tracks,
-                            TrackListContext::generated(
-                                format!("local-album:{album}"),
-                                album,
-                            ),
+                            TrackListContext::generated(format!("local-album:{album}"), album),
                         );
                     }
                 }
@@ -191,18 +182,11 @@ fn handle_action_menu_action(
                 if !tracks.is_empty() {
                     state.show_generated_tracks(
                         tracks,
-                        TrackListContext::generated(
-                            format!("local-artist:{artist}"),
-                            artist,
-                        ),
+                        TrackListContext::generated(format!("local-artist:{artist}"), artist),
                     );
                 }
             } else if let Some(artist_id) = ctx.artist_id {
-                state.begin_artist_page_load(
-                    artist_id.clone(),
-                    ctx.artist_name.clone(),
-                    None,
-                );
+                state.begin_artist_page_load(artist_id.clone(), ctx.artist_name.clone(), None);
                 return Some(AppEvent::LoadArtistPage {
                     artist_id,
                     artist_name: Some(ctx.artist_name),
@@ -324,6 +308,8 @@ fn track_from_search_track(track: &SearchTrack) -> Track {
         local_path: track.local_path.clone(),
         name: track.name.clone(),
         artist: track.artist.clone(),
+        album: track.album.clone(),
+        added_at: None,
         duration_ms: track.duration_ms,
         image_url: track.image_url.clone(),
         album_id: track.album_id.clone(),
