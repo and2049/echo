@@ -346,6 +346,8 @@ pub struct LibraryConfig {
     pub local_music_dir: Option<PathBuf>,
     #[serde(default = "default_volume")]
     pub volume: u32,
+    #[serde(default)]
+    pub keybindings: std::collections::HashMap<String, String>,
 }
 
 fn default_volume() -> u32 {
@@ -375,6 +377,7 @@ impl Default for LibraryConfig {
             enable_visualizer: false,
             local_music_dir: None,
             volume: 100,
+            keybindings: std::collections::HashMap::new(),
         }
     }
 }

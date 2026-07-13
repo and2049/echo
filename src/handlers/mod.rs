@@ -3,6 +3,7 @@ pub mod browse;
 pub mod command;
 pub mod normal;
 pub mod navigation;
+pub mod keymap;
 pub mod search;
 pub mod setup;
 pub mod tracklist;
