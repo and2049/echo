@@ -499,7 +499,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     track_id: t.id.clone(),
                     source: t.source,
                     track_name: t.name.clone(),
+                    local_path: t.local_path.clone(),
                     album_id: t.album_id.clone(),
+                    album_name: t.album.clone(),
                     artist_id: t.artist_id.clone(),
                     artist_name: t.artist.clone(),
                 })
@@ -511,7 +513,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     track_id: t.id.clone(),
                     source: t.source,
                     track_name: t.name.clone(),
+                    local_path: t.local_path.clone(),
                     album_id: t.album_id.clone(),
+                    album_name: t.album.clone(),
                     artist_id: t.artist_id.clone(),
                     artist_name: t.artist.clone(),
                 })
@@ -524,16 +528,30 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     track_id: t.id.clone(),
                     source: t.source,
                     track_name: t.name.clone(),
+                    local_path: t.local_path.clone(),
                     album_id: t.album_id.clone(),
+                    album_name: t.album.clone(),
                     artist_id: t.artist_id.clone(),
                     artist_name: t.artist.clone(),
                 })
             } else if !state.playback.playing_track_id.is_none() {
                 Some(crate::models::ActionMenuContext {
                     track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
-                    source: crate::models::TrackSource::Spotify,
+                    source: state
+                        .playback
+                        .playing_track_source
+                        .unwrap_or(crate::models::TrackSource::Spotify),
                     track_name: state.playback.playing_track_title.clone(),
+                    local_path: state.playback.playing_track_local_path.clone(),
                     album_id: state.playback.playing_track_album_id.clone(),
+                    album_name: state
+                        .data
+                        .local_library
+                        .tracks
+                        .iter()
+                        .find(|track| Some(track.id.as_str()) == state.playback.playing_track_id.as_deref())
+                        .map(|track| track.album.clone())
+                        .unwrap_or_default(),
                     artist_id: state.playback.playing_track_artist_id.clone(),
                     artist_name: state.playback.playing_track_artist.clone(),
                 })

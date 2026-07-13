@@ -6,6 +6,7 @@ mod handlers;
 mod i18n;
 mod image_tasks;
 mod models;
+mod platform;
 mod tui;
 mod worker;
 

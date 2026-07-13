@@ -33,6 +33,7 @@ pub async fn handle_playback_started(
     state.playback.playing_track_album_id = item.album_id.clone();
     state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.playing_track_source = Some(item.source);
+    state.playback.playing_track_local_path = item.local_path.clone();
     state.playback.previous_track_image = state.playback.playing_track_image.take();
     state.playback.playing_track_image_cache = None;
     state.playback.duration_ms = item.duration_ms;
@@ -172,6 +173,7 @@ async fn apply_synced_playback_item(
     state.playback.playing_track_album_id = item.album_id.clone();
     state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.playing_track_source = Some(item.source);
+    state.playback.playing_track_local_path = item.local_path.clone();
     state.playback.duration_ms = item.duration_ms;
 
     if track_changed {

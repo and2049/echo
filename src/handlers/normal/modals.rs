@@ -1,6 +1,6 @@
 use crate::app::{ActiveView, AppState};
 use crate::events::AppEvent;
-use crate::models::{Playlist, SearchTrack, Track, TrackListContext};
+use crate::models::{ActionMenuAction, Playlist, SearchTrack, Track, TrackListContext};
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) {
@@ -83,7 +83,11 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
     }
 
     if state.ui.action_menu_open {
-        const ACTION_COUNT: usize = 5;
+        let action_count = state
+            .ui
+            .action_menu_context
+            .as_ref()
+            .map_or(0, |ctx| ctx.actions().len());
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {
                 state.ui.action_menu_open = false;
@@ -91,7 +95,7 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
                 state.ui.selected_action_index = 0;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if state.ui.selected_action_index + 1 < ACTION_COUNT {
+                if state.ui.selected_action_index + 1 < action_count {
                     state.ui.selected_action_index += 1;
                 }
             }
@@ -122,19 +126,12 @@ fn handle_action_menu_action(
     ctx: crate::models::ActionMenuContext,
     action_idx: usize,
 ) -> Option<AppEvent> {
-    match action_idx {
-        0 => {
-            // Go to Album
+    let action = ctx.actions().get(action_idx).copied()?;
+    match action {
+        ActionMenuAction::GoToAlbum => {
             if ctx.source == crate::models::TrackSource::Local {
-                if let Some(album) = state
-                    .data
-                    .local_library
-                    .tracks
-                    .iter()
-                    .find(|track| track.id == ctx.track_id)
-                    .map(|track| track.album.clone())
-                    .filter(|album| !album.is_empty())
-                {
+                if !ctx.album_name.is_empty() {
+                    let album = ctx.album_name;
                     let tracks: Vec<_> = state
                         .data
                         .local_library
@@ -168,8 +165,7 @@ fn handle_action_menu_action(
                 ));
             }
         }
-        1 => {
-            // Go to Artist
+        ActionMenuAction::GoToArtist => {
             if ctx.source == crate::models::TrackSource::Local && !ctx.artist_name.is_empty() {
                 let artist = ctx.artist_name.clone();
                 let tracks: Vec<_> = state
@@ -194,19 +190,16 @@ fn handle_action_menu_action(
                 });
             }
         }
-        2 => {
-            // Add to Playlist
+        ActionMenuAction::AddToPlaylist => {
             state.ui.action_menu_context = None;
             state.ui.operation_register = vec![ctx.track_id];
             state.ui.playlist_add_modal_open = true;
             state.ui.selected_playlist_modal_index = 0;
         }
-        3 => {
-            // Add to Queue
+        ActionMenuAction::AddToQueue => {
             return Some(AppEvent::AddToQueue(vec![ctx.track_id]));
         }
-        4 => {
-            // Like / Unlike Track
+        ActionMenuAction::ToggleLike => {
             let is_liked = state.data.liked_tracks.contains(&ctx.track_id);
             if is_liked {
                 state.data.liked_tracks.remove(&ctx.track_id);
@@ -215,9 +208,48 @@ fn handle_action_menu_action(
             }
             return Some(AppEvent::ToggleTrackLike(ctx.track_id, !is_liked));
         }
-        _ => {}
+        ActionMenuAction::ToggleSavedAlbum => {
+            if let Some(album_id) = ctx.album_id {
+                let saved = state.data.saved_albums.iter().any(|album| album.id == album_id);
+                return Some(if saved {
+                    AppEvent::RemoveAlbums(vec![album_id])
+                } else {
+                    AppEvent::SaveAlbums(vec![album_id])
+                });
+            }
+        }
+        ActionMenuAction::CopyLink => {
+            match crate::platform::copy_to_clipboard(&format!(
+                "https://open.spotify.com/track/{}",
+                ctx.track_id
+            )) {
+                Ok(()) => set_action_status(state, "Spotify link copied"),
+                Err(error) => set_action_status(state, &format!("Copy failed: {error}")),
+            }
+        }
+        ActionMenuAction::CopyPath => {
+            if let Some(path) = ctx.local_path {
+                match crate::platform::copy_to_clipboard(&path.to_string_lossy()) {
+                    Ok(()) => set_action_status(state, "File path copied"),
+                    Err(error) => set_action_status(state, &format!("Copy failed: {error}")),
+                }
+            }
+        }
+        ActionMenuAction::OpenFolder => {
+            if let Some(path) = ctx.local_path
+                && let Err(error) = crate::platform::reveal_file(&path)
+            {
+                set_action_status(state, &format!("Unable to open file manager: {error}"));
+            }
+        }
     }
     None
+}
+
+fn set_action_status(state: &mut AppState, message: &str) {
+    state.ui.status_message = Some(message.to_string());
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
 }
 
 // ---------------------------------------------------------------------------

@@ -230,9 +230,55 @@ pub struct ActionMenuContext {
     pub track_id: String,
     pub source: TrackSource,
     pub track_name: String,
+    pub local_path: Option<PathBuf>,
     pub album_id: Option<String>,
+    pub album_name: String,
     pub artist_id: Option<String>,
     pub artist_name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionMenuAction {
+    GoToAlbum,
+    GoToArtist,
+    AddToPlaylist,
+    AddToQueue,
+    ToggleLike,
+    ToggleSavedAlbum,
+    CopyLink,
+    CopyPath,
+    OpenFolder,
+}
+
+impl ActionMenuContext {
+    pub fn actions(&self) -> Vec<ActionMenuAction> {
+        let mut actions = Vec::new();
+        if self.album_id.is_some() || !self.album_name.is_empty() {
+            actions.push(ActionMenuAction::GoToAlbum);
+        }
+        if self.artist_id.is_some() || !self.artist_name.is_empty() {
+            actions.push(ActionMenuAction::GoToArtist);
+        }
+        actions.extend([
+            ActionMenuAction::AddToPlaylist,
+            ActionMenuAction::AddToQueue,
+        ]);
+        match self.source {
+            TrackSource::Spotify => {
+                actions.push(ActionMenuAction::ToggleLike);
+                if self.album_id.is_some() {
+                    actions.push(ActionMenuAction::ToggleSavedAlbum);
+                }
+                actions.push(ActionMenuAction::CopyLink);
+            }
+            TrackSource::Local => {
+                if self.local_path.is_some() {
+                    actions.extend([ActionMenuAction::CopyPath, ActionMenuAction::OpenFolder]);
+                }
+            }
+        }
+        actions
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -568,6 +614,37 @@ mod tests {
 
         assert!(id.starts_with("local:"));
         assert_ne!(id, "spotify-track-id");
+    }
+
+    #[test]
+    fn action_menu_is_source_aware() {
+        let spotify = ActionMenuContext {
+            track_id: "spotify".to_string(),
+            source: TrackSource::Spotify,
+            track_name: "Track".to_string(),
+            local_path: None,
+            album_id: Some("album".to_string()),
+            album_name: "Album".to_string(),
+            artist_id: Some("artist".to_string()),
+            artist_name: "Artist".to_string(),
+        };
+        assert!(spotify.actions().contains(&ActionMenuAction::CopyLink));
+        assert!(spotify.actions().contains(&ActionMenuAction::ToggleLike));
+        assert!(!spotify.actions().contains(&ActionMenuAction::CopyPath));
+
+        let local = ActionMenuContext {
+            track_id: "local:track".to_string(),
+            source: TrackSource::Local,
+            track_name: "Track".to_string(),
+            local_path: Some(PathBuf::from("/music/track.mp3")),
+            album_id: None,
+            album_name: "Album".to_string(),
+            artist_id: None,
+            artist_name: "Artist".to_string(),
+        };
+        assert!(local.actions().contains(&ActionMenuAction::CopyPath));
+        assert!(local.actions().contains(&ActionMenuAction::OpenFolder));
+        assert!(!local.actions().contains(&ActionMenuAction::ToggleLike));
     }
 
     #[test]
