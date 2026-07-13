@@ -3,7 +3,6 @@ use tokio::sync::mpsc;
 use crate::{
     app::{self, AppState},
     events::{AppEvent, WorkerEvent},
-    tui::Tui,
 };
 
 mod auth;
@@ -20,7 +19,6 @@ pub async fn apply_worker_event(
     state: &mut AppState,
     app_tx: &mpsc::Sender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
-    tui: &mut Tui,
 ) {
     match worker_event {
         WorkerEvent::AuthenticationComplete => auth::handle(state),
@@ -35,7 +33,11 @@ pub async fn apply_worker_event(
         WorkerEvent::ApiRequestFailed { label, message } => {
             misc::handle_api_request_failed(state, label, message)
         }
-        WorkerEvent::ForceRedraw => misc::handle_force_redraw(tui),
+        WorkerEvent::ForceRedraw => misc::handle_force_redraw(state),
+        WorkerEvent::AudioOutputUnavailable { message } => {
+            misc::handle_audio_output_unavailable(state, message)
+        }
+        WorkerEvent::AudioOutputRecovered => misc::handle_audio_output_recovered(state),
         WorkerEvent::PlaylistsLoaded(playlists) => library::handle_playlists_loaded(state, playlists),
         WorkerEvent::AlbumsLoaded(albums) => library::handle_albums_loaded(state, albums),
         WorkerEvent::LocalLibraryLoaded { library, report } => {
@@ -107,7 +109,6 @@ mod tests {
     async fn force_context_refresh_reuses_stored_context() {
         let (app_tx, mut app_rx) = mpsc::channel(1);
         let (worker_tx, _) = mpsc::channel(1);
-        let mut tui = Tui::test();
         let mut state = AppState::new();
         let context = TrackListContext::playlist(
             "playlist".to_string(),
@@ -124,7 +125,6 @@ mod tests {
             &mut state,
             &app_tx,
             &worker_tx,
-            &mut tui,
         )
         .await;
 

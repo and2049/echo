@@ -21,4 +21,4 @@
 ### Fixes
 - Keep local play and pause state synchronized with the playback source.
 - Refresh local files without requiring repeated `:localpath` commands.
-
+- Pause local playback and preserve position when an audio device disconnects, with persistent in-app recovery guidance and full TUI redraw controls.

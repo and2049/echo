@@ -104,6 +104,7 @@ echo is heavily keyboard-driven.
 - `gg` / `G`: Jump to the first / last item
 - `Ctrl-b` / `Ctrl-f` or `Page Up` / `Page Down`: Move one page
 - `Ctrl-u` / `Ctrl-d`: Move half a page
+- `Ctrl-l`: Clear and fully redraw the TUI
 - `gc`: Jump to the currently playing track or its available context
 - `Enter` or `z`: Select item / Open playlist / Play track
 - `h` / `q` / `Esc` / `Backspace`: Go back / Close modal / Clear search
@@ -161,6 +162,7 @@ While in Command Mode (`:`), you can use the following:
 - `:mute`: Mute playback or restore the previous volume.
 - `:open [spotify-url-or-uri]`: Open a Spotify track, album, artist, or playlist. With no argument, read it from the clipboard.
 - `:relative <on|off|toggle>`: Configure Vim-style relative line numbers in track lists.
+- `:redraw`: Clear and fully redraw the TUI after unexpected terminal output.
 - `:theme <theme_name>`: Switch application theme.
 - `:lang <en|zh|zh-CN>`: Switch language.
 - `:album`: Jump to the album of the currently selected track.
@@ -184,7 +186,7 @@ Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to o
 ";" = "seek_forward"
 ```
 
-Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, and `reverse_tracks`.
+Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, `reverse_tracks`, and `redraw`.
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 

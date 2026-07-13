@@ -5,22 +5,165 @@ use librespot_core::config::SessionConfig;
 use librespot_core::session::Session;
 
 use crate::events::WorkerEvent;
-use librespot_playback::audio_backend;
+use librespot_playback::audio_backend::{Sink, SinkError, SinkResult};
 use librespot_playback::config::PlayerConfig;
+use librespot_playback::convert::Converter;
+use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::Mixer;
 use librespot_playback::player::Player;
-use std::sync::Arc;
+use librespot_playback::{NUM_CHANNELS, SAMPLE_RATE};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    mpsc as std_mpsc,
+};
 use tokio::sync::mpsc;
+
+struct EchoRodioSink {
+    sink: Option<rodio::Sink>,
+    stream: Option<rodio::OutputStream>,
+    errors: std_mpsc::Receiver<String>,
+    error_tx: std_mpsc::Sender<String>,
+    generation: Arc<AtomicU64>,
+    output_available: Arc<AtomicBool>,
+    playback_is_playing: Arc<AtomicBool>,
+    worker_tx: mpsc::Sender<WorkerEvent>,
+}
+
+impl EchoRodioSink {
+    fn new(
+        worker_tx: mpsc::Sender<WorkerEvent>,
+        output_available: Arc<AtomicBool>,
+        playback_is_playing: Arc<AtomicBool>,
+    ) -> Self {
+        let (error_tx, errors) = std_mpsc::channel();
+        Self {
+            sink: None,
+            stream: None,
+            errors,
+            error_tx,
+            generation: Arc::new(AtomicU64::new(0)),
+            output_available,
+            playback_is_playing,
+            worker_tx,
+        }
+    }
+
+    fn open_output(&mut self) -> SinkResult<()> {
+        while self.errors.try_recv().is_ok() {}
+
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let active_generation = self.generation.clone();
+        let error_tx = self.error_tx.clone();
+        let output_available = self.output_available.clone();
+        let playback_is_playing = self.playback_is_playing.clone();
+        let worker_tx = self.worker_tx.clone();
+        let was_unavailable = !self.output_available.swap(true, Ordering::SeqCst);
+
+        let mut stream = rodio::OutputStreamBuilder::from_default_device()
+            .map_err(|error| self.output_error(error.to_string()))?
+            .with_error_callback(move |error| {
+                if active_generation.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                let message = error.to_string();
+                output_available.store(false, Ordering::SeqCst);
+                playback_is_playing.store(false, Ordering::SeqCst);
+                let _ = error_tx.send(message.clone());
+                let _ = worker_tx.try_send(WorkerEvent::AudioOutputUnavailable { message });
+            })
+            .open_stream_or_fallback()
+            .map_err(|error| self.output_error(error.to_string()))?;
+        stream.log_on_drop(false);
+
+        if let Ok(message) = self.errors.try_recv() {
+            return Err(self.output_error(message));
+        }
+
+        self.sink = Some(rodio::Sink::connect_new(stream.mixer()));
+        self.stream = Some(stream);
+        if was_unavailable {
+            let _ = self.worker_tx.try_send(WorkerEvent::AudioOutputRecovered);
+        }
+        Ok(())
+    }
+
+    fn output_error(&mut self, message: String) -> SinkError {
+        self.output_available.store(false, Ordering::SeqCst);
+        self.playback_is_playing.store(false, Ordering::SeqCst);
+        let _ = self
+            .worker_tx
+            .try_send(WorkerEvent::AudioOutputUnavailable {
+                message: message.clone(),
+            });
+        SinkError::NotConnected(message)
+    }
+
+    fn take_stream_error(&mut self) -> SinkResult<()> {
+        if let Ok(message) = self.errors.try_recv() {
+            self.sink = None;
+            self.stream = None;
+            return Err(SinkError::NotConnected(message));
+        }
+        Ok(())
+    }
+}
+
+impl Sink for EchoRodioSink {
+    fn start(&mut self) -> SinkResult<()> {
+        // A previous callback failure is exactly why start must rebuild the stream.
+        let _ = self.take_stream_error();
+        if self.sink.is_none() {
+            self.open_output()?;
+        }
+        if let Some(sink) = self.sink.as_ref() {
+            sink.play();
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) -> SinkResult<()> {
+        if let Some(sink) = self.sink.as_ref() {
+            sink.pause();
+        }
+        Ok(())
+    }
+
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        self.take_stream_error()?;
+        let samples = packet
+            .samples()
+            .map_err(|error| SinkError::OnWrite(error.to_string()))?;
+        let source = rodio::buffer::SamplesBuffer::new(
+            NUM_CHANNELS as u16,
+            SAMPLE_RATE,
+            converter.f64_to_f32(samples),
+        );
+        self.sink
+            .as_ref()
+            .ok_or_else(|| SinkError::NotConnected("audio output is not open".to_string()))?
+            .append(source);
+        while self.sink.as_ref().is_some_and(|sink| sink.len() > 26) {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            self.take_stream_error()?;
+        }
+        Ok(())
+    }
+}
 
 pub async fn spawn_librespot_daemon(
     _access_token: String,
     device_name: String,
     tx: mpsc::Sender<WorkerEvent>,
     mixer_holder: Arc<parking_lot::Mutex<Option<Arc<dyn Mixer>>>>,
+    output_available: Arc<AtomicBool>,
+    playback_is_playing: Arc<AtomicBool>,
 ) {
     tokio::spawn(async move {
         loop {
             let tx = tx.clone();
+            let output_available = output_available.clone();
+            let playback_is_playing = playback_is_playing.clone();
             let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 // Find or create cache directory
                 let mut cache_dir =
@@ -72,7 +215,6 @@ pub async fn spawn_librespot_daemon(
                 let session_config = SessionConfig::default();
                 let session = Session::new(session_config, Some(cache.clone()));
 
-                let backend_fn = audio_backend::find(None).unwrap();
                 let player_config = PlayerConfig::default();
 
                 let mixer_fn = librespot_playback::mixer::find(None).unwrap();
@@ -84,7 +226,11 @@ pub async fn spawn_librespot_daemon(
                     session.clone(),
                     mixer.get_soft_volume(),
                     move || {
-                        let backend = backend_fn(None, Default::default());
+                        let backend: Box<dyn Sink> = Box::new(EchoRodioSink::new(
+                            tx.clone(),
+                            output_available.clone(),
+                            playback_is_playing.clone(),
+                        ));
                         let shared_bands = std::sync::Arc::new(parking_lot::Mutex::new(
                             [0.0f32; crate::worker::visualization::BANDS],
                         ));

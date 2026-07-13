@@ -30,6 +30,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "mute",
         "open",
         "relative",
+        "redraw",
     ];
     let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
@@ -326,6 +327,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 }
                             ),
                         );
+                    }
+                    "redraw" => {
+                        state.ui.needs_terminal_clear = true;
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
@@ -806,5 +810,15 @@ mod tests {
             assert!(state.ui.status_message.is_some(), "{command}");
             assert!(state.ui.status_message_expiry.is_some(), "{command}");
         }
+    }
+
+    #[test]
+    fn redraw_command_requests_terminal_clear() {
+        let mut state = AppState::new();
+        state.ui.command_buffer = "redraw".to_string();
+        let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+
+        assert!(handle_key(&mut state, &key).is_none());
+        assert!(state.ui.needs_terminal_clear);
     }
 }
