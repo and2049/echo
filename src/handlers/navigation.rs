@@ -17,6 +17,7 @@ pub enum NavigationCommand {
     PageDown,
     HalfPageUp,
     HalfPageDown,
+    CurrentContext,
 }
 
 pub struct NavigationKey {
@@ -31,6 +32,20 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
         .is_some_and(|(_, started)| started.elapsed() >= SEQUENCE_TIMEOUT)
     {
         state.ui.pending_key_sequence = None;
+    }
+
+    if state
+        .ui
+        .pending_key_sequence
+        .is_some_and(|(pending, _)| pending == 'g')
+        && key.code == KeyCode::Char('c')
+        && key.modifiers.is_empty()
+    {
+        state.ui.pending_key_sequence = None;
+        return NavigationKey {
+            consumed: true,
+            command: Some(NavigationCommand::CurrentContext),
+        };
     }
 
     if key.code == KeyCode::Char('g') && key.modifiers.is_empty() {
@@ -79,6 +94,9 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
 }
 
 pub fn execute(state: &mut AppState, command: NavigationCommand) -> Option<AppEvent> {
+    if command == NavigationCommand::CurrentContext {
+        return jump_to_current_context(state);
+    }
     let len = selected_list_len(state);
     if len == 0 {
         return None;
@@ -91,12 +109,48 @@ pub fn execute(state: &mut AppState, command: NavigationCommand) -> Option<AppEv
         NavigationCommand::PageDown => (current + PAGE_ROWS).min(len - 1),
         NavigationCommand::HalfPageUp => current.saturating_sub(PAGE_ROWS / 2),
         NavigationCommand::HalfPageDown => (current + PAGE_ROWS / 2).min(len - 1),
+        NavigationCommand::CurrentContext => unreachable!(),
     };
     set_selected_index(state, target);
     if state.ui.active_view == ActiveView::Library && state.ui.active_library_tab == LibraryTab::Browse {
         browse::select_node_from_library_index(state);
         return browse::load_event_if_needed(state);
     }
+    None
+}
+
+fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
+    let Some(track_id) = state.playback.playing_track_id.clone() else {
+        state.ui.status_message = Some("Nothing is currently playing".to_string());
+        return None;
+    };
+    if state.ui.active_view == ActiveView::TrackList
+        && let Some(index) = state.data.tracks.iter().position(|track| track.id == track_id)
+    {
+        state.ui.selected_track_index = index;
+        return None;
+    }
+    if state.playback.playing_track_source == Some(crate::models::TrackSource::Local) {
+        state.show_local_library();
+        state.ui.selected_track_index = state
+            .data
+            .tracks
+            .iter()
+            .position(|track| track.id == track_id)
+            .unwrap_or(0);
+        return None;
+    }
+    if let Some(album_id) = state.playback.playing_track_album_id.clone() {
+        let context = crate::models::TrackListContext::album(
+            album_id,
+            "Current album".to_string(),
+            state.playback.playing_track_artist.clone(),
+            None,
+        );
+        state.begin_tracklist_load(context.clone());
+        return Some(AppEvent::LoadContextTracks(context));
+    }
+    state.ui.status_message = Some("The current playback context is unavailable".to_string());
     None
 }
 
@@ -202,5 +256,31 @@ mod tests {
         }];
         execute(&mut state, NavigationCommand::PageDown);
         assert_eq!(state.ui.selected_queue_index, 0);
+    }
+
+    #[test]
+    fn gc_highlights_playing_track_in_loaded_context() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.tracks = ["one", "two"]
+            .into_iter()
+            .map(|id| crate::models::Track {
+                id: id.to_string(),
+                source: crate::models::TrackSource::Spotify,
+                local_path: None,
+                name: id.to_string(),
+                artist: String::new(),
+                album: String::new(),
+                added_at: None,
+                duration_ms: 0,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            })
+            .collect();
+        state.playback.playing_track_id = Some("two".to_string());
+
+        execute(&mut state, NavigationCommand::CurrentContext);
+        assert_eq!(state.ui.selected_track_index, 1);
     }
 }

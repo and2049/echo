@@ -338,7 +338,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 album.artist.clone(),
                                 album.image_url.clone(),
                             );
-                            state.ui.prev_view = None;
                             state.begin_tracklist_load(context.clone());
                             return Some(AppEvent::LoadContextTracks(context));
                         }
@@ -641,7 +640,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('h') | KeyCode::Esc | KeyCode::Backspace => {
-            if state.ui.active_view == ActiveView::TrackList {
+            if state.pop_view_history() {
+                state.clear_pending_artist_page();
+                if state.data.tracklist_image_url.is_some() {
+                    return Some(AppEvent::ReloadHeaderImage);
+                }
+            } else if state.ui.active_view == ActiveView::TrackList {
                 if search_has_results(state) {
                     state.ui.active_view = ActiveView::SearchResults;
                 } else {
@@ -697,6 +701,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('Q') => {
+            state.push_view_history();
             state.ui.active_view = ActiveView::Queue;
             state.ui.selected_queue_index = 0;
             return Some(AppEvent::FetchQueue);
