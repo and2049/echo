@@ -50,6 +50,9 @@ pub fn handle_tracks_load_failed(state: &mut AppState, message: String) {
 }
 
 pub fn handle_search_results_loaded(state: &mut AppState, results: SearchResults) {
+    if state.ui.active_view != app::ActiveView::SearchResults {
+        state.push_view_history();
+    }
     state.data.search_results = results;
     state.ui.selected_search_index = 0;
     state.ui.active_view = app::ActiveView::SearchResults;

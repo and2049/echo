@@ -32,6 +32,7 @@ pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
             if state.data.followed_artists.is_empty() {
                 return Some(AppEvent::FetchFollowedArtists);
             }
+            state.push_view_history();
             state.ui.active_view = ActiveView::ArtistList;
             state.ui.selected_artist_index = 0;
         }

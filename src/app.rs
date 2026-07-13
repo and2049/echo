@@ -15,7 +15,7 @@ pub struct UIState {
     pub mode: AppMode,
     pub active_view: ActiveView,
     pub is_running: bool,
-    pub prev_view: Option<ActiveView>,
+    pub view_history: Vec<NavigationSnapshot>,
     pub active_library_tab: LibraryTab,
     pub active_search_tab: SearchTab,
     pub active_browse_node: BrowseNode,
@@ -90,7 +90,7 @@ impl UIState {
             mode: initial_mode,
             active_view: ActiveView::Library,
             is_running: true,
-            prev_view: None,
+            view_history: Vec::new(),
             active_library_tab: LibraryTab::Playlists,
             active_search_tab: SearchTab::Tracks,
             active_browse_node: BrowseNode::TopTracks,
@@ -301,7 +301,7 @@ impl DataState {
 // Enums
 // ---------------------------------------------------------------------------
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ActiveView {
     Library,
     TrackList,
@@ -310,6 +310,25 @@ pub enum ActiveView {
     Devices,
     ArtistList,
     ArtistPage,
+}
+
+#[derive(Clone)]
+pub struct NavigationSnapshot {
+    active_view: ActiveView,
+    selected_playlist_index: usize,
+    selected_track_index: usize,
+    selected_search_index: usize,
+    selected_queue_index: usize,
+    selected_artist_index: usize,
+    artist_page_album_index: usize,
+    active_library_tab: LibraryTab,
+    active_search_tab: SearchTab,
+    tracks: Vec<Track>,
+    original_tracks: Vec<Track>,
+    track_context: Option<TrackListContext>,
+    tracklist_image_url: Option<String>,
+    search_results: SearchResults,
+    artist_page_data: Option<ArtistPageData>,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -521,6 +540,53 @@ impl AppState {
             .unwrap_or(0);
     }
 
+    pub fn push_view_history(&mut self) {
+        const HISTORY_LIMIT: usize = 20;
+        let snapshot = NavigationSnapshot {
+            active_view: self.ui.active_view,
+            selected_playlist_index: self.ui.selected_playlist_index,
+            selected_track_index: self.ui.selected_track_index,
+            selected_search_index: self.ui.selected_search_index,
+            selected_queue_index: self.ui.selected_queue_index,
+            selected_artist_index: self.ui.selected_artist_index,
+            artist_page_album_index: self.ui.artist_page_album_index,
+            active_library_tab: self.ui.active_library_tab,
+            active_search_tab: self.ui.active_search_tab,
+            tracks: self.data.tracks.clone(),
+            original_tracks: self.data.original_tracks.clone(),
+            track_context: self.data.active_tracklist_context.clone(),
+            tracklist_image_url: self.data.tracklist_image_url.clone(),
+            search_results: self.data.search_results.clone(),
+            artist_page_data: self.data.artist_page_data.clone(),
+        };
+        if self.ui.view_history.len() == HISTORY_LIMIT {
+            self.ui.view_history.remove(0);
+        }
+        self.ui.view_history.push(snapshot);
+    }
+
+    pub fn pop_view_history(&mut self) -> bool {
+        let Some(snapshot) = self.ui.view_history.pop() else {
+            return false;
+        };
+        self.ui.active_view = snapshot.active_view;
+        self.ui.selected_playlist_index = snapshot.selected_playlist_index;
+        self.ui.selected_track_index = snapshot.selected_track_index;
+        self.ui.selected_search_index = snapshot.selected_search_index;
+        self.ui.selected_queue_index = snapshot.selected_queue_index;
+        self.ui.selected_artist_index = snapshot.selected_artist_index;
+        self.ui.artist_page_album_index = snapshot.artist_page_album_index;
+        self.ui.active_library_tab = snapshot.active_library_tab;
+        self.ui.active_search_tab = snapshot.active_search_tab;
+        self.data.tracks = snapshot.tracks;
+        self.data.original_tracks = snapshot.original_tracks;
+        self.data.active_tracklist_context = snapshot.track_context;
+        self.data.tracklist_image_url = snapshot.tracklist_image_url;
+        self.data.search_results = snapshot.search_results;
+        self.data.artist_page_data = snapshot.artist_page_data;
+        true
+    }
+
     pub fn reverse_tracks(&mut self) {
         let selected_id = self
             .data
@@ -643,6 +709,15 @@ impl AppState {
     }
 
     pub fn begin_tracklist_load(&mut self, context: TrackListContext) {
+        let context_changed = self.ui.active_view != ActiveView::TrackList
+            || self
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .is_none_or(|active| active.id != context.id || active.kind != context.kind);
+        if context_changed {
+            self.push_view_history();
+        }
         self.ui.active_view = ActiveView::TrackList;
         self.data.tracks.clear();
         self.ui.selected_track_index = 0;
@@ -653,6 +728,15 @@ impl AppState {
     }
 
     pub fn show_generated_tracks(&mut self, tracks: Vec<Track>, context: TrackListContext) {
+        let context_changed = self.ui.active_view != ActiveView::TrackList
+            || self
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .is_none_or(|active| active.id != context.id || active.kind != context.kind);
+        if context_changed {
+            self.push_view_history();
+        }
         self.ui.active_view = ActiveView::TrackList;
         self.data.tracks = tracks;
         self.ui.selected_track_index = 0;
@@ -664,6 +748,12 @@ impl AppState {
 
     pub fn show_local_library(&mut self) {
         let context = TrackListContext::local_library();
+        if self.ui.active_view != ActiveView::TrackList
+            || self.data.active_tracklist_context.as_ref().map(|active| &active.id)
+                != Some(&context.id)
+        {
+            self.push_view_history();
+        }
         self.ui.active_view = ActiveView::TrackList;
         self.data.tracks = self.data.local_library.to_tracks();
         self.ui.selected_track_index = 0;
@@ -675,6 +765,12 @@ impl AppState {
 
     pub fn show_local_playlist(&mut self, playlist_id: &str, title: String) {
         let context = TrackListContext::local_playlist(playlist_id.to_string(), title);
+        if self.ui.active_view != ActiveView::TrackList
+            || self.data.active_tracklist_context.as_ref().map(|active| &active.id)
+                != Some(&context.id)
+        {
+            self.push_view_history();
+        }
         self.ui.active_view = ActiveView::TrackList;
         self.data.tracks = self
             .data
@@ -693,6 +789,15 @@ impl AppState {
         artist_name: String,
         image_url: Option<String>,
     ) {
+        let artist_changed = self.ui.active_view != ActiveView::ArtistPage
+            || self
+                .data
+                .artist_page_data
+                .as_ref()
+                .is_none_or(|artist| artist.artist_id != artist_id);
+        if artist_changed {
+            self.push_view_history();
+        }
         self.data.artist_page_data = Some(ArtistPageData {
             artist_id: artist_id.clone(),
             artist_name,
@@ -932,6 +1037,35 @@ mod tests {
         assert_eq!(playback.toggle_mute_target(), 0);
         playback.volume = 0;
         assert_eq!(playback.toggle_mute_target(), 37);
+    }
+
+    #[test]
+    fn view_history_restores_tracklist_without_refetching() {
+        let mut state = AppState::new();
+        state.show_generated_tracks(
+            vec![crate::models::Track {
+                id: "track".to_string(),
+                source: crate::models::TrackSource::Spotify,
+                local_path: None,
+                name: "Track".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                added_at: None,
+                duration_ms: 0,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            }],
+            TrackListContext::generated("one", "One"),
+        );
+        state.ui.selected_track_index = 0;
+        state.push_view_history();
+        state.ui.active_view = ActiveView::Queue;
+        state.data.tracks.clear();
+
+        assert!(state.pop_view_history());
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+        assert_eq!(state.data.tracks[0].id, "track");
     }
 }
 
