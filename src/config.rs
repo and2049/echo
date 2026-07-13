@@ -348,6 +348,8 @@ pub struct LibraryConfig {
     pub volume: u32,
     #[serde(default)]
     pub keybindings: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub relative_line_numbers: bool,
 }
 
 fn default_volume() -> u32 {
@@ -378,6 +380,7 @@ impl Default for LibraryConfig {
             local_music_dir: None,
             volume: 100,
             keybindings: std::collections::HashMap::new(),
+            relative_line_numbers: false,
         }
     }
 }
