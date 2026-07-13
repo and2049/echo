@@ -38,6 +38,34 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
     bail!("no supported clipboard command was found")
 }
 
+pub fn read_clipboard() -> Result<String> {
+    #[cfg(target_os = "windows")]
+    let candidates: &[(&str, &[&str])] = &[(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+    )];
+    #[cfg(target_os = "macos")]
+    let candidates: &[(&str, &[&str])] = &[("pbpaste", &[])];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let candidates: &[(&str, &[&str])] = &[
+        ("wl-paste", &["--no-newline"]),
+        ("xclip", &["-o", "-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--output"]),
+    ];
+
+    for (program, args) in candidates {
+        let Ok(output) = Command::new(program).args(*args).output() else {
+            continue;
+        };
+        if output.status.success() {
+            return String::from_utf8(output.stdout)
+                .context("clipboard contained invalid UTF-8")
+                .map(|text| text.trim().to_string());
+        }
+    }
+    bail!("no supported clipboard command was found")
+}
+
 pub fn reveal_file(path: &Path) -> Result<()> {
     #[cfg(target_os = "windows")]
     let mut command = {

@@ -28,6 +28,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "pixelate",
         "seek",
         "mute",
+        "open",
     ];
     let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
@@ -85,6 +86,87 @@ fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
         .strip_prefix(command_name)
         .map(str::trim)
         .unwrap_or_default()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SpotifyTarget {
+    Track(String),
+    Album(String),
+    Artist(String),
+    Playlist(String),
+}
+
+fn parse_spotify_target(value: &str) -> Option<SpotifyTarget> {
+    let value = value.trim();
+    let (kind, id) = if let Some(uri) = value.strip_prefix("spotify:") {
+        let mut parts = uri.split(':');
+        (parts.next()?, parts.next()?)
+    } else {
+        let path = value
+            .strip_prefix("https://open.spotify.com/")
+            .or_else(|| value.strip_prefix("http://open.spotify.com/"))?;
+        let mut parts = path.split('/');
+        (parts.next()?, parts.next()?.split(['?', '#']).next()?)
+    };
+    if id.is_empty() || !id.chars().all(|character| character.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(match kind {
+        "track" => SpotifyTarget::Track(id.to_string()),
+        "album" => SpotifyTarget::Album(id.to_string()),
+        "artist" => SpotifyTarget::Artist(id.to_string()),
+        "playlist" => SpotifyTarget::Playlist(id.to_string()),
+        _ => return None,
+    })
+}
+
+fn open_spotify_target(state: &mut AppState, target: SpotifyTarget) -> Option<AppEvent> {
+    match target {
+        SpotifyTarget::Track(track_id) => Some(AppEvent::PlayTrack {
+            target: crate::models::PlaybackTarget::SpotifyTrack {
+                track_id: track_id.clone(),
+            },
+            track_id,
+            title: String::new(),
+            artist: String::new(),
+            duration_ms: 0,
+            image_url: None,
+            album_id: None,
+        }),
+        SpotifyTarget::Album(album_id) => {
+            let context = TrackListContext::album(
+                album_id,
+                "Spotify album".to_string(),
+                String::new(),
+                None,
+            );
+            state.begin_tracklist_load(context.clone());
+            Some(AppEvent::LoadContextTracks(context))
+        }
+        SpotifyTarget::Playlist(playlist_id) => {
+            let context = TrackListContext::playlist(
+                playlist_id,
+                "Spotify playlist".to_string(),
+                String::new(),
+                String::new(),
+                None,
+            );
+            state.begin_tracklist_load(context.clone());
+            Some(AppEvent::LoadContextTracks(context))
+        }
+        SpotifyTarget::Artist(artist_id) => {
+            state.begin_artist_page_load(
+                artist_id.clone(),
+                "Spotify artist".to_string(),
+                None,
+            );
+            Some(AppEvent::LoadArtistPage {
+                artist_id,
+                artist_name: None,
+                artist_image_url: None,
+            })
+        }
+    }
 }
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
@@ -191,6 +273,32 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.playback.volume = volume;
                         state.save_volume();
                         return Some(AppEvent::SetVolume(volume as u8));
+                    }
+                    "open" => {
+                        let value = {
+                            let remainder = command_remainder(&cmd, "open");
+                            if remainder.is_empty() {
+                                match crate::platform::read_clipboard() {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        state.ui.status_message = Some(format!(
+                                            "Unable to read clipboard: {error}"
+                                        ));
+                                        return None;
+                                    }
+                                }
+                            } else {
+                                remainder.to_string()
+                            }
+                        };
+                        let Some(target) = parse_spotify_target(&value) else {
+                            state.ui.status_message = Some(
+                                "Expected a Spotify track, album, artist, or playlist URL/URI"
+                                    .to_string(),
+                            );
+                            return None;
+                        };
+                        return open_spotify_target(state, target);
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
@@ -636,5 +744,18 @@ mod tests {
             Some(AppEvent::StartAuth)
         ));
         assert!(state.ui.mode == AppMode::Authenticating);
+    }
+
+    #[test]
+    fn parses_spotify_urls_and_uris_without_network_access() {
+        assert_eq!(
+            parse_spotify_target("spotify:track:abc123"),
+            Some(SpotifyTarget::Track("abc123".to_string()))
+        );
+        assert_eq!(
+            parse_spotify_target("https://open.spotify.com/playlist/list123?si=value"),
+            Some(SpotifyTarget::Playlist("list123".to_string()))
+        );
+        assert_eq!(parse_spotify_target("https://example.com/track/abc"), None);
     }
 }
