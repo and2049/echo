@@ -74,7 +74,7 @@ pub struct UIState {
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
     pub track_sort: TrackSort,
-    pub pending_key_sequence: Option<(char, std::time::Instant)>,
+    pub pending_key_sequence: Option<(String, std::time::Instant)>,
 }
 
 impl UIState {

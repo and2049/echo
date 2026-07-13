@@ -26,6 +26,14 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    let configured = crate::handlers::keymap::configured_action(state, key);
+    if let Some(action) = configured.action {
+        return crate::handlers::keymap::execute(state, action);
+    }
+    if configured.consumed {
+        return None;
+    }
+
     let navigation = crate::handlers::navigation::command_for_key(state, key);
     if let Some(command) = navigation.command {
         return crate::handlers::navigation::execute(state, command);

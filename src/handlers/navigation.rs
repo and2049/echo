@@ -29,6 +29,7 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
     if state
         .ui
         .pending_key_sequence
+        .as_ref()
         .is_some_and(|(_, started)| started.elapsed() >= SEQUENCE_TIMEOUT)
     {
         state.ui.pending_key_sequence = None;
@@ -37,7 +38,8 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
     if state
         .ui
         .pending_key_sequence
-        .is_some_and(|(pending, _)| pending == 'g')
+        .as_ref()
+        .is_some_and(|(pending, _)| pending == "g")
         && key.code == KeyCode::Char('c')
         && key.modifiers.is_empty()
     {
@@ -53,14 +55,14 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
             .ui
             .pending_key_sequence
             .take()
-            .is_some_and(|(key, _)| key == 'g')
+            .is_some_and(|(key, _)| key == "g")
         {
             return NavigationKey {
                 consumed: true,
                 command: Some(NavigationCommand::First),
             };
         }
-        state.ui.pending_key_sequence = Some(('g', std::time::Instant::now()));
+        state.ui.pending_key_sequence = Some(("g".to_string(), std::time::Instant::now()));
         return NavigationKey {
             consumed: true,
             command: None,
