@@ -405,7 +405,6 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
         None => return,
     };
 
-    // Define the 5 actions; mark unavailable ones (no album/artist id) as dimmed.
     let is_liked = state.data.liked_tracks.contains(&ctx.track_id);
     let lang = &state.ui.library_config.language;
     let lbl_album = crate::i18n::t("actions.go_to_album", lang);
@@ -415,32 +414,36 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let lbl_unlike = crate::i18n::t("actions.unlike_track", lang);
     let lbl_like = crate::i18n::t("actions.like_track", lang);
 
-    let has_local_album = ctx.source == crate::models::TrackSource::Local
-        && state.data
-            .local_library
-            .tracks
-            .iter()
-            .find(|track| track.id == ctx.track_id)
-            .is_some_and(|track| !track.album.is_empty());
-
-    let actions: &[(String, bool)] = &[
-        (lbl_album, ctx.album_id.is_some() || has_local_album),
-        (
-            lbl_artist,
-            ctx.artist_id.is_some()
-                || (ctx.source == crate::models::TrackSource::Local && !ctx.artist_name.is_empty()),
-        ),
-        (lbl_playlist, true),
-        (lbl_queue, true),
-        (if is_liked { lbl_unlike } else { lbl_like }, true),
-    ];
+    let album_is_saved = ctx
+        .album_id
+        .as_ref()
+        .is_some_and(|id| state.data.saved_albums.iter().any(|album| &album.id == id));
+    let actions = ctx.actions();
+    let labels: Vec<String> = actions
+        .iter()
+        .map(|action| match action {
+            crate::models::ActionMenuAction::GoToAlbum => lbl_album.clone(),
+            crate::models::ActionMenuAction::GoToArtist => lbl_artist.clone(),
+            crate::models::ActionMenuAction::AddToPlaylist => lbl_playlist.clone(),
+            crate::models::ActionMenuAction::AddToQueue => lbl_queue.clone(),
+            crate::models::ActionMenuAction::ToggleLike => {
+                if is_liked { lbl_unlike.clone() } else { lbl_like.clone() }
+            }
+            crate::models::ActionMenuAction::ToggleSavedAlbum => {
+                if album_is_saved { "Remove album from library" } else { "Save album to library" }.to_string()
+            }
+            crate::models::ActionMenuAction::CopyLink => "Copy Spotify link".to_string(),
+            crate::models::ActionMenuAction::CopyPath => "Copy file path".to_string(),
+            crate::models::ActionMenuAction::OpenFolder => "Show in file manager".to_string(),
+        })
+        .collect();
 
     // Measure popup size — title + 2 border lines + 1 blank + N actions
     let title_format = crate::i18n::t("actions.title", lang);
     let track_label = title_format.replace("{}", &ctx.track_name);
     let label_width = track_label.len() as u16;
     let popup_w = label_width.max(32).min(50);
-    let popup_h = (actions.len() as u16) + 4; // border top/bottom + blank + actions
+    let popup_h = (labels.len() as u16) + 4;
 
     let area = frame.area();
     let x = (area.width.saturating_sub(popup_w)) / 2;
@@ -460,14 +463,12 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
         .style(state.ui.active_theme.base_style())
         .border_style(state.ui.active_theme.primary_style());
 
-    let items: Vec<ListItem> = actions
+    let items: Vec<ListItem> = labels
         .iter()
         .enumerate()
-        .map(|(i, (label, available))| {
+        .map(|(i, label)| {
             let style = if i == state.ui.selected_action_index {
                 state.ui.active_theme.selected_style()
-            } else if !available {
-                state.ui.active_theme.muted_style()
             } else {
                 state.ui.active_theme.base_style()
             };
