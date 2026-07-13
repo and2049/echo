@@ -40,23 +40,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     browse::select_node_from_library_index(state);
                     return browse::load_event_if_needed(state);
                 } else {
-                    let max_len = if state.ui.active_library_tab
-                        == crate::app::LibraryTab::Albums
-                    {
+                    let max_len = if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
                         state.data.saved_albums.len()
                     } else {
                         state.data.library_view.len()
                     };
-                    if max_len > 0
-                        && state.ui.selected_playlist_index < max_len.saturating_sub(1)
-                    {
+                    if max_len > 0 && state.ui.selected_playlist_index < max_len.saturating_sub(1) {
                         state.ui.selected_playlist_index += 1;
                     }
                 }
             }
             ActiveView::TrackList => {
-                if state.ui.selected_track_index < state.data.tracks.len().saturating_sub(1)
-                {
+                if state.ui.selected_track_index < state.data.tracks.len().saturating_sub(1) {
                     state.ui.selected_track_index += 1;
                 }
             }
@@ -71,8 +66,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             ActiveView::ArtistPage => {
                 if let Some(ref data) = state.data.artist_page_data {
                     if !data.albums.is_empty()
-                        && state.ui.artist_page_album_index
-                            < data.albums.len().saturating_sub(1)
+                        && state.ui.artist_page_album_index < data.albums.len().saturating_sub(1)
                     {
                         state.ui.artist_page_album_index += 1;
                     }
@@ -86,16 +80,14 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
             ActiveView::Queue => {
                 if !state.data.queue.is_empty()
-                    && state.ui.selected_queue_index
-                        < state.data.queue.len().saturating_sub(1)
+                    && state.ui.selected_queue_index < state.data.queue.len().saturating_sub(1)
                 {
                     state.ui.selected_queue_index += 1;
                 }
             }
             ActiveView::Devices => {
                 if !state.data.devices.is_empty()
-                    && state.ui.selected_device_index
-                        < state.data.devices.len().saturating_sub(1)
+                    && state.ui.selected_device_index < state.data.devices.len().saturating_sub(1)
                 {
                     state.ui.selected_device_index += 1;
                 }
@@ -162,10 +154,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             "messages.added_to_liked",
                             &state.ui.library_config.language,
                         ));
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         return Some(AppEvent::ToggleTrackLike(track_id, true));
                     }
                 }
@@ -181,10 +171,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             "messages.added_to_liked",
                             &state.ui.library_config.language,
                         ));
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         return Some(AppEvent::ToggleTrackLike(track_id, true));
                     }
                 }
@@ -207,10 +195,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             "messages.added_to_liked",
                             &state.ui.library_config.language,
                         ));
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now()
-                                + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         return Some(AppEvent::ToggleTrackLike(track_id, true));
                     }
                 }
@@ -223,8 +209,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             {
                 state.ui.condensed_lyrics_enabled = !state.ui.condensed_lyrics_enabled;
                 let mut app_config = crate::config::AppConfig::load();
-                app_config.library.condensed_lyrics_enabled =
-                    state.ui.condensed_lyrics_enabled;
+                app_config.library.condensed_lyrics_enabled = state.ui.condensed_lyrics_enabled;
                 let _ = app_config.save();
             } else {
                 state.ui.lyrics_modal_open = !state.ui.lyrics_modal_open;
@@ -232,12 +217,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Enter | KeyCode::Char('z') => {
             if state.ui.active_view == ActiveView::Library {
-                let context = if state.ui.active_library_tab
-                    == crate::app::LibraryTab::Albums
-                {
+                let context = if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
                     if state.ui.selected_playlist_index < state.data.saved_albums.len() {
-                        let album =
-                            &state.data.saved_albums[state.ui.selected_playlist_index];
+                        let album = &state.data.saved_albums[state.ui.selected_playlist_index];
                         Some(TrackListContext::album(
                             album.id.clone(),
                             album.name.clone(),
@@ -247,8 +229,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     } else {
                         None
                     }
-                } else if state.ui.active_library_tab == crate::app::LibraryTab::Browse
-                {
+                } else if state.ui.active_library_tab == crate::app::LibraryTab::Browse {
                     if let Some(event) = browse::enter_active_node(state) {
                         return Some(event);
                     }
@@ -265,12 +246,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 if playlist.id == "local-library" {
                                     state.show_local_library();
                                     None
-                                } else if playlist.id.starts_with("local-playlist:")
-                                {
-                                    state.show_local_playlist(
-                                        &playlist.id,
-                                        playlist.name.clone(),
-                                    );
+                                } else if playlist.id.starts_with("local-playlist:") {
+                                    state.show_local_playlist(&playlist.id, playlist.name.clone());
                                     None
                                 } else {
                                     Some(TrackListContext::playlist(
@@ -333,9 +310,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                             .tracks
                                             .iter()
                                             .find(|local| local.id == track.id)
-                                            .is_some_and(|local| {
-                                                local.album == album_name
-                                            })
+                                            .is_some_and(|local| local.album == album_name)
                                     })
                                     .collect();
                                 if !tracks.is_empty() {
@@ -361,8 +336,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
                     }
                     crate::app::SearchTab::Artists => {
-                        if let Some(artist) =
-                            state.data.search_results.artists.get(i)
+                        if let Some(artist) = state.data.search_results.artists.get(i)
                             && artist.id.starts_with("local-artist:")
                         {
                             let artist_name = artist.name.clone();
@@ -431,23 +405,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             {
                 state.ui.selected_track_index = prev_idx;
             } else {
-                state.ui.selected_track_index =
-                    *state.ui.search_matches.last().unwrap();
+                state.ui.selected_track_index = *state.ui.search_matches.last().unwrap();
             }
         }
-        KeyCode::Char('d') | KeyCode::Char('x')
-            if state.ui.active_view == ActiveView::Library =>
-        {
+        KeyCode::Char('d') | KeyCode::Char('x') if state.ui.active_view == ActiveView::Library => {
             if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
                 if key.code == KeyCode::Char('d')
-                    && state.ui.selected_playlist_index
-                        < state.data.saved_albums.len()
+                    && state.ui.selected_playlist_index < state.data.saved_albums.len()
                 {
-                    let album =
-                        &state.data.saved_albums[state.ui.selected_playlist_index];
+                    let album = &state.data.saved_albums[state.ui.selected_playlist_index];
                     if state.ui.pending_d_press {
-                        state.ui.album_mass_delete_prompt =
-                            Some(vec![album.id.clone()]);
+                        state.ui.album_mass_delete_prompt = Some(vec![album.id.clone()]);
                         state.ui.pending_d_press = false;
                     } else {
                         state.ui.pending_d_press = true;
@@ -478,8 +446,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
 
                         if key.code == KeyCode::Char('x') {
-                            state.ui.operation_register =
-                                vec![playlist.id.clone()];
+                            state.ui.operation_register = vec![playlist.id.clone()];
 
                             for f in &mut state.ui.library_config.folders {
                                 f.playlists.retain(|id| id != &playlist.id);
@@ -487,12 +454,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             state.save_library_config();
                             state.compute_library_view();
                         } else if key.code == KeyCode::Char('d')
-                            && Some(&playlist.owner_id)
-                                == state.data.user_id.as_ref()
+                            && Some(&playlist.owner_id) == state.data.user_id.as_ref()
                         {
                             if state.ui.pending_d_press {
-                                state.ui.playlist_delete_prompt =
-                                    Some(vec![playlist.id.clone()]);
+                                state.ui.playlist_delete_prompt = Some(vec![playlist.id.clone()]);
                                 state.ui.pending_d_press = false;
                             } else {
                                 state.ui.pending_d_press = true;
@@ -502,8 +467,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     crate::models::LibraryNode::Folder(f) => {
                         if key.code == KeyCode::Char('d') {
                             if state.ui.pending_d_press {
-                                state.ui.folder_delete_prompt =
-                                    Some(f.name.clone());
+                                state.ui.folder_delete_prompt = Some(f.name.clone());
                                 state.ui.pending_d_press = false;
                             } else {
                                 state.ui.pending_d_press = true;
@@ -545,11 +509,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 })
             } else if state.ui.active_view == ActiveView::SearchResults
                 && state.ui.active_search_tab == crate::app::SearchTab::Tracks
-                && state.ui.selected_search_index
-                    < state.data.search_results.tracks.len()
+                && state.ui.selected_search_index < state.data.search_results.tracks.len()
             {
-                let t = &state.data.search_results.tracks
-                    [state.ui.selected_search_index];
+                let t = &state.data.search_results.tracks[state.ui.selected_search_index];
                 Some(crate::models::ActionMenuContext {
                     track_id: t.id.clone(),
                     source: t.source,
@@ -560,11 +522,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 })
             } else if !state.playback.playing_track_id.is_none() {
                 Some(crate::models::ActionMenuContext {
-                    track_id: state
-                        .playback
-                        .playing_track_id
-                        .clone()
-                        .unwrap_or_default(),
+                    track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
                     source: crate::models::TrackSource::Spotify,
                     track_name: state.playback.playing_track_title.clone(),
                     album_id: state.playback.playing_track_album_id.clone(),
@@ -585,11 +543,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             if state.ui.active_view == ActiveView::SearchResults
                 && state.ui.active_search_tab == crate::app::SearchTab::Albums
             {
-                if state.ui.selected_search_index
-                    < state.data.search_results.albums.len()
-                {
-                    let album = &state.data.search_results.albums
-                        [state.ui.selected_search_index];
+                if state.ui.selected_search_index < state.data.search_results.albums.len() {
+                    let album = &state.data.search_results.albums[state.ui.selected_search_index];
                     state.ui.status_message = Some(
                         crate::i18n::t(
                             "messages.saved_to_library",
@@ -597,10 +552,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         )
                         .replace("{}", &album.name),
                     );
-                    state.ui.status_message_expiry = Some(
-                        std::time::Instant::now()
-                            + std::time::Duration::from_secs(3),
-                    );
+                    state.ui.status_message_expiry =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     return Some(AppEvent::SaveAlbums(vec![album.id.clone()]));
                 }
             } else {
@@ -611,11 +564,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('p')
             if state.ui.active_view == ActiveView::Library
                 && !state.ui.operation_register.is_empty()
-                && state.ui.selected_playlist_index
-                    < state.data.library_view.len() =>
+                && state.ui.selected_playlist_index < state.data.library_view.len() =>
         {
-            let node =
-                &state.data.library_view[state.ui.selected_playlist_index];
+            let node = &state.data.library_view[state.ui.selected_playlist_index];
             match node {
                 crate::models::LibraryNode::Folder(f) => {
                     let folder_name = f.name.clone();
@@ -740,14 +691,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Char('e') => {
             if state.ui.active_view == ActiveView::Library
-                && let Some(node) =
-                    state.data.library_view.get(state.ui.selected_playlist_index)
+                && let Some(node) = state
+                    .data
+                    .library_view
+                    .get(state.ui.selected_playlist_index)
             {
                 match node {
                     crate::models::LibraryNode::Playlist { playlist, .. } => {
                         state.ui.mode = crate::app::AppMode::Command;
-                        state.ui.command_buffer =
-                            format!("rename {}", playlist.name);
+                        state.ui.command_buffer = format!("rename {}", playlist.name);
                     }
                     crate::models::LibraryNode::Folder(f) => {
                         state.ui.mode = crate::app::AppMode::Command;
@@ -800,21 +752,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 if state.data.artist_albums_loading {
                     state.ui.status_message =
                         Some("Artist albums refresh already in progress.".to_string());
-                    state.ui.status_message_expiry = Some(
-                        std::time::Instant::now()
-                            + std::time::Duration::from_secs(3),
-                    );
+                    state.ui.status_message_expiry =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     return None;
                 }
                 state.data.artist_albums_loading = true;
-                state.ui.status_message =
-                    Some("Refreshing artist albums...".to_string());
+                state.ui.status_message = Some("Refreshing artist albums...".to_string());
                 return Some(AppEvent::RefreshArtistAlbums {
                     artist_id: data.artist_id.clone(),
                 });
             } else if state.ui.active_view == ActiveView::Library {
-                state.ui.status_message =
-                    Some("Refreshing library...".to_string());
+                state.ui.status_message = Some("Refreshing library...".to_string());
                 return Some(AppEvent::RefreshLibraryLists);
             }
         }
@@ -854,33 +802,20 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Tab => {
             if state.ui.active_view == ActiveView::Library {
                 state.ui.active_library_tab = match state.ui.active_library_tab {
-                    crate::app::LibraryTab::Playlists => {
-                        crate::app::LibraryTab::Albums
-                    }
-                    crate::app::LibraryTab::Albums => {
-                        crate::app::LibraryTab::Browse
-                    }
-                    crate::app::LibraryTab::Browse => {
-                        crate::app::LibraryTab::Playlists
-                    }
+                    crate::app::LibraryTab::Playlists => crate::app::LibraryTab::Albums,
+                    crate::app::LibraryTab::Albums => crate::app::LibraryTab::Browse,
+                    crate::app::LibraryTab::Browse => crate::app::LibraryTab::Playlists,
                 };
                 state.ui.selected_playlist_index = 0;
                 if state.ui.active_library_tab == crate::app::LibraryTab::Browse {
-                    state.ui.active_browse_node =
-                        crate::models::BrowseNode::TopTracks;
+                    state.ui.active_browse_node = crate::models::BrowseNode::TopTracks;
                     return browse::load_event_if_needed(state);
                 }
             } else if state.ui.active_view == ActiveView::SearchResults {
                 state.ui.active_search_tab = match state.ui.active_search_tab {
-                    crate::app::SearchTab::Tracks => {
-                        crate::app::SearchTab::Albums
-                    }
-                    crate::app::SearchTab::Albums => {
-                        crate::app::SearchTab::Artists
-                    }
-                    crate::app::SearchTab::Artists => {
-                        crate::app::SearchTab::Tracks
-                    }
+                    crate::app::SearchTab::Tracks => crate::app::SearchTab::Albums,
+                    crate::app::SearchTab::Albums => crate::app::SearchTab::Artists,
+                    crate::app::SearchTab::Artists => crate::app::SearchTab::Tracks,
                 };
                 state.ui.selected_search_index = 0;
             }
@@ -894,16 +829,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn search_track_play_event(
-    state: &AppState,
-    track: &SearchTrack,
-) -> Option<AppEvent> {
+fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppEvent> {
     let playback_track = Track {
         id: track.id.clone(),
         source: track.source,
         local_path: track.local_path.clone(),
         name: track.name.clone(),
         artist: track.artist.clone(),
+        album: track.album.clone(),
+        added_at: None,
         duration_ms: track.duration_ms,
         image_url: track.image_url.clone(),
         album_id: track.album_id.clone(),
@@ -922,6 +856,8 @@ fn search_track_play_event(
                 local_path: t.local_path.clone(),
                 name: t.name.clone(),
                 artist: t.artist.clone(),
+                album: t.album.clone(),
+                added_at: None,
                 duration_ms: t.duration_ms,
                 image_url: t.image_url.clone(),
                 album_id: t.album_id.clone(),
@@ -1016,13 +952,8 @@ mod tests {
         ];
 
         let Some(AppEvent::PlayTrack {
-            target,
-            track_id,
-            ..
-        }) = search_track_play_event(
-            &state,
-            &state.data.search_results.tracks[2],
-        )
+            target, track_id, ..
+        }) = search_track_play_event(&state, &state.data.search_results.tracks[2])
         else {
             panic!("expected play event");
         };

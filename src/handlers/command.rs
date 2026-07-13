@@ -42,7 +42,13 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                     .collect()
             }
             "sort" => {
-                let options = vec!["alpha".to_string(), "creator".to_string()];
+                let options = vec![
+                    "alpha", "creator", "original", "title", "artist", "album", "duration",
+                    "added", "reverse",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>();
                 options
                     .into_iter()
                     .filter(|o| o.starts_with(arg_str))
@@ -174,10 +180,41 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     state.ui.library_config.sort_mode =
                                         crate::config::SortMode::Creator
                                 }
-                                _ => {
-                                    state.ui.library_config.sort_mode =
-                                        crate::config::SortMode::Default
+                                "original" | "title" | "artist" | "album" | "duration"
+                                | "added" | "reverse" => {
+                                    if state.ui.active_view != crate::app::ActiveView::TrackList {
+                                        state.ui.status_message = Some(
+                                            "Track sorting is available from a track list".to_string(),
+                                        );
+                                    } else {
+                                        let sort = match mode {
+                                            "title" => crate::app::TrackSort::Title,
+                                            "artist" => crate::app::TrackSort::Artist,
+                                            "album" => crate::app::TrackSort::Album,
+                                            "duration" => crate::app::TrackSort::Duration,
+                                            "added" => crate::app::TrackSort::Added,
+                                            _ => crate::app::TrackSort::Original,
+                                        };
+                                        if mode == "reverse" {
+                                            state.reverse_tracks();
+                                            state.ui.status_message =
+                                                Some("Track order reversed".to_string());
+                                        } else {
+                                            state.sort_tracks(sort);
+                                            state.ui.status_message =
+                                                Some(format!("Tracks sorted by {mode}"));
+                                        }
+                                    }
+                                    state.ui.status_message_expiry = Some(
+                                        std::time::Instant::now()
+                                            + std::time::Duration::from_secs(3),
+                                    );
+                                    return None;
                                 }
+                                _ => state.ui.status_message = Some(
+                                    "Usage: sort <alpha|creator|original|title|artist|album|duration|added|reverse>"
+                                        .to_string(),
+                                ),
                             }
                             state.save_library_config();
                             state.compute_library_view();
@@ -226,7 +263,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 state.save_library_config();
                                 state.ui.status_message = Some(format!("Theme: {}", theme_name));
                             } else {
-                                let mut theme_names: Vec<&String> = state.ui.themes.keys().collect();
+                                let mut theme_names: Vec<&String> =
+                                    state.ui.themes.keys().collect();
                                 theme_names.sort();
                                 state.ui.status_message = Some(format!(
                                     "Unknown theme '{}'. Available: {}",
@@ -321,19 +359,23 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         let mut album_id_opt = None;
                         if state.ui.active_view == ActiveView::TrackList {
                             if state.ui.selected_track_index < state.data.tracks.len() {
-                                album_id_opt =
-                                    state.data.tracks[state.ui.selected_track_index].album_id.clone();
+                                album_id_opt = state.data.tracks[state.ui.selected_track_index]
+                                    .album_id
+                                    .clone();
                             }
                         } else if state.ui.active_view == ActiveView::Queue {
                             if state.ui.selected_track_index < state.data.queue.len() {
-                                album_id_opt =
-                                    state.data.queue[state.ui.selected_track_index].album_id.clone();
+                                album_id_opt = state.data.queue[state.ui.selected_track_index]
+                                    .album_id
+                                    .clone();
                             }
                         } else if state.ui.active_view == ActiveView::SearchResults
                             && state.ui.active_search_tab == crate::app::SearchTab::Tracks
-                            && state.ui.selected_search_index < state.data.search_results.tracks.len()
+                            && state.ui.selected_search_index
+                                < state.data.search_results.tracks.len()
                         {
-                            album_id_opt = state.data.search_results.tracks[state.ui.selected_search_index]
+                            album_id_opt = state.data.search_results.tracks
+                                [state.ui.selected_search_index]
                                 .album_id
                                 .clone();
                         }
@@ -357,7 +399,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "newplaylist" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty() {
-                            state.ui.status_message = Some(format!("Creating playlist '{}'...", name));
+                            state.ui.status_message =
+                                Some(format!("Creating playlist '{}'...", name));
                             state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                             return Some(AppEvent::CreatePlaylist(name));
@@ -425,8 +468,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         let name = args.collect::<Vec<&str>>().join(" ");
                         if !name.is_empty()
                             && state.ui.active_view == crate::app::ActiveView::Library
-                            && let Some(node) =
-                                state.data.library_view.get(state.ui.selected_playlist_index)
+                            && let Some(node) = state
+                                .data
+                                .library_view
+                                .get(state.ui.selected_playlist_index)
                         {
                             match node {
                                 crate::models::LibraryNode::Playlist { playlist, .. } => {
@@ -437,7 +482,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 }
                                 crate::models::LibraryNode::Folder(f) => {
                                     let old_name = f.name.clone();
-                                    if let Some(idx) = state.ui
+                                    if let Some(idx) = state
+                                        .ui
                                         .library_config
                                         .folders
                                         .iter()
@@ -550,7 +596,10 @@ mod tests {
         state.ui.command_buffer = "spotifylogin".to_string();
         let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
 
-        assert!(matches!(handle_key(&mut state, &key), Some(AppEvent::StartAuth)));
+        assert!(matches!(
+            handle_key(&mut state, &key),
+            Some(AppEvent::StartAuth)
+        ));
         assert!(state.ui.mode == AppMode::Authenticating);
     }
 }

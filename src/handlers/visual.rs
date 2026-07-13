@@ -68,6 +68,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                             local_path: t.local_path.clone(),
                                             name: t.name.clone(),
                                             artist: t.artist.clone(),
+                                            album: t.album.clone(),
+                                            added_at: None,
                                             duration_ms: t.duration_ms,
                                             image_url: t.image_url.clone(),
                                             album_id: t.album_id.clone(),
@@ -217,7 +219,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
 
                 state.ui.mode = AppMode::Normal;
                 state.ui.visual_selection_start = None;
-                state.ui.status_message = Some(format!("Added {} tracks to queue", track_ids.len()));
+                state.ui.status_message =
+                    Some(format!("Added {} tracks to queue", track_ids.len()));
 
                 if !track_ids.is_empty() {
                     return Some(AppEvent::AddToQueue(track_ids));
@@ -292,7 +295,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     if playlist.id.starts_with("local-playlist:")
                                         || (playlist.id != "LIKED_SONGS"
                                             && playlist.id != "local-library"
-                                            && Some(&playlist.owner_id) == state.data.user_id.as_ref())
+                                            && Some(&playlist.owner_id)
+                                                == state.data.user_id.as_ref())
                                     {
                                         Some(playlist.id.clone())
                                     } else {
@@ -329,7 +333,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     if playlist.id.starts_with("local-playlist:")
                                         || (playlist.id != "LIKED_SONGS"
                                             && playlist.id != "local-library"
-                                            && Some(&playlist.owner_id) == state.data.user_id.as_ref())
+                                            && Some(&playlist.owner_id)
+                                                == state.data.user_id.as_ref())
                                     {
                                         Some(playlist.id.clone())
                                     } else {

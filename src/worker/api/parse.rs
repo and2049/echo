@@ -25,6 +25,12 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
                     .join(", ")
             })
             .unwrap_or_default(),
+        album: album
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        added_at: None,
         artist_id: artists
             .and_then(|a| a.first())
             .and_then(|a| a.get("id"))

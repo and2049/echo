@@ -20,11 +20,11 @@ use local_playback::{LocalPlaybackEngine, LocalPlaybackSnapshot, RepeatMode};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rspotify::clients::OAuthClient;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 type LocalScanResult = std::result::Result<(LocalLibrary, crate::models::LocalScanReport), String>;
@@ -404,12 +404,18 @@ mod tests {
 
     #[test]
     fn sync_interval_playing_is_30_seconds() {
-        assert_eq!(sync_interval_duration(true), std::time::Duration::from_secs(30));
+        assert_eq!(
+            sync_interval_duration(true),
+            std::time::Duration::from_secs(30)
+        );
     }
 
     #[test]
     fn sync_interval_paused_is_5_minutes() {
-        assert_eq!(sync_interval_duration(false), std::time::Duration::from_secs(300));
+        assert_eq!(
+            sync_interval_duration(false),
+            std::time::Duration::from_secs(300)
+        );
     }
 }
 
@@ -878,6 +884,8 @@ impl Worker {
                                         local_path: Some(path),
                                         name: title.clone(),
                                         artist: artist.clone(),
+                                        album: String::new(),
+                                        added_at: None,
                                         duration_ms,
                                         image_url: image_url.clone(),
                                         album_id: album_id.clone(),

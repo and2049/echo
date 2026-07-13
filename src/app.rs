@@ -73,6 +73,7 @@ pub struct UIState {
     pub header_image_dirty: bool,
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
+    pub track_sort: TrackSort,
 }
 
 impl UIState {
@@ -137,6 +138,7 @@ impl UIState {
             header_image_cache: None,
             header_image_dirty: false,
             operation_register: vec![],
+            track_sort: TrackSort::Original,
         }
     }
 }
@@ -213,6 +215,7 @@ pub struct DataState {
     pub search_results: SearchResults,
     // TrackList
     pub tracks: Vec<Track>,
+    pub original_tracks: Vec<Track>,
     pub active_tracklist_context: Option<TrackListContext>,
     pub tracklist_image_url: Option<String>,
     // Queue
@@ -241,6 +244,7 @@ impl DataState {
             followed_artists: Vec::new(),
             search_results: SearchResults::default(),
             tracks: Vec::new(),
+            original_tracks: Vec::new(),
             active_tracklist_context: None,
             tracklist_image_url: None,
             queue: Vec::new(),
@@ -290,6 +294,16 @@ pub enum LibraryTab {
     Playlists,
     Albums,
     Browse,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrackSort {
+    Original,
+    Title,
+    Artist,
+    Album,
+    Duration,
+    Added,
 }
 
 // ---------------------------------------------------------------------------
@@ -379,7 +393,10 @@ impl AppState {
 
         let themes = crate::config::load_themes().unwrap_or_else(|_| {
             let mut fallback = HashMap::new();
-            fallback.insert("default".to_string(), crate::config::bundled_default_theme());
+            fallback.insert(
+                "default".to_string(),
+                crate::config::bundled_default_theme(),
+            );
             fallback
         });
 
@@ -434,6 +451,48 @@ impl AppState {
         }
     }
 
+    pub fn sort_tracks(&mut self, sort: TrackSort) {
+        let selected_id = self
+            .data
+            .tracks
+            .get(self.ui.selected_track_index)
+            .map(|track| track.id.clone());
+
+        if sort == TrackSort::Original {
+            self.data.tracks.clone_from(&self.data.original_tracks);
+        } else {
+            self.data.tracks.sort_by(|left, right| {
+                let order = match sort {
+                    TrackSort::Title => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+                    TrackSort::Artist => {
+                        left.artist.to_lowercase().cmp(&right.artist.to_lowercase())
+                    }
+                    TrackSort::Album => left.album.to_lowercase().cmp(&right.album.to_lowercase()),
+                    TrackSort::Duration => left.duration_ms.cmp(&right.duration_ms),
+                    TrackSort::Added => left.added_at.cmp(&right.added_at),
+                    TrackSort::Original => std::cmp::Ordering::Equal,
+                };
+                order.then_with(|| left.id.cmp(&right.id))
+            });
+        }
+        self.ui.track_sort = sort;
+        self.ui.selected_track_index = selected_id
+            .and_then(|id| self.data.tracks.iter().position(|track| track.id == id))
+            .unwrap_or(0);
+    }
+
+    pub fn reverse_tracks(&mut self) {
+        let selected_id = self
+            .data
+            .tracks
+            .get(self.ui.selected_track_index)
+            .map(|track| track.id.clone());
+        self.data.tracks.reverse();
+        self.ui.selected_track_index = selected_id
+            .and_then(|id| self.data.tracks.iter().position(|track| track.id == id))
+            .unwrap_or(0);
+    }
+
     pub fn compute_library_view(&mut self) {
         use crate::config::SortMode;
         use crate::models::LibraryNode;
@@ -475,8 +534,7 @@ impl AppState {
             });
         }
 
-        let pinned_set: HashSet<String> =
-            self.ui.library_config.pinned.iter().cloned().collect();
+        let pinned_set: HashSet<String> = self.ui.library_config.pinned.iter().cloned().collect();
         let mut folder_playlists: HashSet<String> = HashSet::new();
 
         // 1. Pinned Playlists
@@ -641,7 +699,11 @@ mod tests {
 
         assert_eq!(state.data.active_tracklist_context, Some(context));
         assert_eq!(
-            state.data.active_tracklist_context.as_ref().map(|ctx| ctx.kind),
+            state
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .map(|ctx| ctx.kind),
             Some(TrackListContextKind::Album)
         );
         assert_eq!(state.data.tracklist_image_url.as_deref(), Some("cover"));
@@ -737,9 +799,8 @@ mod tests {
         state.playback.duration_ms = 5000;
         state.playback.progress_ms = 4900;
         state.playback.is_playing = true;
-        state.playback.playback_last_updated_at = Some(
-            std::time::Instant::now() - std::time::Duration::from_secs(10),
-        );
+        state.playback.playback_last_updated_at =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
         let effective = effective_progress_ms(&state.playback);
         assert_eq!(effective, 5000);
     }
@@ -750,9 +811,8 @@ mod tests {
         state.playback.duration_ms = 10000;
         state.playback.progress_ms = 3000;
         state.playback.is_playing = false;
-        state.playback.playback_last_updated_at = Some(
-            std::time::Instant::now() - std::time::Duration::from_secs(5),
-        );
+        state.playback.playback_last_updated_at =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
         let effective = effective_progress_ms(&state.playback);
         assert_eq!(effective, 3000);
     }
@@ -782,6 +842,38 @@ mod tests {
             effective >= 12940 && effective <= 13060,
             "expected ~13000, got {effective}"
         );
+    }
+
+    #[test]
+    fn track_sort_preserves_selection_and_original_order() {
+        let mut state = AppState::new();
+        let track = |id: &str, name: &str, duration_ms| crate::models::Track {
+            id: id.to_string(),
+            source: crate::models::TrackSource::Spotify,
+            local_path: None,
+            name: name.to_string(),
+            artist: String::new(),
+            album: String::new(),
+            added_at: None,
+            duration_ms,
+            image_url: None,
+            album_id: None,
+            artist_id: None,
+        };
+        state.data.tracks = vec![track("b", "Beta", 2), track("a", "Alpha", 3)];
+        state.data.original_tracks = state.data.tracks.clone();
+        state.ui.selected_track_index = 0;
+
+        state.sort_tracks(TrackSort::Title);
+        assert_eq!(state.data.tracks[0].id, "a");
+        assert_eq!(state.ui.selected_track_index, 1);
+
+        state.reverse_tracks();
+        assert_eq!(state.data.tracks[0].id, "b");
+        assert_eq!(state.ui.selected_track_index, 0);
+
+        state.sort_tracks(TrackSort::Original);
+        assert_eq!(state.data.tracks[0].id, "b");
     }
 }
 

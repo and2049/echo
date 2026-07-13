@@ -81,6 +81,8 @@ mod tests {
             local_path: None,
             name: "Test Track".to_string(),
             artist: "Test Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             artist_id: Some("artist1".to_string()),
             album_id: None,
             duration_ms: 60000,
@@ -89,7 +91,8 @@ mod tests {
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
-            !state.data
+            !state
+                .data
                 .active_tracklist_context
                 .as_ref()
                 .unwrap()
@@ -107,6 +110,8 @@ mod tests {
             local_path: None,
             name: "Track".to_string(),
             artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
             artist_id: None,
             duration_ms: 1000,
             image_url: None,
@@ -115,7 +120,8 @@ mod tests {
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
-            !state.data
+            !state
+                .data
                 .active_tracklist_context
                 .as_ref()
                 .unwrap()

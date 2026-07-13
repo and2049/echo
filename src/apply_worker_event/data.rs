@@ -3,8 +3,7 @@ use tokio::sync::mpsc;
 use crate::{
     app::{self, AppState},
     events::WorkerEvent,
-    image_tasks,
-    i18n,
+    i18n, image_tasks,
     models::{SearchResults, Track, TrackListContext},
 };
 
@@ -17,17 +16,21 @@ pub fn handle_tracks_loaded(
     context: TrackListContext,
 ) {
     let preserve_track_selection = state
-        .data.active_tracklist_context
+        .data
+        .active_tracklist_context
         .as_ref()
         .is_some_and(|active| active.id == context.id && active.kind == context.kind);
     let selected_track_index = if preserve_track_selection && !tracks.is_empty() {
         state
-            .ui.selected_track_index
+            .ui
+            .selected_track_index
             .min(tracks.len().saturating_sub(1))
     } else {
         0
     };
+    state.data.original_tracks = tracks.clone();
     state.data.tracks = tracks;
+    state.ui.track_sort = crate::app::TrackSort::Original;
     state.data.tracklist_image_url = context.image_url.clone();
     if let Some(url) = context.image_url.as_ref() {
         image_tasks::spawn_header_for_url(

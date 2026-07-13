@@ -262,7 +262,10 @@ impl SpotifyWorker {
 
     pub async fn toggle_playback(&mut self, is_playing: bool) -> Result<()> {
         let device_id = self.get_device_id().await;
-        match self.try_toggle_playback(device_id.as_deref(), is_playing).await {
+        match self
+            .try_toggle_playback(device_id.as_deref(), is_playing)
+            .await
+        {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
@@ -287,7 +290,10 @@ impl SpotifyWorker {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
-                self.client.next_track(fresh.as_deref()).await.map_err(Into::into)
+                self.client
+                    .next_track(fresh.as_deref())
+                    .await
+                    .map_err(Into::into)
             }
             other => other.map_err(Into::into),
         }
@@ -299,7 +305,10 @@ impl SpotifyWorker {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
-                self.client.previous_track(fresh.as_deref()).await.map_err(Into::into)
+                self.client
+                    .previous_track(fresh.as_deref())
+                    .await
+                    .map_err(Into::into)
             }
             other => other.map_err(Into::into),
         }
@@ -311,7 +320,10 @@ impl SpotifyWorker {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
-                self.client.shuffle(is_shuffled, fresh.as_deref()).await.map_err(Into::into)
+                self.client
+                    .shuffle(is_shuffled, fresh.as_deref())
+                    .await
+                    .map_err(Into::into)
             }
             other => other.map_err(Into::into),
         }
@@ -323,7 +335,10 @@ impl SpotifyWorker {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
-                self.client.repeat(state, fresh.as_deref()).await.map_err(Into::into)
+                self.client
+                    .repeat(state, fresh.as_deref())
+                    .await
+                    .map_err(Into::into)
             }
             other => other.map_err(Into::into),
         }
@@ -335,7 +350,10 @@ impl SpotifyWorker {
             Err(ref e) if is_device_not_found(e) => {
                 self.device_id = None;
                 let fresh = self.get_device_id().await;
-                self.client.volume(volume, fresh.as_deref()).await.map_err(Into::into)
+                self.client
+                    .volume(volume, fresh.as_deref())
+                    .await
+                    .map_err(Into::into)
             }
             other => other.map_err(Into::into),
         }
@@ -485,6 +503,8 @@ impl SpotifyWorker {
                             .map(|a| a.name)
                             .collect::<Vec<_>>()
                             .join(", "),
+                        album: track.album.name,
+                        added_at: None,
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
@@ -539,6 +559,12 @@ impl SpotifyWorker {
                         .and_then(|a| a.get("id"))
                         .and_then(|i| i.as_str())
                         .map(|s| s.to_string());
+                    let album = val
+                        .get("album")
+                        .and_then(|a| a.get("name"))
+                        .and_then(|name| name.as_str())
+                        .unwrap_or_default()
+                        .to_string();
 
                     let artist_id = val
                         .get("artists")
@@ -554,6 +580,8 @@ impl SpotifyWorker {
                         local_path: None,
                         name,
                         artist,
+                        album,
+                        added_at: None,
                         duration_ms,
                         image_url,
                         album_id,
