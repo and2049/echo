@@ -163,6 +163,7 @@ pub struct PlaybackState {
     pub device_name: String,
     pub repeat_mode: String,
     pub volume: u32,
+    pub previous_volume: Option<u32>,
     pub audio_visualization: Option<std::sync::Arc<parking_lot::Mutex<[f32; 32]>>>,
     pub enable_visualizer: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub current_lyrics: Option<crate::models::Lyrics>,
@@ -191,12 +192,47 @@ impl Default for PlaybackState {
             device_name: "echo-rs".to_string(),
             repeat_mode: "Off".to_string(),
             volume: 100,
+            previous_volume: None,
             audio_visualization: None,
             enable_visualizer: None,
             current_lyrics: None,
             current_lyric_track_id: None,
             is_fetching_lyrics: false,
             playback_last_updated_at: None,
+        }
+    }
+}
+
+impl PlaybackState {
+    pub fn display_progress_ms(&self) -> u32 {
+        if self.is_playing {
+            self.playback_last_updated_at.map_or(self.progress_ms, |updated| {
+                self.progress_ms
+                    .saturating_add(updated.elapsed().as_millis().try_into().unwrap_or(u32::MAX))
+                    .min(self.duration_ms)
+            })
+        } else {
+            self.progress_ms
+        }
+    }
+
+    pub fn seek_target(&self, offset_seconds: i64) -> u32 {
+        let current = i64::from(self.display_progress_ms());
+        let target = current.saturating_add(offset_seconds.saturating_mul(1_000));
+        target.clamp(0, i64::from(self.duration_ms)) as u32
+    }
+
+    pub fn set_optimistic_progress(&mut self, progress_ms: u32) {
+        self.progress_ms = progress_ms.min(self.duration_ms);
+        self.playback_last_updated_at = Some(std::time::Instant::now());
+    }
+
+    pub fn toggle_mute_target(&mut self) -> u32 {
+        if self.volume == 0 {
+            self.previous_volume.take().unwrap_or(100).max(1)
+        } else {
+            self.previous_volume = Some(self.volume);
+            0
         }
     }
 }
@@ -877,17 +913,26 @@ mod tests {
         state.sort_tracks(TrackSort::Original);
         assert_eq!(state.data.tracks[0].id, "b");
     }
+
+    #[test]
+    fn seek_target_clamps_relative_offsets() {
+        let mut playback = PlaybackState::default();
+        playback.duration_ms = 60_000;
+        playback.progress_ms = 2_000;
+        assert_eq!(playback.seek_target(-5), 0);
+        assert_eq!(playback.seek_target(90), 60_000);
+    }
+
+    #[test]
+    fn mute_restores_previous_volume() {
+        let mut playback = PlaybackState::default();
+        playback.volume = 37;
+        assert_eq!(playback.toggle_mute_target(), 0);
+        playback.volume = 0;
+        assert_eq!(playback.toggle_mute_target(), 37);
+    }
 }
 
 fn effective_progress_ms(pb: &PlaybackState) -> u32 {
-    if pb.is_playing {
-        if let Some(last_updated) = pb.playback_last_updated_at {
-            let elapsed = last_updated.elapsed().as_millis() as u32;
-            (pb.progress_ms + elapsed).min(pb.duration_ms)
-        } else {
-            pb.progress_ms
-        }
-    } else {
-        pb.progress_ms
-    }
+    pb.display_progress_ms()
 }

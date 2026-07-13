@@ -737,6 +737,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 &state.ui.library_config.language,
             ));
         }
+        KeyCode::Char(',') => return seek_by(state, -5),
+        KeyCode::Char('.') => return seek_by(state, 5),
+        KeyCode::Char('0') => return seek_to(state, 0),
+        KeyCode::Char('M') => {
+            let volume = state.playback.toggle_mute_target();
+            state.playback.volume = volume;
+            state.save_volume();
+            return Some(AppEvent::SetVolume(volume as u8));
+        }
         KeyCode::Char(']') | KeyCode::Char('>') => {
             state.playback.progress_ms = 0;
             state.playback.duration_ms = 0;
@@ -831,6 +840,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         _ => {}
     }
     None
+}
+
+fn seek_by(state: &mut AppState, seconds: i64) -> Option<AppEvent> {
+    let target = state.playback.seek_target(seconds);
+    seek_to(state, target)
+}
+
+fn seek_to(state: &mut AppState, progress_ms: u32) -> Option<AppEvent> {
+    if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
+        state.ui.status_message = Some("Nothing is currently seekable".to_string());
+        state.ui.status_message_expiry =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        return None;
+    }
+    state.playback.set_optimistic_progress(progress_ms);
+    Some(AppEvent::SeekTo(state.playback.progress_ms))
 }
 
 // ---------------------------------------------------------------------------
@@ -976,5 +1001,32 @@ mod tests {
         };
         assert_eq!(tracks.len(), 2);
         assert_eq!(selected_index, 1);
+    }
+
+    #[test]
+    fn seek_keys_emit_absolute_targets() {
+        let mut state = AppState::new();
+        state.playback.playing_track_id = Some("track".to_string());
+        state.playback.duration_ms = 60_000;
+        state.playback.progress_ms = 10_000;
+
+        let event = handle_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('.'), crossterm::event::KeyModifiers::NONE),
+        );
+        assert!(matches!(event, Some(AppEvent::SeekTo(15_000))));
+    }
+
+    #[test]
+    fn mute_key_preserves_volume_for_restore() {
+        let mut state = AppState::new();
+        state.playback.volume = 42;
+
+        let event = handle_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('M'), crossterm::event::KeyModifiers::NONE),
+        );
+        assert!(matches!(event, Some(AppEvent::SetVolume(0))));
+        assert_eq!(state.playback.previous_volume, Some(42));
     }
 }

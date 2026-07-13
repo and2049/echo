@@ -46,16 +46,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
 
     // Render Progress Bar
     let pb = &state.playback;
-    let effective_progress_ms = if pb.is_playing {
-        if let Some(last_updated) = pb.playback_last_updated_at {
-            let elapsed = last_updated.elapsed().as_millis() as u32;
-            (pb.progress_ms + elapsed).min(pb.duration_ms)
-        } else {
-            pb.progress_ms
-        }
-    } else {
-        pb.progress_ms
-    };
+    let effective_progress_ms = pb.display_progress_ms();
     let ratio = if pb.duration_ms > 0 {
         (effective_progress_ms as f64 / pb.duration_ms as f64).clamp(0.0, 1.0)
     } else {

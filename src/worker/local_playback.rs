@@ -146,6 +146,16 @@ impl LocalPlaybackEngine {
         self.snapshot()
     }
 
+    pub fn seek_to(&mut self, progress_ms: u32) -> Result<LocalPlaybackSnapshot> {
+        let sink = self
+            .sink
+            .as_ref()
+            .context("local playback is not active")?;
+        sink.try_seek(Duration::from_millis(u64::from(progress_ms)))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        Ok(self.snapshot())
+    }
+
     pub fn add_to_queue(&mut self, tracks: Vec<Track>) -> LocalPlaybackSnapshot {
         self.queue.append_tracks(tracks);
         self.snapshot()

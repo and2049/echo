@@ -1074,6 +1074,28 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::SeekTo(progress_ms) => {
+                                if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                    match local_playback.seek_to(progress_ms) {
+                                        Ok(snapshot) => {
+                                            emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                                        }
+                                        Err(error) => {
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "Seek".to_string(),
+                                                message: error.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                } else if let Some(ref mut sp) = spotify_opt
+                                    && let Err(error) = sp.seek_to(progress_ms).await
+                                {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Seek".to_string(),
+                                        message: error.to_string(),
+                                    }).await;
+                                }
+                            }
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
                                 if active_playback_source == Some(ActivePlaybackSource::Local) {
                                     match local_playback.next() {

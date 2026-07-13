@@ -33,6 +33,7 @@ pub enum AppEvent {
     ToggleShuffle(bool),
     SetRepeatMode(String),
     SetVolume(u8),
+    SeekTo(u32),
     LoadTrackMetadata(String),
     GlobalSearch(String),
     AddToQueue(Vec<String>),
