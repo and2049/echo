@@ -101,6 +101,10 @@ echo is heavily keyboard-driven.
 
 ### Global Navigation
 - `j` / `k` or `Down` / `Up`: Move down / up
+- `gg` / `G`: Jump to the first / last item
+- `Ctrl-b` / `Ctrl-f` or `Page Up` / `Page Down`: Move one page
+- `Ctrl-u` / `Ctrl-d`: Move half a page
+- `gc`: Jump to the currently playing track or its available context
 - `Enter` or `z`: Select item / Open playlist / Play track
 - `h` / `q` / `Esc` / `Backspace`: Go back / Close modal / Clear search
 - `Tab`: Switch tabs (e.g., Playlists ↔ Albums, Search Tracks ↔ Search Albums)
@@ -113,6 +117,9 @@ echo is heavily keyboard-driven.
 - `Space`: Play / Pause
 - `]` / `>`: Next Track
 - `[` / `<`: Previous Track
+- `,` / `.`: Seek backward / forward by 5 seconds
+- `0`: Seek to the start of the current track
+- `M` (Shift + m): Mute / restore the previous volume
 - `s`: Toggle Shuffle
 - `r`: Toggle Repeat Mode (Off → Track → Context)
 - `=` / `-`: Volume Up / Down (by 1%)
@@ -136,6 +143,8 @@ echo is heavily keyboard-driven.
 - `x`: Cut playlist (to move into a folder)
 - `R` (Shift + r): Force refresh
 
+The track action menu adapts to the source. Spotify tracks support link copying, liking, and album library actions. Local tracks support copying their absolute path and revealing the file in the platform file manager. Both sources retain album/artist navigation, playlist insertion, and queue actions where applicable.
+
 ## Commands
 While in Command Mode (`:`), you can use the following:
 - `:search <query>`: Search for tracks or albums.
@@ -146,7 +155,12 @@ While in Command Mode (`:`), you can use the following:
 - `:newfolder <name>`: Create a new folder to organize playlists.
 - `:delfolder`: Delete the currently selected folder.
 - `:rename <name>`: Rename the currently selected playlist or folder.
-- `:sort <alpha|creator>`: Sort your library.
+- `:sort <alpha|creator>`: Sort the playlist library.
+- `:sort <original|title|artist|album|duration|added|reverse>`: Sort the active track list entirely in memory.
+- `:seek <seconds|+seconds|-seconds>`: Seek to an absolute position or by a relative offset.
+- `:mute`: Mute playback or restore the previous volume.
+- `:open [spotify-url-or-uri]`: Open a Spotify track, album, artist, or playlist. With no argument, read it from the clipboard.
+- `:relative <on|off|toggle>`: Configure Vim-style relative line numbers in track lists.
 - `:theme <theme_name>`: Switch application theme.
 - `:lang <en|zh|zh-CN>`: Switch language.
 - `:album`: Jump to the album of the currently selected track.
@@ -156,6 +170,23 @@ While in Command Mode (`:`), you can use the following:
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
+
+## Custom Keybindings
+
+Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to override or add semantic mappings. Single keys, modifier keys such as `ctrl-f`, and two-key sequences are supported. Unmapped keys keep Echo's defaults.
+
+```toml
+[library.keybindings]
+"s d" = "sort_duration"
+"s a" = "sort_artist"
+"ctrl-j" = "half_page_down"
+"ctrl-k" = "half_page_up"
+";" = "seek_forward"
+```
+
+Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, and `reverse_tracks`.
+
+Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 
 ## Local Music
 
