@@ -24,6 +24,12 @@ pub async fn apply_worker_event(
 ) {
     match worker_event {
         WorkerEvent::AuthenticationComplete => auth::handle(state),
+        WorkerEvent::SpotifyReauthorizationRequired => {
+            auth::handle_reauthorization_required(state, app_tx).await
+        }
+        WorkerEvent::SpotifyAuthenticationFailed { message } => {
+            auth::handle_failure(state, message)
+        }
         WorkerEvent::UserIdentityLoaded(user_id) => auth::handle_user_identity(state, user_id),
         WorkerEvent::ForceContextRefresh => misc::handle_force_context_refresh(state, app_tx).await,
         WorkerEvent::ApiRequestFailed { label, message } => {

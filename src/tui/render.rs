@@ -704,7 +704,7 @@ pub fn render_authenticating(frame: &mut Frame, state: &AppState) {
         .style(state.ui.active_theme.base_style())
         .border_style(state.ui.active_theme.primary_style());
     let text = vec![
-        Line::from("Waiting for Spotify authentication..."),
+        Line::from("Waiting for Spotify sign-in or reauthorization..."),
         Line::from(
             "Please check your browser. The Web API redirect URI is http://127.0.0.1:8888/callback.",
         ),
