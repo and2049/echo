@@ -395,6 +395,12 @@ pub enum SortMode {
 }
 
 impl AppConfig {
+    pub fn clear_auth_tokens() -> Result<()> {
+        let mut config = Self::load();
+        config.auth_tokens = None;
+        config.save()
+    }
+
     pub fn config_path() -> PathBuf {
         let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         path.push("echo");

@@ -71,6 +71,10 @@ pub enum AppEvent {
 pub enum WorkerEvent {
     Tick,
     AuthenticationComplete,
+    SpotifyReauthorizationRequired,
+    SpotifyAuthenticationFailed {
+        message: String,
+    },
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
     AlbumsLoaded(Vec<crate::models::Album>),

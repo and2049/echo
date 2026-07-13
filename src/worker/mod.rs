@@ -605,6 +605,25 @@ impl Worker {
                     }
                 }
                 _ = sync_interval.tick() => {
+                    let auth_check = if let Some(ref sp) = spotify_opt {
+                        Some(sp.validate_session().await)
+                    } else {
+                        None
+                    };
+                    match auth_check {
+                        Some(Err(api::SpotifyAuthError::ReauthorizationRequired)) => {
+                            spotify_opt = None;
+                            api_client = None;
+                            let _ = self.tx.send(WorkerEvent::SpotifyReauthorizationRequired).await;
+                        }
+                        Some(Err(api::SpotifyAuthError::TemporaryFailure(message))) => {
+                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                label: "Spotify authentication".to_string(),
+                                message,
+                            }).await;
+                        }
+                        _ => {}
+                    }
                     if let Some(ref sp) = spotify_opt
                         && active_playback_source != Some(ActivePlaybackSource::Local)
                         && !sync_inflight.swap(true, Ordering::SeqCst) {
@@ -664,8 +683,9 @@ impl Worker {
                             AppEvent::Quit => break,
                             AppEvent::StartAuth => {
                                 let config = AppConfig::load();
-                                if config.spotify_credentials.is_some()
-                                    && let Ok(client) = SpotifyWorker::new(&config).await {
+                                if config.spotify_credentials.is_some() {
+                                    match SpotifyWorker::new(&config).await {
+                                        Ok(client) => {
                                         api_client = Some(api::client::EchoSpotifyClient::new(
                                             client.client.clone(),
                                             self.first_party.clone(),
@@ -771,7 +791,20 @@ impl Worker {
                                                     let _ = self.tx.send(WorkerEvent::QueueLoaded(queue)).await;
                                                 }
                                         }
+                                        }
+                                        Err(error) => {
+                                            spotify_opt = None;
+                                            api_client = None;
+                                            let _ = self.tx.send(WorkerEvent::SpotifyAuthenticationFailed {
+                                                message: error.to_string(),
+                                            }).await;
+                                        }
                                     }
+                                } else {
+                                    let _ = self.tx.send(WorkerEvent::SpotifyAuthenticationFailed {
+                                        message: "Spotify developer credentials are not configured".to_string(),
+                                    }).await;
+                                }
                             }
                             AppEvent::LoadContextTracks(context) => {
                                 if let Some(sp) = spotify_opt.as_ref() {

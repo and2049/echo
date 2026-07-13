@@ -23,6 +23,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "newlocalplaylist",
         "localpath",
         "rescanlocal",
+        "spotifylogin",
         "rename",
         "pixelate",
     ];
@@ -145,6 +146,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 match cmd_name {
                     "q" | "qa" | "wq" => {
                         state.ui.is_running = false;
+                    }
+                    "spotifylogin" => {
+                        state.ui.mode = AppMode::Authenticating;
+                        return Some(AppEvent::StartAuth);
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
@@ -537,5 +542,15 @@ mod tests {
         };
 
         assert_eq!(name, "Road Mix");
+    }
+
+    #[test]
+    fn spotifylogin_command_starts_authentication() {
+        let mut state = AppState::new();
+        state.ui.command_buffer = "spotifylogin".to_string();
+        let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+
+        assert!(matches!(handle_key(&mut state, &key), Some(AppEvent::StartAuth)));
+        assert!(state.ui.mode == AppMode::Authenticating);
     }
 }
