@@ -26,6 +26,8 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "spotifylogin",
         "rename",
         "pixelate",
+        "seek",
+        "mute",
     ];
     let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
@@ -156,6 +158,39 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     "spotifylogin" => {
                         state.ui.mode = AppMode::Authenticating;
                         return Some(AppEvent::StartAuth);
+                    }
+                    "seek" => {
+                        let Some(value) = args.next() else {
+                            state.ui.status_message = Some("Usage: seek <seconds|+seconds|-seconds>".to_string());
+                            state.ui.status_message_expiry = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(3),
+                            );
+                            return None;
+                        };
+                        let Ok(seconds) = value.parse::<i64>() else {
+                            state.ui.status_message = Some("Seek position must be a number of seconds".to_string());
+                            state.ui.status_message_expiry = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(3),
+                            );
+                            return None;
+                        };
+                        let target = if value.starts_with('+') || value.starts_with('-') {
+                            state.playback.seek_target(seconds)
+                        } else {
+                            seconds.max(0).saturating_mul(1_000).min(i64::from(state.playback.duration_ms)) as u32
+                        };
+                        if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
+                            state.ui.status_message = Some("Nothing is currently seekable".to_string());
+                            return None;
+                        }
+                        state.playback.set_optimistic_progress(target);
+                        return Some(AppEvent::SeekTo(target));
+                    }
+                    "mute" => {
+                        let volume = state.playback.toggle_mute_target();
+                        state.playback.volume = volume;
+                        state.save_volume();
+                        return Some(AppEvent::SetVolume(volume as u8));
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");

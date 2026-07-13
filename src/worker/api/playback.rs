@@ -359,6 +359,16 @@ impl SpotifyWorker {
         }
     }
 
+    pub async fn seek_to(&mut self, progress_ms: u32) -> Result<()> {
+        self.client
+            .seek_track(
+                chrono::Duration::milliseconds(i64::from(progress_ms)),
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn play_track(
         &mut self,
         context_id: &str,
