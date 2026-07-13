@@ -89,6 +89,12 @@ fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
         .unwrap_or_default()
 }
 
+fn set_status(state: &mut AppState, message: impl Into<String>) {
+    state.ui.status_message = Some(message.into());
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum SpotifyTarget {
     Track(String),
@@ -109,7 +115,11 @@ fn parse_spotify_target(value: &str) -> Option<SpotifyTarget> {
         let mut parts = path.split('/');
         (parts.next()?, parts.next()?.split(['?', '#']).next()?)
     };
-    if id.is_empty() || !id.chars().all(|character| character.is_ascii_alphanumeric()) {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
         return None;
     }
     Some(match kind {
@@ -135,12 +145,8 @@ fn open_spotify_target(state: &mut AppState, target: SpotifyTarget) -> Option<Ap
             album_id: None,
         }),
         SpotifyTarget::Album(album_id) => {
-            let context = TrackListContext::album(
-                album_id,
-                "Spotify album".to_string(),
-                String::new(),
-                None,
-            );
+            let context =
+                TrackListContext::album(album_id, "Spotify album".to_string(), String::new(), None);
             state.begin_tracklist_load(context.clone());
             Some(AppEvent::LoadContextTracks(context))
         }
@@ -156,11 +162,7 @@ fn open_spotify_target(state: &mut AppState, target: SpotifyTarget) -> Option<Ap
             Some(AppEvent::LoadContextTracks(context))
         }
         SpotifyTarget::Artist(artist_id) => {
-            state.begin_artist_page_load(
-                artist_id.clone(),
-                "Spotify artist".to_string(),
-                None,
-            );
+            state.begin_artist_page_load(artist_id.clone(), "Spotify artist".to_string(), None);
             Some(AppEvent::LoadArtistPage {
                 artist_id,
                 artist_name: None,
@@ -244,26 +246,26 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "seek" => {
                         let Some(value) = args.next() else {
-                            state.ui.status_message = Some("Usage: seek <seconds|+seconds|-seconds>".to_string());
-                            state.ui.status_message_expiry = Some(
-                                std::time::Instant::now() + std::time::Duration::from_secs(3),
-                            );
+                            set_status(state, "Usage: seek <seconds|+seconds|-seconds>");
                             return None;
                         };
                         let Ok(seconds) = value.parse::<i64>() else {
-                            state.ui.status_message = Some("Seek position must be a number of seconds".to_string());
-                            state.ui.status_message_expiry = Some(
-                                std::time::Instant::now() + std::time::Duration::from_secs(3),
-                            );
+                            set_status(state, "Seek position must be a number of seconds");
                             return None;
                         };
                         let target = if value.starts_with('+') || value.starts_with('-') {
                             state.playback.seek_target(seconds)
                         } else {
-                            seconds.max(0).saturating_mul(1_000).min(i64::from(state.playback.duration_ms)) as u32
+                            seconds
+                                .max(0)
+                                .saturating_mul(1_000)
+                                .min(i64::from(state.playback.duration_ms))
+                                as u32
                         };
-                        if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
-                            state.ui.status_message = Some("Nothing is currently seekable".to_string());
+                        if state.playback.playing_track_id.is_none()
+                            || state.playback.duration_ms == 0
+                        {
+                            set_status(state, "Nothing is currently seekable");
                             return None;
                         }
                         state.playback.set_optimistic_progress(target);
@@ -282,9 +284,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 match crate::platform::read_clipboard() {
                                     Ok(value) => value,
                                     Err(error) => {
-                                        state.ui.status_message = Some(format!(
-                                            "Unable to read clipboard: {error}"
-                                        ));
+                                        set_status(
+                                            state,
+                                            format!("Unable to read clipboard: {error}"),
+                                        );
                                         return None;
                                     }
                                 }
@@ -293,9 +296,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             }
                         };
                         let Some(target) = parse_spotify_target(&value) else {
-                            state.ui.status_message = Some(
-                                "Expected a Spotify track, album, artist, or playlist URL/URI"
-                                    .to_string(),
+                            set_status(
+                                state,
+                                "Expected a Spotify track, album, artist, or playlist URL/URI",
                             );
                             return None;
                         };
@@ -305,24 +308,24 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         state.ui.library_config.relative_line_numbers = match args.next() {
                             Some("on") => true,
                             Some("off") => false,
-                            Some("toggle") | None => {
-                                !state.ui.library_config.relative_line_numbers
-                            }
+                            Some("toggle") | None => !state.ui.library_config.relative_line_numbers,
                             Some(_) => {
-                                state.ui.status_message =
-                                    Some("Usage: relative <on|off|toggle>".to_string());
+                                set_status(state, "Usage: relative <on|off|toggle>");
                                 return None;
                             }
                         };
                         state.save_library_config();
-                        state.ui.status_message = Some(format!(
-                            "Relative line numbers {}",
-                            if state.ui.library_config.relative_line_numbers {
-                                "enabled"
-                            } else {
-                                "disabled"
-                            }
-                        ));
+                        set_status(
+                            state,
+                            format!(
+                                "Relative line numbers {}",
+                                if state.ui.library_config.relative_line_numbers {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                }
+                            ),
+                        );
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");
@@ -350,8 +353,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                 "original" | "title" | "artist" | "album" | "duration"
                                 | "added" | "reverse" => {
                                     if state.ui.active_view != crate::app::ActiveView::TrackList {
-                                        state.ui.status_message = Some(
-                                            "Track sorting is available from a track list".to_string(),
+                                        set_status(
+                                            state,
+                                            "Track sorting is available from a track list",
                                         );
                                     } else {
                                         let sort = match mode {
@@ -364,23 +368,17 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                         };
                                         if mode == "reverse" {
                                             state.reverse_tracks();
-                                            state.ui.status_message =
-                                                Some("Track order reversed".to_string());
+                                            set_status(state, "Track order reversed");
                                         } else {
                                             state.sort_tracks(sort);
-                                            state.ui.status_message =
-                                                Some(format!("Tracks sorted by {mode}"));
+                                            set_status(state, format!("Tracks sorted by {mode}"));
                                         }
                                     }
-                                    state.ui.status_message_expiry = Some(
-                                        std::time::Instant::now()
-                                            + std::time::Duration::from_secs(3),
-                                    );
                                     return None;
                                 }
-                                _ => state.ui.status_message = Some(
-                                    "Usage: sort <alpha|creator|original|title|artist|album|duration|added|reverse>"
-                                        .to_string(),
+                                _ => set_status(
+                                    state,
+                                    "Usage: sort <alpha|creator|original|title|artist|album|duration|added|reverse>",
                                 ),
                             }
                             state.save_library_config();
@@ -781,5 +779,32 @@ mod tests {
             Some(SpotifyTarget::Playlist("list123".to_string()))
         );
         assert_eq!(parse_spotify_target("https://example.com/track/abc"), None);
+    }
+
+    #[test]
+    fn relative_command_status_expires() {
+        let mut state = AppState::new();
+        state.ui.command_buffer = "relative on".to_string();
+        let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+
+        assert!(handle_key(&mut state, &key).is_none());
+        assert_eq!(
+            state.ui.status_message.as_deref(),
+            Some("Relative line numbers enabled")
+        );
+        assert!(state.ui.status_message_expiry.is_some());
+    }
+
+    #[test]
+    fn added_command_errors_expire() {
+        let key = KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+
+        for command in ["seek", "open invalid", "relative invalid", "sort invalid"] {
+            let mut state = AppState::new();
+            state.ui.command_buffer = command.to_string();
+            assert!(handle_key(&mut state, &key).is_none(), "{command}");
+            assert!(state.ui.status_message.is_some(), "{command}");
+            assert!(state.ui.status_message_expiry.is_some(), "{command}");
+        }
     }
 }
