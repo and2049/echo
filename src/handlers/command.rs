@@ -29,6 +29,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "seek",
         "mute",
         "open",
+        "relative",
     ];
     let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
@@ -299,6 +300,29 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             return None;
                         };
                         return open_spotify_target(state, target);
+                    }
+                    "relative" => {
+                        state.ui.library_config.relative_line_numbers = match args.next() {
+                            Some("on") => true,
+                            Some("off") => false,
+                            Some("toggle") | None => {
+                                !state.ui.library_config.relative_line_numbers
+                            }
+                            Some(_) => {
+                                state.ui.status_message =
+                                    Some("Usage: relative <on|off|toggle>".to_string());
+                                return None;
+                            }
+                        };
+                        state.save_library_config();
+                        state.ui.status_message = Some(format!(
+                            "Relative line numbers {}",
+                            if state.ui.library_config.relative_line_numbers {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            }
+                        ));
                     }
                     "newfolder" => {
                         let name = args.collect::<Vec<&str>>().join(" ");

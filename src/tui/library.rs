@@ -264,6 +264,27 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
     }
 }
 
+fn displayed_track_number(index: usize, selected: usize, base: isize, relative: bool) -> isize {
+    if relative && index != selected {
+        index.abs_diff(selected) as isize
+    } else {
+        index as isize + base
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::displayed_track_number;
+
+    #[test]
+    fn relative_numbers_keep_current_absolute_and_show_distance_elsewhere() {
+        assert_eq!(displayed_track_number(4, 4, 1, true), 5);
+        assert_eq!(displayed_track_number(1, 4, 1, true), 3);
+        assert_eq!(displayed_track_number(7, 4, 1, true), 3);
+        assert_eq!(displayed_track_number(1, 4, 1, false), 2);
+    }
+}
+
 pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: Rect) {
     let is_album_context = state.data
         .active_tracklist_context
@@ -322,7 +343,12 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             } else {
                 Cell::from(format!(
                     "{:>3}",
-                    (i as isize) + state.ui.library_config.track_index_base
+                    displayed_track_number(
+                        i,
+                        state.ui.selected_track_index,
+                        state.ui.library_config.track_index_base,
+                        state.ui.library_config.relative_line_numbers,
+                    )
                 ))
             };
 
