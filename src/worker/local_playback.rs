@@ -1,10 +1,11 @@
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    sync::mpsc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
 
 use crate::models::{PlaybackItem, Track, TrackSource};
@@ -52,12 +53,42 @@ pub struct LocalPlaybackSnapshot {
     pub progress_ms: u32,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum LocalPlaybackError {
+    #[error("{0}")]
+    OutputUnavailable(String),
+    #[error(transparent)]
+    Track(#[from] anyhow::Error),
+}
+
+pub type LocalPlaybackResult<T> = std::result::Result<T, LocalPlaybackError>;
+
+#[derive(Clone, Debug)]
+struct OutputStreamFailure {
+    generation: u64,
+    message: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum LocalPlaybackTick {
+    Snapshot(LocalPlaybackSnapshot),
+    OutputUnavailable {
+        snapshot: LocalPlaybackSnapshot,
+        message: String,
+    },
+}
+
 pub struct LocalPlaybackEngine {
     queue: LocalQueue,
     output_stream: Option<OutputStream>,
     sink: Option<Sink>,
     volume: u32,
     playing: bool,
+    resume_position_ms: u32,
+    output_unavailable: bool,
+    stream_generation: u64,
+    output_error_tx: mpsc::Sender<OutputStreamFailure>,
+    output_error_rx: mpsc::Receiver<OutputStreamFailure>,
 }
 
 // LocalPlaybackEngine is only ever used from a single tokio task.
@@ -67,12 +98,18 @@ unsafe impl Send for LocalPlaybackEngine {}
 
 impl Default for LocalPlaybackEngine {
     fn default() -> Self {
+        let (output_error_tx, output_error_rx) = mpsc::channel();
         Self {
             queue: LocalQueue::default(),
             output_stream: None,
             sink: None,
             volume: 100,
             playing: false,
+            resume_position_ms: 0,
+            output_unavailable: false,
+            stream_generation: 0,
+            output_error_tx,
+            output_error_rx,
         }
     }
 }
@@ -82,8 +119,10 @@ impl LocalPlaybackEngine {
         &mut self,
         tracks: Vec<Track>,
         selected_index: usize,
-    ) -> Result<LocalPlaybackSnapshot> {
+    ) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
         self.queue = LocalQueue::new(tracks, selected_index);
+        self.resume_position_ms = 0;
+        self.output_unavailable = false;
         self.start_current()?;
         Ok(self.snapshot())
     }
@@ -93,21 +132,24 @@ impl LocalPlaybackEngine {
             sink.stop();
         }
         self.playing = false;
+        self.output_stream = None;
+        self.resume_position_ms = 0;
+        self.output_unavailable = false;
     }
 
-    pub fn toggle_playback(&mut self, playing: bool) {
-        self.playing = playing;
-        if let Some(sink) = self.sink.as_ref() {
-            if playing {
-                sink.play();
-            } else {
-                sink.pause();
-            }
+    pub fn toggle_playback(&mut self, playing: bool) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
+        if playing && (self.output_unavailable || self.sink.is_none()) {
+            self.resume_current()?;
+        } else if let Some(sink) = self.sink.as_ref() {
+            if playing { sink.play() } else { sink.pause() }
         }
+        self.playing = playing;
+        Ok(self.snapshot())
     }
 
-    pub fn next(&mut self) -> Result<LocalPlaybackSnapshot> {
+    pub fn next(&mut self) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
         if self.queue.advance() {
+            self.resume_position_ms = 0;
             self.start_current()?;
         } else {
             self.stop();
@@ -115,8 +157,9 @@ impl LocalPlaybackEngine {
         Ok(self.snapshot())
     }
 
-    pub fn previous(&mut self) -> Result<LocalPlaybackSnapshot> {
+    pub fn previous(&mut self) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
         if self.queue.retreat() {
+            self.resume_position_ms = 0;
             self.start_current()?;
         } else if self
             .sink
@@ -146,11 +189,8 @@ impl LocalPlaybackEngine {
         self.snapshot()
     }
 
-    pub fn seek_to(&mut self, progress_ms: u32) -> Result<LocalPlaybackSnapshot> {
-        let sink = self
-            .sink
-            .as_ref()
-            .context("local playback is not active")?;
+    pub fn seek_to(&mut self, progress_ms: u32) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
+        let sink = self.sink.as_ref().context("local playback is not active")?;
         sink.try_seek(Duration::from_millis(u64::from(progress_ms)))
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         Ok(self.snapshot())
@@ -161,7 +201,14 @@ impl LocalPlaybackEngine {
         self.snapshot()
     }
 
-    pub fn tick(&mut self) -> Result<Option<LocalPlaybackSnapshot>> {
+    pub fn tick(&mut self) -> LocalPlaybackResult<Option<LocalPlaybackTick>> {
+        if let Some(message) = self.take_output_error() {
+            self.disconnect_output();
+            return Ok(Some(LocalPlaybackTick::OutputUnavailable {
+                snapshot: self.snapshot(),
+                message,
+            }));
+        }
         if !self.playing {
             return Ok(None);
         }
@@ -172,10 +219,10 @@ impl LocalPlaybackEngine {
             } else {
                 self.stop();
             }
-            return Ok(Some(self.snapshot()));
+            return Ok(Some(LocalPlaybackTick::Snapshot(self.snapshot())));
         }
 
-        Ok(Some(self.snapshot()))
+        Ok(Some(LocalPlaybackTick::Snapshot(self.snapshot())))
     }
 
     pub fn snapshot(&self) -> LocalPlaybackSnapshot {
@@ -190,11 +237,11 @@ impl LocalPlaybackEngine {
                 .sink
                 .as_ref()
                 .map(|sink| sink.get_pos().as_millis().try_into().unwrap_or(u32::MAX))
-                .unwrap_or(0),
+                .unwrap_or(self.resume_position_ms),
         }
     }
 
-    fn start_current(&mut self) -> Result<()> {
+    fn start_current(&mut self) -> LocalPlaybackResult<()> {
         let attempts = self.queue.len().max(1);
         let mut last_error = None;
         for _ in 0..attempts {
@@ -207,7 +254,7 @@ impl LocalPlaybackEngine {
             };
             match build_decoder(&path) {
                 Ok(source) => {
-                    self.start_source(source)?;
+                    self.start_source(source, 0)?;
                     return Ok(());
                 }
                 Err(error) => {
@@ -219,15 +266,54 @@ impl LocalPlaybackEngine {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("local queue has no playable tracks")))
+        Err(LocalPlaybackError::Track(last_error.unwrap_or_else(|| {
+            anyhow::anyhow!("local queue has no playable tracks")
+        })))
     }
 
-    fn start_source(&mut self, source: rodio::decoder::Decoder<File>) -> Result<()> {
+    fn resume_current(&mut self) -> LocalPlaybackResult<()> {
+        let path = self
+            .queue
+            .current_local_path()
+            .ok_or_else(|| anyhow::anyhow!("local track is missing a file path"))?;
+        let source = build_decoder(&path)?;
+        self.start_source(source, self.resume_position_ms)
+    }
+
+    fn start_source(
+        &mut self,
+        source: rodio::decoder::Decoder<File>,
+        resume_position_ms: u32,
+    ) -> LocalPlaybackResult<()> {
         if let Some(sink) = self.sink.take() {
             sink.stop();
         }
         if self.output_stream.is_none() {
-            let mut stream = OutputStreamBuilder::open_default_stream()?;
+            self.stream_generation = self.stream_generation.wrapping_add(1);
+            let generation = self.stream_generation;
+            let output_error_tx = self.output_error_tx.clone();
+            let builder = match OutputStreamBuilder::from_default_device() {
+                Ok(builder) => builder,
+                Err(error) => {
+                    self.output_unavailable = true;
+                    self.playing = false;
+                    return Err(output_error(error));
+                }
+            }
+            .with_error_callback(move |error| {
+                let _ = output_error_tx.send(OutputStreamFailure {
+                    generation,
+                    message: error.to_string(),
+                });
+            });
+            let mut stream = match builder.open_stream_or_fallback() {
+                Ok(stream) => stream,
+                Err(error) => {
+                    self.output_unavailable = true;
+                    self.playing = false;
+                    return Err(output_error(error));
+                }
+            };
             stream.log_on_drop(false);
             self.output_stream = Some(stream);
         }
@@ -239,13 +325,52 @@ impl LocalPlaybackEngine {
         let sink = Sink::connect_new(stream.mixer());
         sink.set_volume(self.volume as f32 / 100.0);
         sink.append(source);
+        if resume_position_ms > 0 {
+            if let Err(error) = sink.try_seek(Duration::from_millis(u64::from(resume_position_ms)))
+            {
+                self.output_stream = None;
+                self.output_unavailable = true;
+                self.playing = false;
+                return Err(output_error(error));
+            }
+        }
         self.sink = Some(sink);
         self.playing = true;
+        self.resume_position_ms = resume_position_ms;
+        self.output_unavailable = false;
         Ok(())
+    }
+
+    fn take_output_error(&mut self) -> Option<String> {
+        let mut active_error = None;
+        while let Ok(error) = self.output_error_rx.try_recv() {
+            if error.generation == self.stream_generation {
+                active_error = Some(error.message);
+            }
+        }
+        active_error
+    }
+
+    fn disconnect_output(&mut self) {
+        self.resume_position_ms = self
+            .sink
+            .as_ref()
+            .map(|sink| sink.get_pos().as_millis().try_into().unwrap_or(u32::MAX))
+            .unwrap_or(self.resume_position_ms);
+        if let Some(sink) = self.sink.take() {
+            sink.pause();
+        }
+        self.output_stream = None;
+        self.playing = false;
+        self.output_unavailable = true;
     }
 }
 
-fn build_decoder(path: &Path) -> Result<rodio::decoder::Decoder<File>> {
+fn output_error(error: impl std::fmt::Display) -> LocalPlaybackError {
+    LocalPlaybackError::OutputUnavailable(error.to_string())
+}
+
+fn build_decoder(path: &Path) -> anyhow::Result<rodio::decoder::Decoder<File>> {
     let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let byte_len = file.metadata().ok().map(|metadata| metadata.len());
     let mut decoder = Decoder::builder().with_data(file);
@@ -515,5 +640,53 @@ mod tests {
             .map(|track| track.id)
             .collect();
         assert_eq!(ids, vec!["c", "d", "e", "f"]);
+    }
+
+    #[test]
+    fn output_errors_ignore_stale_stream_generations() {
+        let mut engine = LocalPlaybackEngine::default();
+        engine.stream_generation = 2;
+        engine
+            .output_error_tx
+            .send(OutputStreamFailure {
+                generation: 1,
+                message: "old stream".to_string(),
+            })
+            .unwrap();
+        engine
+            .output_error_tx
+            .send(OutputStreamFailure {
+                generation: 2,
+                message: "device removed".to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            engine.take_output_error().as_deref(),
+            Some("device removed")
+        );
+    }
+
+    #[test]
+    fn disconnect_preserves_queue_and_saved_position() {
+        let mut engine = LocalPlaybackEngine::default();
+        engine.queue = queue();
+        engine.resume_position_ms = 4_200;
+        engine.playing = true;
+
+        engine.disconnect_output();
+
+        assert_eq!(engine.queue.current().unwrap().id, "b");
+        assert_eq!(engine.snapshot().progress_ms, 4_200);
+        assert!(!engine.snapshot().is_playing);
+        assert!(engine.output_unavailable);
+    }
+
+    #[test]
+    fn missing_track_file_is_not_an_output_device_error() {
+        let mut engine = LocalPlaybackEngine::default();
+        let error = engine.play_context(vec![track("missing")], 0).unwrap_err();
+
+        assert!(matches!(error, LocalPlaybackError::Track(_)));
     }
 }

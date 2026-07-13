@@ -33,6 +33,7 @@ pub enum KeymapAction {
     SortDuration,
     SortAdded,
     ReverseTracks,
+    Redraw,
 }
 
 pub struct ConfiguredKey {
@@ -147,6 +148,10 @@ pub fn execute(state: &mut AppState, action: KeymapAction) -> Option<AppEvent> {
             state.reverse_tracks();
             None
         }
+        KeymapAction::Redraw => {
+            state.ui.needs_terminal_clear = true;
+            None
+        }
         KeymapAction::First
         | KeymapAction::Last
         | KeymapAction::PageUp
@@ -234,6 +239,7 @@ fn parse_action(name: &str) -> Option<KeymapAction> {
         "sort_duration" => KeymapAction::SortDuration,
         "sort_added" => KeymapAction::SortAdded,
         "reverse_tracks" => KeymapAction::ReverseTracks,
+        "redraw" => KeymapAction::Redraw,
         _ => return None,
     })
 }
@@ -268,5 +274,28 @@ mod tests {
             key_token(&KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)),
             "ctrl-f"
         );
+    }
+
+    #[test]
+    fn configured_redraw_requests_terminal_clear() {
+        let mut state = AppState::new();
+        state
+            .ui
+            .library_config
+            .keybindings
+            .insert("z r".to_string(), "redraw".to_string());
+
+        let first = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+        );
+        assert!(first.consumed);
+        let second = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+        execute(&mut state, second.action.unwrap());
+
+        assert!(state.ui.needs_terminal_clear);
     }
 }

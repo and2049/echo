@@ -152,6 +152,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
         },
+        KeyCode::Char('l') | KeyCode::Char('L')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+                && !key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::SHIFT) =>
+        {
+            state.ui.needs_terminal_clear = true;
+        }
         KeyCode::Char('l') => {
             if state.ui.active_view == ActiveView::Library {
                 return crate::handlers::normal::handle_key(
@@ -1059,5 +1069,21 @@ mod tests {
         );
         assert!(matches!(event, Some(AppEvent::SetVolume(0))));
         assert_eq!(state.playback.previous_volume, Some(42));
+    }
+
+    #[test]
+    fn ctrl_l_requests_redraw_without_triggering_navigation() {
+        let mut state = AppState::new();
+
+        let event = handle_key(
+            &mut state,
+            &KeyEvent::new(
+                KeyCode::Char('l'),
+                crossterm::event::KeyModifiers::CONTROL,
+            ),
+        );
+
+        assert!(event.is_none());
+        assert!(state.ui.needs_terminal_clear);
     }
 }

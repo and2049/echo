@@ -164,7 +164,6 @@ async fn main() -> Result<()> {
                 &mut state,
                 &app_tx,
                 &worker_tx_clone,
-                &mut tui,
             )
             .await;
         }

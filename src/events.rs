@@ -93,6 +93,10 @@ pub enum WorkerEvent {
         label: String,
         message: String,
     },
+    AudioOutputUnavailable {
+        message: String,
+    },
+    AudioOutputRecovered,
     AudioVisualizationReady(
         std::sync::Arc<parking_lot::Mutex<[f32; 32]>>,
         std::sync::Arc<std::sync::atomic::AtomicBool>,

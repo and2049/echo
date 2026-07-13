@@ -53,6 +53,7 @@ pub struct UIState {
     // Status
     pub status_message: Option<String>,
     pub status_message_expiry: Option<std::time::Instant>,
+    pub audio_output_error: Option<String>,
     pub recent_queue_count: usize,
     // Theme / display
     pub themes: HashMap<String, Theme>,
@@ -124,6 +125,7 @@ impl UIState {
             search_context_query: String::new(),
             status_message: None,
             status_message_expiry: None,
+            audio_output_error: None,
             recent_queue_count: 0,
             themes,
             active_theme: ResolvedTheme::from_theme(&active_theme_config),

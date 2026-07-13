@@ -11,10 +11,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    layout::Rect, backend::CrosstermBackend, style::Color as RatatuiColor, Terminal,
-    TerminalOptions, Viewport,
-};
+use ratatui::{backend::CrosstermBackend, style::Color as RatatuiColor, Terminal};
 use std::io::{Stdout, stdout};
 
 pub struct Tui {
@@ -64,24 +61,6 @@ impl Tui {
         disable_raw_mode()?;
         self.terminal.show_cursor()?;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-impl Tui {
-    pub fn test() -> Self {
-        let backend = CrosstermBackend::new(stdout());
-        let terminal = Terminal::with_options(
-            backend,
-            TerminalOptions {
-                viewport: Viewport::Fixed(Rect::new(0, 0, 80, 24)),
-            },
-        )
-        .expect("Failed to create test terminal");
-        Self {
-            terminal,
-            background: None,
-        }
     }
 }
 

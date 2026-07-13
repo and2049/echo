@@ -68,20 +68,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     crate::tui::playback::render_playback_bar(frame, state, playback_bar_area);
 
     // Render Command Bar
-    let (cmd_text, cmd_style) = match state.ui.mode {
-        AppMode::Command => (
-            format!(":{}", state.ui.command_buffer),
-            state.ui.active_theme.base_style(),
-        ),
-        AppMode::Search => (
-            format!("/{}", state.ui.search_query),
-            state.ui.active_theme.base_style(),
-        ),
-        _ => (
-            state.ui.status_message.clone().unwrap_or_default(),
-            state.ui.active_theme.muted_style(),
-        ),
-    };
+    let (cmd_text, cmd_style) = command_bar_content(state);
     let cmd_bar = Paragraph::new(cmd_text).style(cmd_style);
     frame.render_widget(cmd_bar, command_bar_area);
 
@@ -393,6 +380,26 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
 
     render_action_menu(frame, state);
     render_lyrics_modal(frame, state);
+}
+
+fn command_bar_content(state: &AppState) -> (String, ratatui::style::Style) {
+    match state.ui.mode {
+        AppMode::Command => (
+            format!(":{}", state.ui.command_buffer),
+            state.ui.active_theme.base_style(),
+        ),
+        AppMode::Search => (
+            format!("/{}", state.ui.search_query),
+            state.ui.active_theme.base_style(),
+        ),
+        _ => match state.ui.audio_output_error.as_ref() {
+            Some(message) => (message.clone(), state.ui.active_theme.error_style()),
+            None => (
+                state.ui.status_message.clone().unwrap_or_default(),
+                state.ui.active_theme.muted_style(),
+            ),
+        },
+    }
 }
 
 pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
@@ -792,6 +799,32 @@ mod tests {
         buffer.set_style(area, style);
         buffer.set_string(0, 0, text, style);
         buffer
+    }
+
+    #[test]
+    fn persistent_audio_error_has_priority_over_timed_status() {
+        let mut state = AppState::new();
+        state.ui.status_message = Some("ordinary status".to_string());
+        state.ui.audio_output_error = Some("audio disconnected".to_string());
+
+        let (text, style) = command_bar_content(&state);
+
+        assert_eq!(text, "audio disconnected");
+        assert_eq!(style, state.ui.active_theme.error_style());
+    }
+
+    #[test]
+    fn command_input_temporarily_covers_persistent_audio_error() {
+        let mut state = AppState::new();
+        state.ui.audio_output_error = Some("audio disconnected".to_string());
+        state.ui.mode = AppMode::Command;
+        state.ui.command_buffer = "redraw".to_string();
+
+        assert_eq!(command_bar_content(&state).0, ":redraw");
+        assert_eq!(state.ui.audio_output_error.as_deref(), Some("audio disconnected"));
+
+        state.ui.mode = AppMode::Normal;
+        assert_eq!(command_bar_content(&state).0, "audio disconnected");
     }
 
     #[test]
