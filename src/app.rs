@@ -74,6 +74,7 @@ pub struct UIState {
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
     pub track_sort: TrackSort,
+    pub pending_key_sequence: Option<(char, std::time::Instant)>,
 }
 
 impl UIState {
@@ -139,6 +140,7 @@ impl UIState {
             header_image_dirty: false,
             operation_register: vec![],
             track_sort: TrackSort::Original,
+            pending_key_sequence: None,
         }
     }
 }

@@ -26,6 +26,14 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         return None;
     }
 
+    let navigation = crate::handlers::navigation::command_for_key(state, key);
+    if let Some(command) = navigation.command {
+        return crate::handlers::navigation::execute(state, command);
+    }
+    if navigation.consumed {
+        return None;
+    }
+
     if key.code != KeyCode::Char('d') {
         state.ui.pending_d_press = false;
     }

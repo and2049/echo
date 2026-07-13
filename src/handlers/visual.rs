@@ -3,6 +3,13 @@ use crate::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
+    let navigation = crate::handlers::navigation::command_for_key(state, key);
+    if let Some(command) = navigation.command {
+        return crate::handlers::navigation::execute(state, command);
+    }
+    if navigation.consumed {
+        return None;
+    }
     if let Some((playlist_id, track_ids)) = state.ui.track_delete_prompt.clone() {
         if key.code == KeyCode::Char('y') {
             state.ui.track_delete_prompt = None;
