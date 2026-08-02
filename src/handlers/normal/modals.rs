@@ -264,7 +264,12 @@ pub fn playlist_modal_choices(state: &AppState) -> Vec<Playlist> {
         .filter(|p| Some(&p.owner_id) == state.data.user_id.as_ref())
         .cloned()
         .collect();
-    playlists.extend(state.data.local_playlists.to_library_playlists());
+    playlists.extend(
+        state
+            .data
+            .local_playlists
+            .to_library_playlists(&state.data.local_library),
+    );
     playlists
 }
 

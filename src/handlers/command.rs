@@ -26,6 +26,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
         "spotifylogin",
         "rename",
         "pixelate",
+        "thumbs",
         "seek",
         "mute",
         "open",
@@ -508,6 +509,22 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         }
                         state.ui.status_message_expiry =
                             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                    }
+                    "thumbs" => {
+                        let enabled = match args.next() {
+                            Some("on") => true,
+                            Some("off") => false,
+                            Some(other) => {
+                                state.ui.status_message =
+                                    Some(format!("Usage: thumbs [on|off], got '{}'", other));
+                                state.ui.status_message_expiry = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(3),
+                                );
+                                return None;
+                            }
+                            None => !state.ui.library_config.library_thumbnails,
+                        };
+                        state.set_library_thumbnails(enabled);
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");

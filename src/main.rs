@@ -7,6 +7,7 @@ mod i18n;
 mod image_tasks;
 mod models;
 mod platform;
+mod thumbnails;
 mod tui;
 mod worker;
 
@@ -176,6 +177,8 @@ async fn main() -> Result<()> {
                 tui::render::render_app(f, &mut state);
             })?;
         }
+
+        thumbnails::drain_pending(&mut state, &worker_tx_clone);
     }
 
     tui.exit()?;

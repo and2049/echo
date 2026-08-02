@@ -34,6 +34,8 @@ pub struct Playlist {
     pub owner: String,
     pub owner_id: String,
     pub image_url: Option<String>,
+    #[serde(default)]
+    pub thumb_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,6 +44,8 @@ pub struct Album {
     pub name: String,
     pub artists: String,
     pub image_url: Option<String>,
+    #[serde(default)]
+    pub thumb_url: Option<String>,
     pub release_year: String,
     #[serde(default)]
     pub track_count: Option<u32>,
@@ -455,15 +459,24 @@ pub struct LocalPlaylists {
 }
 
 impl LocalPlaylists {
-    pub fn to_library_playlists(&self) -> Vec<Playlist> {
+    pub fn to_library_playlists(&self, library: &LocalLibrary) -> Vec<Playlist> {
         self.playlists
             .iter()
-            .map(|playlist| Playlist {
-                id: playlist.id.clone(),
-                name: playlist.name.clone(),
-                owner: "Local".to_string(),
-                owner_id: "local".to_string(),
-                image_url: None,
+            .map(|playlist| {
+                let thumb_url = playlist.entries.iter().find_map(|entry| match entry {
+                    LocalPlaylistEntry::LocalTrack { track_id } => library
+                        .track_by_id(track_id)
+                        .and_then(|track| track.artwork_url()),
+                    LocalPlaylistEntry::SpotifyTrack { image_url, .. } => image_url.clone(),
+                });
+                Playlist {
+                    id: playlist.id.clone(),
+                    name: playlist.name.clone(),
+                    owner: "Local".to_string(),
+                    owner_id: "local".to_string(),
+                    image_url: None,
+                    thumb_url,
+                }
             })
             .collect()
     }

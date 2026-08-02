@@ -80,6 +80,13 @@ pub(crate) fn album(album: &serde_json::Value) -> Option<Album> {
             .and_then(|image| image.get("url"))
             .and_then(|v| v.as_str())
             .map(|v| v.to_string()),
+        thumb_url: album
+            .get("images")
+            .and_then(|v| v.as_array())
+            .and_then(|images| images.last())
+            .and_then(|image| image.get("url"))
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string()),
         release_year: release_date.split('-').next().unwrap_or("").to_string(),
         track_count: album
             .get("total_tracks")

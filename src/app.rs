@@ -72,6 +72,7 @@ pub struct UIState {
     pub active_library_header_image: Option<ratatui_image::protocol::StatefulProtocol>,
     pub header_image_cache: Option<Buffer>,
     pub header_image_dirty: bool,
+    pub thumbnails: crate::thumbnails::ThumbnailCache,
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
     pub track_sort: TrackSort,
@@ -140,6 +141,7 @@ impl UIState {
             active_library_header_image: None,
             header_image_cache: None,
             header_image_dirty: false,
+            thumbnails: crate::thumbnails::ThumbnailCache::default(),
             operation_register: vec![],
             track_sort: TrackSort::Original,
             pending_key_sequence: None,
@@ -616,6 +618,7 @@ impl AppState {
                 owner: String::new(),
                 owner_id: "spotify".to_string(),
                 image_url: None,
+                thumb_url: None,
             },
             indent: 0,
         });
@@ -630,12 +633,17 @@ impl AppState {
                     owner: "Local".to_string(),
                     owner_id: "local".to_string(),
                     image_url: None,
+                    thumb_url: None,
                 },
                 indent: 0,
             });
         }
 
-        for playlist in self.data.local_playlists.to_library_playlists() {
+        for playlist in self
+            .data
+            .local_playlists
+            .to_library_playlists(&self.data.local_library)
+        {
             view.push(LibraryNode::Playlist {
                 playlist,
                 indent: 0,
@@ -702,6 +710,21 @@ impl AppState {
         let mut config = crate::config::AppConfig::load();
         config.library = self.ui.library_config.clone();
         let _ = config.save();
+    }
+
+    pub fn set_library_thumbnails(&mut self, enabled: bool) {
+        self.ui.library_config.library_thumbnails = enabled;
+        self.save_library_config();
+        let message = if !enabled {
+            "Library thumbnails off".to_string()
+        } else if self.ui.image_picker.is_some() {
+            "Library thumbnails on".to_string()
+        } else {
+            "Library thumbnails on (no terminal image support; showing compact list)".to_string()
+        };
+        self.ui.status_message = Some(message);
+        self.ui.status_message_expiry =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
     }
 
     pub fn save_volume(&self) {

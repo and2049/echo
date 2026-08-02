@@ -30,6 +30,7 @@ impl SpotifyWorker {
                 owner,
                 owner_id,
                 image_url: p.images.first().map(|i| i.url.clone()),
+                thumb_url: p.images.last().map(|i| i.url.clone()),
             });
         }
         Ok(out)
@@ -55,6 +56,7 @@ impl SpotifyWorker {
                             .collect::<Vec<_>>()
                             .join(", "),
                         image_url: album.images.first().map(|i| i.url.clone()),
+                        thumb_url: album.images.last().map(|i| i.url.clone()),
                         release_year: album.release_date.chars().take(4).collect(),
                         track_count: None,
                     });

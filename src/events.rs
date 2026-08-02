@@ -132,6 +132,10 @@ pub enum WorkerEvent {
     QueueLoaded(Vec<Track>),
     TracksQueued(usize),
     HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
+    ThumbnailProcessed {
+        url: String,
+        protocol: Option<ratatui_image::protocol::StatefulProtocol>,
+    },
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
     DevicesLoaded(Vec<crate::models::Device>),
     LyricsLoaded(Option<crate::models::Lyrics>),
