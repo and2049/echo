@@ -787,6 +787,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.save_volume();
             return Some(AppEvent::SetVolume(volume as u8));
         }
+        KeyCode::Char('T') => {
+            let enabled = !state.ui.library_config.library_thumbnails;
+            state.set_library_thumbnails(enabled);
+        }
         KeyCode::Char(']') | KeyCode::Char('>') => {
             state.playback.progress_ms = 0;
             state.playback.duration_ms = 0;

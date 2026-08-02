@@ -112,6 +112,14 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         None
     };
 
+    if state.ui.library_config.library_thumbnails
+        && state.ui.image_picker.is_some()
+        && state.ui.active_library_tab != crate::app::LibraryTab::Browse
+    {
+        render_library_thumbnails(frame, state, library_list_area, is_focused, visual_range);
+        return;
+    }
+
     let library_items: Vec<ListItem> = state.data
         .library_view
         .iter()
@@ -261,6 +269,339 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         playlist_state.select(Some(state.ui.selected_playlist_index));
         frame.render_stateful_widget(playlist_list, library_list_area, &mut playlist_state);
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
+    }
+}
+
+struct ThumbRow {
+    title: String,
+    subtitle: String,
+    thumb_url: Option<String>,
+    indent: u16,
+    ghosted: bool,
+    is_folder: bool,
+}
+
+/// Folders have no cover art and stay compact single-liners; everything else
+/// gets a cover-sized multi-line row.
+fn thumb_row_height(row: &ThumbRow) -> u16 {
+    if row.is_folder {
+        1
+    } else {
+        crate::thumbnails::ROW_H
+    }
+}
+
+/// Scroll math mirroring a per-frame recreated `ListState`, generalized to
+/// variable row heights: the viewport only ever scrolls down far enough that
+/// the selected row is fully visible at the bottom.
+pub fn thumb_first_visible(selected: usize, heights: &[u16], viewport: u16) -> usize {
+    if heights.is_empty() {
+        return 0;
+    }
+    let selected = selected.min(heights.len() - 1);
+    let mut used = 0u16;
+    let mut first = selected;
+    for i in (0..=selected).rev() {
+        if used.saturating_add(heights[i]) > viewport {
+            // Selected row taller than the viewport: render it clipped.
+            return if i == selected { selected } else { first };
+        }
+        used = used.saturating_add(heights[i]);
+        first = i;
+    }
+    first
+}
+
+fn render_library_thumbnails(
+    frame: &mut Frame,
+    state: &mut AppState,
+    area: Rect,
+    is_focused: bool,
+    visual_range: Option<(usize, usize)>,
+) {
+    use crate::thumbnails::{THUMB_H, THUMB_W, ThumbState};
+
+    let rows: Vec<ThumbRow> = if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
+        state
+            .data
+            .saved_albums
+            .iter()
+            .map(|album| ThumbRow {
+                title: stabilize_terminal_emoji_width(&album.name),
+                subtitle: album.artists.clone(),
+                thumb_url: album.thumb_url.clone().or_else(|| album.image_url.clone()),
+                indent: 0,
+                ghosted: false,
+                is_folder: false,
+            })
+            .collect()
+    } else {
+        state
+            .data
+            .library_view
+            .iter()
+            .map(|node| match node {
+                crate::models::LibraryNode::Folder(f) => ThumbRow {
+                    title: format!(
+                        "{} {}",
+                        if f.is_open { "▼" } else { "▶" },
+                        stabilize_terminal_emoji_width(&f.name)
+                    ),
+                    subtitle: String::new(),
+                    thumb_url: None,
+                    indent: 0,
+                    ghosted: false,
+                    is_folder: true,
+                },
+                crate::models::LibraryNode::Playlist { playlist, indent } => {
+                    let mut prefix = String::new();
+                    if state.ui.library_config.pinned.contains(&playlist.id) {
+                        prefix.push_str("📌 ");
+                    }
+                    ThumbRow {
+                        title: format!(
+                            "{}{}",
+                            prefix,
+                            stabilize_terminal_emoji_width(&playlist.name)
+                        ),
+                        subtitle: playlist.owner.clone(),
+                        thumb_url: playlist
+                            .thumb_url
+                            .clone()
+                            .or_else(|| playlist.image_url.clone()),
+                        indent: (*indent as u16).saturating_mul(2),
+                        ghosted: state.ui.operation_register.contains(&playlist.id),
+                        is_folder: false,
+                    }
+                }
+            })
+            .collect()
+    };
+
+    if rows.is_empty() {
+        return;
+    }
+
+    let heights: Vec<u16> = rows.iter().map(thumb_row_height).collect();
+    let selected = state.ui.selected_playlist_index.min(rows.len() - 1);
+    let first = thumb_first_visible(selected, &heights, area.height);
+    let mut last = first;
+    let mut used = 0u16;
+    while last < rows.len() && used < area.height {
+        used = used.saturating_add(heights[last]);
+        last += 1;
+    }
+
+    // Materialize pass: request missing thumbnails and render freshly decoded
+    // protocols into their cached cell buffers (needs &mut access to the cache
+    // while the draw pass below only reads it).
+    for row in &rows[first..last] {
+        let Some(url) = row.thumb_url.as_deref() else {
+            continue;
+        };
+        if !state.ui.thumbnails.entries.contains_key(url) {
+            state.ui.thumbnails.request(url);
+        } else if let Some(ThumbState::Ready { protocol, buffer }) =
+            state.ui.thumbnails.entries.get_mut(url)
+            && buffer.is_none()
+        {
+            let cache_area = Rect::new(0, 0, THUMB_W, THUMB_H);
+            let mut cached = Buffer::empty(cache_area);
+            let image = ratatui_image::StatefulImage::default();
+            StatefulWidget::render(image, cache_area, &mut cached, protocol.as_mut());
+            *buffer = Some(cached);
+        }
+    }
+
+    let base_style = state.ui.active_theme.base_style();
+    let selected_style = state.ui.active_theme.selected_style();
+    let visual_style = state
+        .ui
+        .active_theme
+        .selected_style()
+        .bg(state.ui.active_theme.primary);
+    let folder_style = state
+        .ui
+        .active_theme
+        .primary_style()
+        .add_modifier(Modifier::BOLD);
+    let muted = state.ui.active_theme.text_muted;
+    let show_selection =
+        state.ui.active_library_tab == crate::app::LibraryTab::Playlists || is_focused;
+
+    let mut y = area.y;
+    for i in first..last {
+        let row = &rows[i];
+        if y >= area.bottom() {
+            break;
+        }
+        let row_bottom = (y + heights[i]).min(area.bottom());
+        let in_visual = visual_range.is_some_and(|(start, end)| i >= start && i <= end);
+        let mut style = if in_visual {
+            visual_style
+        } else if show_selection && i == selected {
+            selected_style
+        } else if row.is_folder {
+            folder_style
+        } else {
+            base_style
+        };
+        if row.is_folder {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if row.ghosted {
+            style = style.fg(muted);
+        }
+
+        let buf = frame.buffer_mut();
+        for yy in y..row_bottom {
+            for xx in area.left()..area.right() {
+                let cell = &mut buf[(xx, yy)];
+                cell.set_style(style);
+                cell.set_symbol(" ");
+            }
+        }
+
+        let img_x = area.x + 1 + row.indent;
+        let mut text_x = area.x + 1 + row.indent;
+        if !row.is_folder && img_x + THUMB_W < area.right() {
+            let img_area = Rect {
+                x: img_x,
+                y,
+                width: THUMB_W,
+                height: THUMB_H.min(row_bottom.saturating_sub(y)),
+            };
+            let cached_buffer = row.thumb_url.as_deref().and_then(|url| {
+                match state.ui.thumbnails.get(url) {
+                    Some(ThumbState::Ready {
+                        buffer: Some(cached),
+                        ..
+                    }) => Some(cached),
+                    _ => None,
+                }
+            });
+            if let Some(cached) = cached_buffer {
+                for yy in 0..cached.area.height.min(img_area.height) {
+                    for xx in 0..cached.area.width.min(img_area.width) {
+                        let src = &cached[(xx, yy)];
+                        let dst = &mut buf[(img_area.x + xx, img_area.y + yy)];
+                        dst.set_style(src.style());
+                        dst.set_symbol(src.symbol());
+                        dst.set_skip(src.skip);
+                    }
+                }
+            } else {
+                draw_thumb_placeholder(buf, img_area, style.fg(muted), "♪");
+            }
+            text_x = img_x + THUMB_W + 1;
+        }
+
+        if text_x < area.right() {
+            let text_w = (area.right() - text_x).saturating_sub(1);
+            let title = truncate_to_width_with_ellipsis(&row.title, text_w);
+            buf.set_stringn(text_x, y, &title, text_w as usize, style);
+            if !row.subtitle.is_empty() && y + 1 < row_bottom {
+                let subtitle = truncate_to_width_with_ellipsis(&row.subtitle, text_w);
+                buf.set_stringn(text_x, y + 1, &subtitle, text_w as usize, style.fg(muted));
+            }
+            // Repair wide-grapheme trailers over the text columns only; the
+            // image cells carry protocol payloads and must not be restyled.
+            repair_wide_grapheme_trailing_styles(
+                buf,
+                Rect {
+                    x: text_x,
+                    y,
+                    width: area.right() - text_x,
+                    height: row_bottom.saturating_sub(y),
+                },
+            );
+        }
+
+        y = row_bottom;
+    }
+}
+
+#[cfg(test)]
+mod thumb_tests {
+    use super::thumb_first_visible;
+
+    fn visible_height(first: usize, selected: usize, heights: &[u16]) -> u16 {
+        heights[first..=selected].iter().sum()
+    }
+
+    #[test]
+    fn selection_is_always_fully_visible() {
+        let uniform = vec![3u16; 50];
+        let mixed: Vec<u16> = (0..50).map(|i| if i % 4 == 0 { 1 } else { 3 }).collect();
+        for heights in [&uniform, &mixed] {
+            for viewport in [3u16, 7, 20] {
+                for selected in [0usize, 1, 10, 49, 60] {
+                    let first = thumb_first_visible(selected, heights, viewport);
+                    let clamped = selected.min(heights.len() - 1);
+                    assert!(first <= clamped);
+                    assert!(visible_height(first, clamped, heights) <= viewport);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_list_starts_at_zero() {
+        assert_eq!(thumb_first_visible(0, &[], 5), 0);
+    }
+
+    #[test]
+    fn short_list_starts_at_top() {
+        assert_eq!(thumb_first_visible(2, &[3, 3, 3], 24), 0);
+    }
+
+    #[test]
+    fn selection_is_last_visible_once_past_first_page() {
+        // 15 rows of height 3, viewport 9 -> rows 8..=10 visible.
+        assert_eq!(thumb_first_visible(10, &[3u16; 15], 9), 8);
+    }
+
+    #[test]
+    fn single_line_folders_let_more_rows_fit() {
+        // folder(1) + three playlists(3) = 10 cells: all fit in a 10-tall
+        // viewport, whereas uniform 3-tall rows would not.
+        let heights = [1u16, 3, 3, 3];
+        assert_eq!(thumb_first_visible(3, &heights, 10), 0);
+        assert_eq!(thumb_first_visible(3, &[3u16, 3, 3, 3], 10), 1);
+    }
+
+    #[test]
+    fn oversized_selected_row_renders_clipped() {
+        assert_eq!(thumb_first_visible(2, &[3u16, 3, 3], 2), 2);
+    }
+}
+
+fn draw_thumb_placeholder(buf: &mut Buffer, area: Rect, style: Style, symbol: &str) {
+    if area.width < 2 || area.height == 0 {
+        return;
+    }
+    let right = area.x + area.width - 1;
+    let bottom_row = area.y + area.height - 1;
+    for y in area.y..=bottom_row {
+        for x in area.x..=right {
+            let cell = &mut buf[(x, y)];
+            let glyph = match (y, x) {
+                (yy, xx) if yy == area.y && xx == area.x => "┌",
+                (yy, xx) if yy == area.y && xx == right => "┐",
+                (yy, xx) if yy == bottom_row && xx == area.x => "└",
+                (yy, xx) if yy == bottom_row && xx == right => "┘",
+                (yy, _) if yy == area.y || yy == bottom_row => "─",
+                (_, xx) if xx == area.x || xx == right => "│",
+                _ => " ",
+            };
+            cell.set_style(style);
+            cell.set_symbol(glyph);
+        }
+    }
+    if !symbol.is_empty() && area.height >= 2 {
+        let center_x = area.x + area.width / 2;
+        let center_y = area.y + area.height / 2;
+        buf[(center_x, center_y)].set_symbol(symbol);
     }
 }
 

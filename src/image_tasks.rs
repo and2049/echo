@@ -88,6 +88,46 @@ pub fn spawn_header_image_processing(
     });
 }
 
+pub fn spawn_thumbnail_processing(
+    url: String,
+    picker: &ratatui_image::picker::Picker,
+    tx: mpsc::Sender<WorkerEvent>,
+) {
+    let picker_clone = picker.clone();
+
+    tokio::spawn(async move {
+        let cache_path = crate::thumbnails::disk_path(&url);
+        let bytes = match tokio::fs::read(&cache_path).await {
+            Ok(bytes) => Some(bytes),
+            Err(_) => {
+                let bytes = load_image_bytes(&url).await;
+                if let Some(bytes) = &bytes {
+                    if let Some(dir) = cache_path.parent() {
+                        let _ = tokio::fs::create_dir_all(dir).await;
+                    }
+                    let _ = tokio::fs::write(&cache_path, bytes).await;
+                }
+                bytes
+            }
+        };
+
+        let protocol = match bytes {
+            Some(bytes) => tokio::task::spawn_blocking(move || {
+                image::load_from_memory(&bytes)
+                    .ok()
+                    .map(|dyn_img| picker_clone.new_resize_protocol(dyn_img.thumbnail(64, 64)))
+            })
+            .await
+            .ok()
+            .flatten(),
+            None => None,
+        };
+
+        // Always report back, even on failure, so Loading entries resolve.
+        let _ = tx.send(WorkerEvent::ThumbnailProcessed { url, protocol }).await;
+    });
+}
+
 pub fn spawn_header_for_url(
     url: &str,
     picker: Option<&ratatui_image::picker::Picker>,

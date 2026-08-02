@@ -350,6 +350,8 @@ pub struct LibraryConfig {
     pub keybindings: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub relative_line_numbers: bool,
+    #[serde(default)]
+    pub library_thumbnails: bool,
 }
 
 fn default_volume() -> u32 {
@@ -381,6 +383,7 @@ impl Default for LibraryConfig {
             volume: 100,
             keybindings: std::collections::HashMap::new(),
             relative_line_numbers: false,
+            library_thumbnails: false,
         }
     }
 }
@@ -757,6 +760,7 @@ mod tests {
                 name: "Album".to_string(),
                 artists: "Artist".to_string(),
                 image_url: None,
+                thumb_url: None,
                 release_year: "2024".to_string(),
                 track_count,
             }],
@@ -814,6 +818,7 @@ mod tests {
             owner: "Owner".to_string(),
             owner_id: "owner".to_string(),
             image_url: None,
+            thumb_url: None,
         }]);
         entry.fetched_at = now_epoch_secs().saturating_sub(LIBRARY_LIST_REFRESH_TTL.as_secs() + 1);
 

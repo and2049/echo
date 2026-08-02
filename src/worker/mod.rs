@@ -1482,6 +1482,7 @@ impl Worker {
                                                         owner,
                                                         owner_id,
                                                         image_url: p.images.first().map(|i| i.url.clone()),
+                                                        thumb_url: p.images.last().map(|i| i.url.clone()),
                                                     });
                                                 }
                                                 save_playlists_cache(out.clone());

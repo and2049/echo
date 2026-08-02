@@ -68,6 +68,9 @@ pub async fn apply_worker_event(
             playback::handle_audio_visualization_ready(state, bands, flag)
         }
         WorkerEvent::HeaderImageProcessed(protocol) => images::handle(state, protocol),
+        WorkerEvent::ThumbnailProcessed { url, protocol } => {
+            images::handle_thumbnail(state, url, protocol)
+        }
         WorkerEvent::TracksLoaded(tracks, context) => {
             data::handle_tracks_loaded(state, worker_tx, tracks, context)
         }

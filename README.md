@@ -137,6 +137,7 @@ echo is heavily keyboard-driven.
 - `q`: Add currently hovered track to Queue
 - `Q` (Shift + q): Open Queue view
 - `m`: Pin / Unpin a playlist
+- `T` (Shift + t): Toggle library thumbnails (cover art next to playlist / album names)
 - `c`: Quick shortcut to create a new playlist
 - `e`: Quick shortcut to rename a playlist or folder
 - `v`: Enter Visual mode for multi-selection
@@ -170,6 +171,7 @@ While in Command Mode (`:`), you can use the following:
 - `:vis`: Toggle the audio visualizer.
 - `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
+- `:thumbs [on|off]`: Toggle cover-art thumbnails in the library sidebar. Covers are cached in `~/.config/echo/thumbs/` so they load instantly on later launches.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
 
@@ -186,7 +188,7 @@ Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to o
 ";" = "seek_forward"
 ```
 
-Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, `reverse_tracks`, and `redraw`.
+Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, `reverse_tracks`, `redraw`, and `toggle_thumbnails`.
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 

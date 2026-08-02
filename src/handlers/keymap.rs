@@ -34,6 +34,7 @@ pub enum KeymapAction {
     SortAdded,
     ReverseTracks,
     Redraw,
+    ToggleThumbnails,
 }
 
 pub struct ConfiguredKey {
@@ -152,6 +153,11 @@ pub fn execute(state: &mut AppState, action: KeymapAction) -> Option<AppEvent> {
             state.ui.needs_terminal_clear = true;
             None
         }
+        KeymapAction::ToggleThumbnails => {
+            let enabled = !state.ui.library_config.library_thumbnails;
+            state.set_library_thumbnails(enabled);
+            None
+        }
         KeymapAction::First
         | KeymapAction::Last
         | KeymapAction::PageUp
@@ -240,6 +246,7 @@ fn parse_action(name: &str) -> Option<KeymapAction> {
         "sort_added" => KeymapAction::SortAdded,
         "reverse_tracks" => KeymapAction::ReverseTracks,
         "redraw" => KeymapAction::Redraw,
+        "toggle_thumbnails" => KeymapAction::ToggleThumbnails,
         _ => return None,
     })
 }
