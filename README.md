@@ -198,7 +198,7 @@ Echo streams at 320 kbps and applies volume normalisation, matching the Spotify 
 
 ```toml
 [library]
-bitrate = 320         # 96, 160, or 320. 320 requires Spotify Premium.
+bitrate = 320         # 96, 160, or 320
 normalisation = true  # Even out loudness between tracks, like the Spotify app.
 ```
 
