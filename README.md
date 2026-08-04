@@ -192,6 +192,24 @@ Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 
+## Audio Quality
+
+Echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. Both live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
+
+```toml
+[library]
+bitrate = 320         # 96, 160, or 320. 320 requires Spotify Premium.
+normalisation = true  # Even out loudness between tracks, like the Spotify app.
+```
+
+Echo opens the output device as stereo at 44.1 kHz — librespot's native rate, so no resampling — whenever the device supports it. Devices that do not offer 44.1 kHz (most Windows endpoints default to 48 kHz) fall back to the device's own default rate.
+
+The endpoint actually opened is written to `echo-debug-audio-spotify.log` in the working directory, and `echo-debug-audio-local.log` for local files:
+
+```
+device=Headphones (WH-1000XM5) channels=2 sample_rate=48000 format=F32
+```
+
 ## Local Music
 
 Local support is separate from Spotify. Use `:localpath <absolute-folder-path>` to choose the folder echo should scan. Supported audio extensions are `mp3`, `wav`, `flac`, `ogg`, `m4a`, and `aac`; echo scans recursively and reads title, artist, album, duration, and artwork when available. Echo refreshes the configured local folder on startup and watches it for supported audio/artwork changes while running; `:rescanlocal` is still available as a manual fallback.
@@ -205,4 +223,5 @@ Embedded artwork is used when available. If a track has no embedded artwork, ech
 - **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). echo will fall back to block rendering if neither is supported.
 - **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
 - **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
+- **Audio sounds mono or muffled (Bluetooth headsets)**: Windows exposes a Bluetooth headset as two output devices — a stereo "Headphones" (A2DP) endpoint, and a mono "Hands-Free" (HFP) endpoint capped at 16 kHz. Windows switches to Hands-Free whenever an application opens the microphone. Check `echo-debug-audio-spotify.log`: if it reports `channels=1`, quit whatever is holding the mic and select the stereo endpoint as your default output device.
 - **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences), `~/.config/echo/cache.json` (holds liked tracks), `~/.config/echo/local_library.json`, and `~/.config/echo/local_playlists.json`.

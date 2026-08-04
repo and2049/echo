@@ -6,18 +6,60 @@ use librespot_core::session::Session;
 
 use crate::events::WorkerEvent;
 use librespot_playback::audio_backend::{Sink, SinkError, SinkResult};
-use librespot_playback::config::PlayerConfig;
+use librespot_playback::config::{Bitrate, PlayerConfig};
 use librespot_playback::convert::Converter;
 use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::Mixer;
 use librespot_playback::player::Player;
 use librespot_playback::{NUM_CHANNELS, SAMPLE_RATE};
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc as std_mpsc,
 };
 use tokio::sync::mpsc;
+
+// Prefer a native stereo config, at `preferred_rate` if the device supports it, else at the device
+// default rate. Taking the device default config verbatim can yield mono, which rodio downmixes by
+// discarding the right channel rather than summing L+R.
+pub(crate) fn preferred_output_config(
+    device: &rodio::Device,
+    preferred_rate: Option<u32>,
+) -> Option<rodio::SupportedStreamConfig> {
+    let default_config = device.default_output_config().ok()?;
+    let is_stereo =
+        |c: &rodio::cpal::SupportedStreamConfigRange| c.channels() == NUM_CHANNELS as u16;
+    // Match the device's default sample format first. The supported-config list is not ordered by
+    // quality, so taking the first stereo range can land on U8.
+    let range = device
+        .supported_output_configs()
+        .ok()?
+        .find(|c| is_stereo(c) && c.sample_format() == default_config.sample_format())
+        .or_else(|| device.supported_output_configs().ok()?.find(is_stereo));
+    Some(
+        range
+            .and_then(|c| {
+                preferred_rate
+                    .and_then(|rate| c.try_with_sample_rate(rodio::cpal::SampleRate(rate)))
+                    .or_else(|| c.try_with_sample_rate(default_config.sample_rate()))
+            })
+            .unwrap_or(default_config),
+    )
+}
+
+pub(crate) fn log_output_config(kind: &str, device: &str, stream: &rodio::OutputStream) {
+    let config = stream.config();
+    let _ = std::fs::write(
+        format!("echo-debug-audio-{kind}.log"),
+        format!(
+            "device={device} channels={} sample_rate={} format={:?}",
+            config.channel_count(),
+            config.sample_rate(),
+            config.sample_format()
+        ),
+    );
+}
 
 struct EchoRodioSink {
     sink: Option<rodio::Sink>,
@@ -60,21 +102,40 @@ impl EchoRodioSink {
         let worker_tx = self.worker_tx.clone();
         let was_unavailable = !self.output_available.swap(true, Ordering::SeqCst);
 
-        let mut stream = rodio::OutputStreamBuilder::from_default_device()
-            .map_err(|error| self.output_error(error.to_string()))?
-            .with_error_callback(move |error| {
-                if active_generation.load(Ordering::SeqCst) != generation {
-                    return;
-                }
-                let message = error.to_string();
-                output_available.store(false, Ordering::SeqCst);
-                playback_is_playing.store(false, Ordering::SeqCst);
-                let _ = error_tx.send(message.clone());
-                let _ = worker_tx.try_send(WorkerEvent::AudioOutputUnavailable { message });
-            })
-            .open_stream_or_fallback()
-            .map_err(|error| self.output_error(error.to_string()))?;
+        let on_error = move |error: rodio::cpal::StreamError| {
+            if active_generation.load(Ordering::SeqCst) != generation {
+                return;
+            }
+            let message = error.to_string();
+            output_available.store(false, Ordering::SeqCst);
+            playback_is_playing.store(false, Ordering::SeqCst);
+            let _ = error_tx.send(message.clone());
+            let _ = worker_tx.try_send(WorkerEvent::AudioOutputUnavailable { message });
+        };
+
+        let Some(device) = rodio::cpal::default_host().default_output_device() else {
+            return Err(self.output_error("no audio output device".to_string()));
+        };
+        let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+
+        let exact = preferred_output_config(&device, Some(SAMPLE_RATE)).and_then(|config| {
+            rodio::OutputStreamBuilder::default()
+                .with_device(device.clone())
+                .with_supported_config(&config)
+                .with_error_callback(on_error.clone())
+                .open_stream()
+                .ok()
+        });
+        let mut stream = match exact {
+            Some(stream) => stream,
+            None => rodio::OutputStreamBuilder::from_device(device)
+                .map_err(|error| self.output_error(error.to_string()))?
+                .with_error_callback(on_error)
+                .open_stream_or_fallback()
+                .map_err(|error| self.output_error(error.to_string()))?,
+        };
         stream.log_on_drop(false);
+        log_output_config("spotify", &device_name, &stream);
 
         if let Ok(message) = self.errors.try_recv() {
             return Err(self.output_error(message));
@@ -158,6 +219,8 @@ pub async fn spawn_librespot_daemon(
     mixer_holder: Arc<parking_lot::Mutex<Option<Arc<dyn Mixer>>>>,
     output_available: Arc<AtomicBool>,
     playback_is_playing: Arc<AtomicBool>,
+    bitrate: u32,
+    normalisation: bool,
 ) {
     tokio::spawn(async move {
         loop {
@@ -215,7 +278,15 @@ pub async fn spawn_librespot_daemon(
                 let session_config = SessionConfig::default();
                 let session = Session::new(session_config, Some(cache.clone()));
 
-                let player_config = PlayerConfig::default();
+                let player_config = PlayerConfig {
+                    bitrate: match bitrate {
+                        96 => Bitrate::Bitrate96,
+                        160 => Bitrate::Bitrate160,
+                        _ => Bitrate::Bitrate320,
+                    },
+                    normalisation,
+                    ..Default::default()
+                };
 
                 let mixer_fn = librespot_playback::mixer::find(None).unwrap();
                 let mixer = mixer_fn(librespot_playback::mixer::MixerConfig::default()).unwrap();
@@ -261,7 +332,9 @@ pub async fn spawn_librespot_daemon(
 
                 let _ = std::fs::write(
                     "echo-debug-fallback.log",
-                    "Spirc Daemon initialized successfully, awaiting task...",
+                    format!(
+                        "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
+                    ),
                 );
                 spirc_task.await;
                 let _ = std::fs::write("echo-debug-fallback.log", "Spirc Daemon task exited!");
