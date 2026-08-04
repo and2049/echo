@@ -796,6 +796,8 @@ impl Worker {
                                             self.spotify_mixer.clone(),
                                             self.spotify_output_available.clone(),
                                             is_playing.clone(),
+                                            config.library.bitrate,
+                                            config.library.normalisation,
                                         ).await;
 
                                         // Hydrate library lists from cache immediately, then refresh stale entries in background.

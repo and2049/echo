@@ -352,10 +352,22 @@ pub struct LibraryConfig {
     pub relative_line_numbers: bool,
     #[serde(default)]
     pub library_thumbnails: bool,
+    #[serde(default = "default_bitrate")]
+    pub bitrate: u32,
+    #[serde(default = "default_normalisation")]
+    pub normalisation: bool,
 }
 
 fn default_volume() -> u32 {
     100
+}
+
+fn default_bitrate() -> u32 {
+    320
+}
+
+fn default_normalisation() -> bool {
+    true
 }
 
 fn default_enable_visualizer() -> bool {
@@ -384,6 +396,8 @@ impl Default for LibraryConfig {
             keybindings: std::collections::HashMap::new(),
             relative_line_numbers: false,
             library_thumbnails: false,
+            bitrate: 320,
+            normalisation: true,
         }
     }
 }

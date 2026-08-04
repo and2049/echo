@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::Context;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
 
 use crate::models::{PlaybackItem, Track, TrackSource};
@@ -292,29 +293,52 @@ impl LocalPlaybackEngine {
             self.stream_generation = self.stream_generation.wrapping_add(1);
             let generation = self.stream_generation;
             let output_error_tx = self.output_error_tx.clone();
-            let builder = match OutputStreamBuilder::from_default_device() {
-                Ok(builder) => builder,
-                Err(error) => {
-                    self.output_unavailable = true;
-                    self.playing = false;
-                    return Err(output_error(error));
-                }
-            }
-            .with_error_callback(move |error| {
+            let on_error = move |error: rodio::cpal::StreamError| {
                 let _ = output_error_tx.send(OutputStreamFailure {
                     generation,
                     message: error.to_string(),
                 });
-            });
-            let mut stream = match builder.open_stream_or_fallback() {
-                Ok(stream) => stream,
-                Err(error) => {
-                    self.output_unavailable = true;
-                    self.playing = false;
-                    return Err(output_error(error));
+            };
+            let Some(device) = rodio::cpal::default_host().default_output_device() else {
+                self.output_unavailable = true;
+                self.playing = false;
+                return Err(output_error("no audio output device"));
+            };
+            let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+
+            // No rate preference: local files vary, so keep the device rate and only force stereo.
+            let exact =
+                crate::worker::audio::preferred_output_config(&device, None).and_then(|config| {
+                    OutputStreamBuilder::default()
+                        .with_device(device.clone())
+                        .with_supported_config(&config)
+                        .with_error_callback(on_error.clone())
+                        .open_stream()
+                        .ok()
+                });
+            let mut stream = match exact {
+                Some(stream) => stream,
+                None => {
+                    let builder = match OutputStreamBuilder::from_device(device) {
+                        Ok(builder) => builder.with_error_callback(on_error),
+                        Err(error) => {
+                            self.output_unavailable = true;
+                            self.playing = false;
+                            return Err(output_error(error));
+                        }
+                    };
+                    match builder.open_stream_or_fallback() {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            self.output_unavailable = true;
+                            self.playing = false;
+                            return Err(output_error(error));
+                        }
+                    }
                 }
             };
             stream.log_on_drop(false);
+            crate::worker::audio::log_output_config("local", &device_name, &stream);
             self.output_stream = Some(stream);
         }
 
