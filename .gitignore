@@ -28,3 +28,5 @@ target
 
 *.log
 echo-config.toml
+
+/vendor/opentui/

@@ -1,6 +1,7 @@
 primary = "#00d9ff"
 secondary = "#ebf744"
 background = "#161618"
+surface = "#232328" # menus, modals, popovers
 text = "#d8f588"
 text_muted = "#394150"
 highlight_bg = "#d0ff4f"

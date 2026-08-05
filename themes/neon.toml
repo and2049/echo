@@ -1,6 +1,7 @@
 primary = "#ff7b64"
 secondary = "#c4f765"
 background = "#16161a"
+surface = "#232329" # menus, modals, popovers
 text = "#faf6c6"
 text_muted = "#494640" # progress remaining
 highlight_bg = "#f7b87e"

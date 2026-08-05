@@ -1,0 +1,63 @@
+[package]
+name = "echo-desktop"
+version.workspace = true
+edition.workspace = true
+
+# Named `echo-desktop`, not `echo`: a bare `echo` can never win against the shell builtin
+# anyway, and on Linux a deb shipping /usr/bin/echo is rejected outright (coreutils owns it).
+# Installers and menus still present the app as "Echo" via product-name below.
+[[bin]]
+name = "echo-desktop"
+path = "src/main.rs"
+
+[dependencies]
+echo-core = { workspace = true }
+
+anyhow = { workspace = true }
+# Same 0.25 line as gpui's internal image dep, so `image::Frame`s can cross into RenderImage.
+image = { workspace = true }
+tokio = { workspace = true }
+webbrowser = { workspace = true }
+
+# Pinned to the same rev because gpui_platform is not yet published to crates.io and
+# gpui's API moves quickly. Bumping this rev is a deliberate task, not routine.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
+
+[build-dependencies]
+embed-resource = "3"
+
+# The plain "Echo" identity is this crate's: the TUI packages as "Echo TUI"/com.echo.tui.
+[package.metadata.packager]
+product-name = "Echo"
+identifier = "com.echo.app"
+publisher = "Echo"
+category = "Music"
+icons = [
+    "../../icons/icon.icns",
+    "../../icons/icon.ico",
+    "../../icons/32x32.png",
+    "../../icons/128x128.png",
+    "../../icons/icon.png",
+    "../../icons/128x128@2x.png",
+]
+resources = [{ src = "../../themes", target = "themes" }]
+# The Echo package carries both frontends: the desktop app plus the `spotify` TUI, so one
+# install puts the terminal command on PATH (MSI: install dir appended via the WiX fragment
+# below; deb: both land in /usr/bin; macOS: both inside Echo.app/Contents/MacOS).
+binaries = [
+    { path = "echo-desktop", main = true },
+    { path = "spotify", main = false },
+]
+before-packaging-command = "cargo build --release -p echo-desktop -p spotify-tui"
+
+[package.metadata.packager.deb]
+desktop_template = "../../assets/echo.desktop.hbs"
+depends = ["libssl3", "libasound2", "libdbus-1-3"]
+
+[package.metadata.packager.wix]
+# Appends the install dir to the machine PATH (and removes it on uninstall) so `spotify`
+# works from any shell. The stock template's "PATH Environment Variable" feature only
+# installs the exes — it contains no Environment element — hence this fragment.
+fragment_paths = ["wix/env-path.wxs"]
+component_refs = ["EnvPathEntry"]

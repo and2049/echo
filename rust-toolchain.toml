@@ -1,0 +1,4 @@
+[toolchain]
+# gpui (the desktop frontend's UI framework) needs recent stable; zed pins 1.95.
+channel = "1.95"
+profile = "minimal"

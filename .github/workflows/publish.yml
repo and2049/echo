@@ -35,6 +35,7 @@ jobs:
 
       - name: Update Version in Cargo.toml
         shell: bash
+        # Member crates inherit via version.workspace = true, so the root is the only bump.
         run: |
           perl -0pi -e 's/(^version = ")[^"]+(")/${1}${{ inputs.version }}${2}/m' Cargo.toml
 
@@ -59,10 +60,21 @@ jobs:
           rm -rf /tmp/*.dmg /var/tmp/*.dmg
 
       - name: Install cargo-packager
-        run: cargo install cargo-packager --locked
+        # Pinned: the desktop package injects a custom WiX fragment, so template drift in a
+        # new packager release should be adopted deliberately, not picked up by surprise.
+        run: cargo install cargo-packager --locked --version 0.11.8
 
+      # One "Echo" package per OS, bundling the desktop app plus the `spotify` TUI
+      # (the MSI also puts the install dir on PATH; the deb ships /usr/bin/spotify).
       - name: Build and Package
-        run: cargo packager --release --formats ${{ matrix.formats }}
+        run: cargo packager --release -p echo-desktop --formats ${{ matrix.formats }}
+
+      # Terminal-only Linux installs keep a TUI-only AppImage; install.sh copies it to
+      # ~/.local/bin/spotify. The standalone TUI MSI/DMG/deb are gone — the Echo package
+      # covers those platforms.
+      - name: Package TUI AppImage
+        if: runner.os == 'Linux'
+        run: cargo packager --release -p spotify-tui --formats appimage
 
       - uses: actions/upload-artifact@v4
         with:
