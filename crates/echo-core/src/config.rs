@@ -560,11 +560,19 @@ pub struct Theme {
     pub primary: String,
     pub secondary: String,
     pub background: String,
+    /// Elevated panels: menus, modals, popovers. Themes without one get `Reset`, which the
+    /// desktop maps to a fixed near-window panel color.
+    #[serde(default = "default_surface")]
+    pub surface: String,
     pub text: String,
     pub text_muted: String,
     pub highlight_bg: String,
     pub highlight_fg: String,
     pub error: String,
+}
+
+fn default_surface() -> String {
+    "Reset".to_string()
 }
 
 impl Default for Theme {
@@ -573,6 +581,7 @@ impl Default for Theme {
             primary: "Cyan".to_string(),
             secondary: "Yellow".to_string(),
             background: "Reset".to_string(),
+            surface: default_surface(),
             text: "White".to_string(),
             text_muted: "DarkGray".to_string(),
             highlight_bg: "White".to_string(),
@@ -649,8 +658,9 @@ fn load_themes_from_paths(
 
     // Packaged/dev themes are read-only app themes. User themes are loaded after
     // them, but duplicate names are exposed as `user/<name>` instead of shadowing
-    // the app theme.
-    themes.insert("default".to_string(), bundled_default_theme());
+    // the app theme. The bundled echo theme pre-seeds the map (and is the default),
+    // so a working theme always exists even with no theme dirs on disk.
+    themes.insert("echo".to_string(), bundled_default_theme());
     for dir in app_theme_dirs {
         load_themes_from_dir(&mut themes, dir, DuplicateTheme::Replace)?;
     }
@@ -659,7 +669,7 @@ fn load_themes_from_paths(
     load_themes_from_dir(&mut themes, user_theme_dir, DuplicateTheme::NamespaceUser)?;
 
     if themes.is_empty() {
-        themes.insert("default".to_string(), bundled_default_theme());
+        themes.insert("echo".to_string(), bundled_default_theme());
     }
 
     Ok(themes)

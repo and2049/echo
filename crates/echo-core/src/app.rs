@@ -387,22 +387,20 @@ impl AppState {
 
         let themes = crate::config::load_themes().unwrap_or_else(|_| {
             let mut fallback = HashMap::new();
-            fallback.insert(
-                "default".to_string(),
-                crate::config::bundled_default_theme(),
-            );
+            fallback.insert("echo".to_string(), crate::config::bundled_default_theme());
             fallback
         });
 
         let default_theme = crate::config::bundled_default_theme();
-        let active_theme_name = config
-            .library
-            .active_theme
-            .clone()
-            .unwrap_or_else(|| "default".to_string());
+        // "default" was the pre-workspace alias for the bundled echo theme; map configs that
+        // still reference it.
+        let active_theme_name = match config.library.active_theme.clone() {
+            Some(name) if name != "default" => name,
+            _ => "echo".to_string(),
+        };
         let active_theme_config = themes
             .get(&active_theme_name)
-            .or_else(|| themes.get("default"))
+            .or_else(|| themes.get("echo"))
             .unwrap_or(&default_theme)
             .clone();
 
