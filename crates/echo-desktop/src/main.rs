@@ -1011,12 +1011,8 @@ impl EchoApp {
         } else {
             0.0
         };
-        let time_label: SharedString = format!(
-            "{} / {}",
-            format_time(progress_ms),
-            format_time(playback.duration_ms)
-        )
-        .into();
+        let elapsed_label: SharedString = format_time(progress_ms).into();
+        let duration_label: SharedString = format_time(playback.duration_ms).into();
         let play_icon = if playback.is_playing {
             "icons/pause.svg"
         } else {
@@ -1096,7 +1092,6 @@ impl EchoApp {
                 }
             })
             .filter(|(current, _)| !current.is_empty());
-        let bar_height = if inline_lyrics.is_some() { 96.0 } else { 72.0 };
 
         let seek_bounds = self.seek_bounds.clone();
         let volume_bounds = self.volume_bounds.clone();
@@ -1106,76 +1101,130 @@ impl EchoApp {
             .flex_row()
             .items_center()
             .gap_3()
-            .h(px(bar_height))
+            .h(px(88.0))
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
-            .child(icon_button("previous", "icons/previous.svg", fg, cx, |this, cx| {
-                this.play_previous(cx)
-            }))
             .child(
+                // Left cluster: the song card stacked over the transport row, so the seek bar
+                // gets the whole center width.
                 div()
-                    .id("play-pause")
                     .flex_none()
-                    .w(px(40.0))
-                    .h(px(40.0))
+                    .w(px(240.0))
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .justify_center()
-                    .rounded_full()
-                    .hover(|style| style.bg(accent.opacity(0.15)))
-                    .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
+                    .gap_1()
                     .child(
-                        svg()
-                            .path(play_icon)
-                            .w(px(22.0))
-                            .h(px(22.0))
-                            .text_color(accent),
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .child(match cover {
+                                Some(image) => img(image)
+                                    .flex_none()
+                                    .w(px(36.0))
+                                    .h(px(36.0))
+                                    .rounded_md()
+                                    .into_any_element(),
+                                None => div()
+                                    .flex_none()
+                                    .w(px(36.0))
+                                    .h(px(36.0))
+                                    .rounded_md()
+                                    .bg(muted.opacity(0.15))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        svg()
+                                            .path("icons/music-note.svg")
+                                            .w(px(16.0))
+                                            .h(px(16.0))
+                                            .text_color(muted),
+                                    )
+                                    .into_any_element(),
+                            })
+                            .child(
+                                div()
+                                    .flex_col()
+                                    .flex_grow(1.0)
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .text_color(fg)
+                                            .text_sm()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .overflow_hidden()
+                                            .child(title),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(muted)
+                                            .text_xs()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .overflow_hidden()
+                                            .child(artist),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_1()
+                            .child(icon_button(
+                                "previous",
+                                "icons/previous.svg",
+                                fg,
+                                cx,
+                                |this, cx| this.play_previous(cx),
+                            ))
+                            .child(
+                                div()
+                                    .id("play-pause")
+                                    .flex_none()
+                                    .w(px(36.0))
+                                    .h(px(36.0))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .hover(|style| style.bg(accent.opacity(0.15)))
+                                    .on_click(cx.listener(|this, _event, _window, cx| {
+                                        this.toggle_playback(cx)
+                                    }))
+                                    .child(
+                                        svg()
+                                            .path(play_icon)
+                                            .w(px(20.0))
+                                            .h(px(20.0))
+                                            .text_color(accent),
+                                    ),
+                            )
+                            .child(icon_button("next", "icons/next.svg", fg, cx, |this, cx| {
+                                this.play_next(cx)
+                            }))
+                            .child(icon_button(
+                                "shuffle",
+                                "icons/shuffle.svg",
+                                shuffle_color,
+                                cx,
+                                |this, cx| this.toggle_shuffle(cx),
+                            ))
+                            .child(icon_button(
+                                "repeat",
+                                repeat_icon,
+                                repeat_color,
+                                cx,
+                                |this, cx| this.cycle_repeat(cx),
+                            )),
                     ),
             )
-            .child(icon_button("next", "icons/next.svg", fg, cx, |this, cx| {
-                this.play_next(cx)
-            }))
-            .child(match cover {
-                Some(image) => img(image)
-                    .flex_none()
-                    .w(px(48.0))
-                    .h(px(48.0))
-                    .rounded_md()
-                    .into_any_element(),
-                None => div()
-                    .flex_none()
-                    .w(px(48.0))
-                    .h(px(48.0))
-                    .rounded_md()
-                    .bg(muted.opacity(0.15))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        svg()
-                            .path("icons/music-note.svg")
-                            .w(px(20.0))
-                            .h(px(20.0))
-                            .text_color(muted),
-                    )
-                    .into_any_element(),
-            })
-            .child(
-                div()
-                    .flex_col()
-                    .flex_none()
-                    .w(px(220.0))
-                    .overflow_hidden()
-                    .child(div().text_color(fg).text_sm().child(title))
-                    .child(div().text_color(muted).text_xs().child(artist)),
-            )
-            .child(icon_button("shuffle", "icons/shuffle.svg", shuffle_color, cx, |this, cx| {
-                this.toggle_shuffle(cx)
-            }))
-            .child(icon_button("repeat", repeat_icon, repeat_color, cx, |this, cx| {
-                this.cycle_repeat(cx)
-            }))
             .child(
                 div()
                     .flex_grow(1.0)
@@ -1213,11 +1262,24 @@ impl EchoApp {
                         )
                     })
                     .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(muted)
+                            .text_xs()
+                            .child(elapsed_label),
+                    )
+                    .child(
                 // Progress track: the canvas overlay records the track's bounds each paint, and
                 // a click anywhere in the (taller) hit area seeks to that fraction.
                 div()
                     .id("seek-bar")
-                    .w_full()
+                    .flex_grow(1.0)
                     .py_2()
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
@@ -1251,14 +1313,15 @@ impl EchoApp {
                                     .w(gpui::relative(fraction)),
                             ),
                     ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(muted)
+                            .text_xs()
+                            .child(duration_label),
                     ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(muted)
-                    .text_xs()
-                    .child(time_label),
+                    ),
             )
             .when_some(visualizer_bands, |el, bands| {
                 // 32 bands, 0–100, painted as bottom-anchored bars. Repaints ride the fast tick.
