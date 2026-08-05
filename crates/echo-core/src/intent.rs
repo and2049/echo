@@ -5,9 +5,11 @@
 //! and return the event the worker should receive. The frontends translate their input idioms
 //! into these calls and send whatever comes back over `app_tx`.
 
-use crate::app::AppState;
+use crate::app::{ActiveView, AppState, SearchTab};
 use crate::events::AppEvent;
-use crate::models::{LibraryNode, PlaybackTarget, Track, TrackListContext, TrackSource};
+use crate::models::{
+    Artist, LibraryNode, PlaybackTarget, SearchTrack, Track, TrackListContext, TrackSource,
+};
 
 /// Activates row `index` of the playlists sidebar (the `library_view` tree): opens playlists,
 /// shows local collections, toggles folders.
@@ -203,11 +205,318 @@ pub fn transfer_to_device(state: &mut AppState, index: usize) -> Option<AppEvent
     (!id.is_empty()).then(|| AppEvent::TransferPlayback(id))
 }
 
+// Global search and result activation.
+
+/// Kicks off a worker-side search across Spotify and the local library. `None` for an empty
+/// query; the results arrive as `SearchResultsLoaded`, which switches to the results view.
+pub fn global_search(state: &mut AppState, query: &str) -> Option<AppEvent> {
+    let query = query.trim().to_string();
+    if query.is_empty() {
+        return None;
+    }
+    state.ui.search_context_query = query.clone();
+    state.ui.status_message = Some(format!("Searching for '{query}'..."));
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    Some(AppEvent::GlobalSearch(query))
+}
+
+/// Activates row `index` of the search results under the active tab: plays a track, opens an
+/// album, or enters an artist page. Local results resolve against the local library instead of
+/// the API.
+pub fn activate_search_result(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    state.ui.selected_search_index = index;
+    match state.ui.active_search_tab {
+        SearchTab::Tracks => {
+            let track = state.data.search_results.tracks.get(index)?.clone();
+            search_track_play_event(state, &track)
+        }
+        SearchTab::Albums => {
+            let album = state.data.search_results.albums.get(index)?.clone();
+            if album.id.starts_with("local-album:") {
+                let album_name = album.name.clone();
+                let tracks: Vec<_> = state
+                    .data
+                    .local_library
+                    .to_tracks()
+                    .into_iter()
+                    .filter(|track| {
+                        state
+                            .data
+                            .local_library
+                            .tracks
+                            .iter()
+                            .find(|local| local.id == track.id)
+                            .is_some_and(|local| local.album == album_name)
+                    })
+                    .collect();
+                if !tracks.is_empty() {
+                    state.show_generated_tracks(
+                        tracks,
+                        TrackListContext::generated(album.id.clone(), album.name.clone()),
+                    );
+                }
+                return None;
+            }
+            let context = TrackListContext::album(
+                album.id.clone(),
+                album.name.clone(),
+                album.artist.clone(),
+                album.image_url.clone(),
+            );
+            state.begin_tracklist_load(context.clone());
+            Some(AppEvent::LoadContextTracks(context))
+        }
+        SearchTab::Artists => {
+            let artist = state.data.search_results.artists.get(index)?.clone();
+            if artist.id.starts_with("local-artist:") {
+                let artist_name = artist.name.clone();
+                let tracks: Vec<_> = state
+                    .data
+                    .local_library
+                    .to_tracks()
+                    .into_iter()
+                    .filter(|track| track.artist == artist_name)
+                    .collect();
+                if !tracks.is_empty() {
+                    state.show_generated_tracks(
+                        tracks,
+                        TrackListContext::generated(artist.id.clone(), artist.name.clone()),
+                    );
+                }
+                return None;
+            }
+            open_artist(state, artist)
+        }
+    }
+}
+
+fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppEvent> {
+    let target = if track.source == TrackSource::Local {
+        // Local matches play as a context of all local results, so next/previous work.
+        let tracks: Vec<_> = state
+            .data
+            .search_results
+            .tracks
+            .iter()
+            .filter(|result| result.source == TrackSource::Local)
+            .map(|t| Track {
+                id: t.id.clone(),
+                source: t.source,
+                local_path: t.local_path.clone(),
+                name: t.name.clone(),
+                artist: t.artist.clone(),
+                album: t.album.clone(),
+                added_at: None,
+                duration_ms: t.duration_ms,
+                image_url: t.image_url.clone(),
+                album_id: t.album_id.clone(),
+                artist_id: t.artist_id.clone(),
+            })
+            .collect();
+        let selected_index = tracks
+            .iter()
+            .position(|candidate| candidate.id == track.id)
+            .unwrap_or(0);
+        PlaybackTarget::LocalContext {
+            tracks,
+            selected_index,
+        }
+    } else {
+        PlaybackTarget::SpotifyTrack {
+            track_id: track.id.clone(),
+        }
+    };
+
+    Some(AppEvent::PlayTrack {
+        target,
+        track_id: track.id.clone(),
+        title: track.name.clone(),
+        artist: track.artist.clone(),
+        duration_ms: track.duration_ms,
+        image_url: track.image_url.clone(),
+        album_id: track.album_id.clone(),
+    })
+}
+
+// Artist pages.
+
+/// Opens the followed-artists list, fetching it first when empty.
+pub fn open_artist_list(state: &mut AppState) -> Option<AppEvent> {
+    state.push_view_history();
+    state.ui.active_view = ActiveView::ArtistList;
+    state.ui.selected_artist_index = 0;
+    state
+        .data
+        .followed_artists
+        .is_empty()
+        .then_some(AppEvent::FetchFollowedArtists)
+}
+
+/// Enters the artist page for followed artist `index`.
+pub fn open_followed_artist(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    state.ui.selected_artist_index = index;
+    let artist = state.data.followed_artists.get(index)?.clone();
+    open_artist(state, artist)
+}
+
+fn open_artist(state: &mut AppState, artist: Artist) -> Option<AppEvent> {
+    let artist_id = artist.id.clone();
+    let artist_name = artist.name.clone();
+    let artist_image_url = artist.image_url.clone();
+    state.begin_artist_page_load(
+        artist_id.clone(),
+        artist_name.clone(),
+        artist_image_url.clone(),
+    );
+    Some(AppEvent::LoadArtistPage {
+        artist_id,
+        artist_name: Some(artist_name),
+        artist_image_url,
+    })
+}
+
+/// Opens album `index` of the current artist page as a track list.
+pub fn open_artist_album(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    state.ui.artist_page_album_index = index;
+    let data = state.data.artist_page_data.clone()?;
+    let album = data.albums.get(index)?;
+    let context = TrackListContext::album(
+        album.id.clone(),
+        album.name.clone(),
+        album.artists.clone(),
+        album.image_url.clone(),
+    );
+    state.begin_tracklist_load(context.clone());
+    Some(AppEvent::LoadContextTracks(context))
+}
+
+/// Backs out of an artist page to the artist list, cancelling any in-flight page load.
+pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
+    state.ui.active_view = ActiveView::ArtistList;
+    state.clear_pending_artist_page();
+    AppEvent::CancelArtistPageLoad
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::TrackListContextKind;
     use std::path::PathBuf;
+
+    #[test]
+    fn backing_out_cancels_pending_artist_without_clearing_page_data() {
+        let mut state = AppState::new();
+        state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
+
+        let event = back_to_artist_list(&mut state);
+
+        assert!(matches!(event, AppEvent::CancelArtistPageLoad));
+        assert!(state.ui.active_view == ActiveView::ArtistList);
+        assert!(state.data.pending_artist_page_id.is_none());
+    }
+
+    #[test]
+    fn selecting_followed_artist_opens_partial_shell_immediately() {
+        let mut state = AppState::new();
+        state.data.followed_artists.push(Artist {
+            id: "artist".to_string(),
+            name: "Artist".to_string(),
+            followers: 0,
+            image_url: Some("image".to_string()),
+        });
+
+        let event = open_followed_artist(&mut state, 0);
+
+        assert!(matches!(event, Some(AppEvent::LoadArtistPage { .. })));
+        assert!(matches!(state.ui.active_view, ActiveView::ArtistPage));
+        assert_eq!(state.data.pending_artist_page_id.as_deref(), Some("artist"));
+        let page = state.data.artist_page_data.as_ref().expect("artist shell");
+        assert_eq!(page.artist_name, "Artist");
+        assert_eq!(page.image_url.as_deref(), Some("image"));
+        assert!(page.albums.is_empty());
+        assert!(state.data.artist_albums_loading);
+    }
+
+    #[test]
+    fn selecting_search_artist_opens_partial_shell_with_image() {
+        let mut state = AppState::new();
+        state.ui.active_search_tab = SearchTab::Artists;
+        state.data.search_results.artists.push(Artist {
+            id: "artist".to_string(),
+            name: "Search Artist".to_string(),
+            followers: 0,
+            image_url: Some("search-image".to_string()),
+        });
+
+        let event = activate_search_result(&mut state, 0);
+
+        assert!(matches!(event, Some(AppEvent::LoadArtistPage { .. })));
+        assert!(matches!(state.ui.active_view, ActiveView::ArtistPage));
+        let page = state.data.artist_page_data.as_ref().expect("artist shell");
+        assert_eq!(page.artist_name, "Search Artist");
+        assert_eq!(page.image_url.as_deref(), Some("search-image"));
+    }
+
+    #[test]
+    fn local_search_track_playback_uses_local_context() {
+        let mut state = AppState::new();
+        state.ui.active_search_tab = SearchTab::Tracks;
+        let search_track = |id: &str, name: &str, source, path: Option<&str>| SearchTrack {
+            id: id.to_string(),
+            source,
+            local_path: path.map(PathBuf::from),
+            name: name.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            duration_ms: 1,
+            image_url: None,
+            album_id: None,
+            artist_id: None,
+        };
+        state.data.search_results.tracks = vec![
+            search_track("spotify", "Spotify", TrackSource::Spotify, None),
+            search_track("local:a", "Local A", TrackSource::Local, Some("/music/a.wav")),
+            search_track("local:b", "Local B", TrackSource::Local, Some("/music/b.wav")),
+        ];
+
+        let Some(AppEvent::PlayTrack {
+            target, track_id, ..
+        }) = activate_search_result(&mut state, 2)
+        else {
+            panic!("expected play event");
+        };
+
+        assert_eq!(track_id, "local:b");
+        let PlaybackTarget::LocalContext {
+            tracks,
+            selected_index,
+        } = target
+        else {
+            panic!("expected local context");
+        };
+        // Only the two local results form the context, with the clicked one selected.
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(selected_index, 1);
+    }
+
+    #[test]
+    fn opening_the_artist_list_fetches_only_when_empty() {
+        let mut state = AppState::new();
+        assert!(matches!(
+            open_artist_list(&mut state),
+            Some(AppEvent::FetchFollowedArtists)
+        ));
+
+        state.data.followed_artists.push(Artist {
+            id: "artist".to_string(),
+            name: "Artist".to_string(),
+            followers: 0,
+            image_url: None,
+        });
+        assert!(open_artist_list(&mut state).is_none());
+        assert!(state.ui.active_view == ActiveView::ArtistList);
+    }
 
     #[test]
     fn generated_context_playback_never_masquerades_as_playlist() {

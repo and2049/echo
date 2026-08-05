@@ -50,9 +50,16 @@ actions!(
         SeekBackward,
         ToggleQueue,
         OpenDevices,
-        Dismiss
+        Dismiss,
+        FocusSearch
     ]
 );
+
+/// Key context for the list bindings; the search input carries [`SEARCH_CONTEXT`] instead, and
+/// every list binding is predicated on `list && !search` so plain letters type into the box.
+const LIST_CONTEXT: &str = "list";
+const SEARCH_CONTEXT: &str = "search";
+const LIST_KEYS: Option<&str> = Some("list && !search");
 
 /// Keyboard page distance; the TUI uses a similar fixed stride.
 const PAGE_ROWS: isize = 10;
@@ -62,9 +69,14 @@ pub(crate) struct EchoApp {
     pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     pub(crate) worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
     pub(crate) images: images::ImageCache,
+    pub(crate) search_input: String,
+    pub(crate) search_focus: FocusHandle,
     pub(crate) library_scroll: UniformListScrollHandle,
     pub(crate) tracks_scroll: UniformListScrollHandle,
     pub(crate) queue_scroll: UniformListScrollHandle,
+    pub(crate) search_scroll: UniformListScrollHandle,
+    pub(crate) artists_scroll: UniformListScrollHandle,
+    pub(crate) artist_albums_scroll: UniformListScrollHandle,
     /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
     /// position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -128,9 +140,14 @@ impl EchoApp {
             app_tx,
             worker_tx,
             images: images::ImageCache::default(),
+            search_input: String::new(),
+            search_focus: cx.focus_handle(),
             library_scroll: UniformListScrollHandle::new(),
             tracks_scroll: UniformListScrollHandle::new(),
             queue_scroll: UniformListScrollHandle::new(),
+            search_scroll: UniformListScrollHandle::new(),
+            artists_scroll: UniformListScrollHandle::new(),
+            artist_albums_scroll: UniformListScrollHandle::new(),
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             focus_handle,
@@ -146,6 +163,18 @@ impl EchoApp {
         match self.state.ui.active_view {
             ActiveView::TrackList => self.state.data.tracks.len(),
             ActiveView::Queue => self.state.data.queue.len(),
+            ActiveView::SearchResults => match self.state.ui.active_search_tab {
+                echo_core::app::SearchTab::Tracks => self.state.data.search_results.tracks.len(),
+                echo_core::app::SearchTab::Albums => self.state.data.search_results.albums.len(),
+                echo_core::app::SearchTab::Artists => self.state.data.search_results.artists.len(),
+            },
+            ActiveView::ArtistList => self.state.data.followed_artists.len(),
+            ActiveView::ArtistPage => self
+                .state
+                .data
+                .artist_page_data
+                .as_ref()
+                .map_or(0, |data| data.albums.len()),
             _ => match self.state.ui.active_library_tab {
                 LibraryTab::Albums => self.state.data.saved_albums.len(),
                 _ => self.state.data.library_view.len(),
@@ -165,6 +194,19 @@ impl EchoApp {
                 ActiveView::Queue => {
                     self.state.ui.selected_queue_index = index;
                     self.queue_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+                ActiveView::SearchResults => {
+                    self.state.ui.selected_search_index = index;
+                    self.search_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+                ActiveView::ArtistList => {
+                    self.state.ui.selected_artist_index = index;
+                    self.artists_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+                ActiveView::ArtistPage => {
+                    self.state.ui.artist_page_album_index = index;
+                    self.artist_albums_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
                 }
                 _ => {
                     self.state.ui.selected_playlist_index = index;
@@ -186,6 +228,9 @@ impl EchoApp {
             match self.state.ui.active_view {
                 ActiveView::TrackList => self.state.ui.selected_track_index,
                 ActiveView::Queue => self.state.ui.selected_queue_index,
+                ActiveView::SearchResults => self.state.ui.selected_search_index,
+                ActiveView::ArtistList => self.state.ui.selected_artist_index,
+                ActiveView::ArtistPage => self.state.ui.artist_page_album_index,
                 _ => self.state.ui.selected_playlist_index,
             }
         };
@@ -212,6 +257,18 @@ impl EchoApp {
                 }
                 // The queue is browse-only: the API can't jump to a queue position.
                 ActiveView::Queue => None,
+                ActiveView::SearchResults => {
+                    let index = self.state.ui.selected_search_index;
+                    echo_core::intent::activate_search_result(&mut self.state, index)
+                }
+                ActiveView::ArtistList => {
+                    let index = self.state.ui.selected_artist_index;
+                    echo_core::intent::open_followed_artist(&mut self.state, index)
+                }
+                ActiveView::ArtistPage => {
+                    let index = self.state.ui.artist_page_album_index;
+                    echo_core::intent::open_artist_album(&mut self.state, index)
+                }
                 _ => {
                     let index = self.state.ui.selected_playlist_index;
                     match self.state.ui.active_library_tab {
@@ -248,10 +305,58 @@ impl EchoApp {
 
     /// Escape: close whatever is topmost.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
-        if self.state.ui.device_modal_open {
-            self.state.ui.device_modal_open = false;
-        } else if self.state.ui.active_view == ActiveView::Queue {
-            self.state.ui.active_view = ActiveView::Library;
+        match () {
+            _ if self.state.ui.device_modal_open => {
+                self.state.ui.device_modal_open = false;
+            }
+            _ if self.state.ui.active_view == ActiveView::ArtistPage => {
+                let event = echo_core::intent::back_to_artist_list(&mut self.state);
+                self.dispatch(event);
+            }
+            _ if self.state.ui.active_view == ActiveView::SearchResults => {
+                // Mirrors the TUI's `q` from search results: drop them entirely.
+                self.state.ui.active_view = ActiveView::Library;
+                self.state.data.search_results = Default::default();
+                self.state.ui.search_context_query.clear();
+                self.state.ui.status_message = None;
+            }
+            _ if self.state.ui.active_view == ActiveView::Queue
+                || self.state.ui.active_view == ActiveView::ArtistList =>
+            {
+                self.state.ui.active_view = ActiveView::Library;
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Enter/escape and typing for the search box, which owns key handling while focused.
+    fn handle_search_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                let query = self.search_input.clone();
+                if let Some(event) = echo_core::intent::global_search(&mut self.state, &query) {
+                    self.dispatch(event);
+                }
+                window.focus(&self.focus_handle, cx);
+            }
+            "escape" => {
+                self.search_input.clear();
+                window.focus(&self.focus_handle, cx);
+            }
+            "backspace" => {
+                self.search_input.pop();
+            }
+            _ => {
+                if let Some(text) = event.keystroke.key_char.as_deref() {
+                    self.search_input.push_str(text);
+                }
+            }
         }
         cx.notify();
     }
@@ -588,7 +693,7 @@ fn icon_button(
 }
 
 impl Render for EchoApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
 
@@ -600,6 +705,7 @@ impl Render for EchoApp {
             .then(|| views::device_modal(self, cx).into_any_element());
 
         div()
+            .key_context(LIST_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
                 this.toggle_playback(cx)
@@ -631,6 +737,10 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &ToggleQueue, _window, cx| this.toggle_queue(cx)))
             .on_action(cx.listener(|this, _: &OpenDevices, _window, cx| this.open_devices(cx)))
             .on_action(cx.listener(|this, _: &Dismiss, _window, cx| this.dismiss(cx)))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                window.focus(&this.search_focus, cx);
+                cx.notify();
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -643,7 +753,7 @@ impl Render for EchoApp {
                     .flex_row()
                     .overflow_hidden()
                     .child(views::sidebar(self, cx))
-                    .child(views::main_area(self, cx)),
+                    .child(views::main_area(self, window, cx)),
             )
             .child(self.render_playback_bar(cx))
             .when_some(device_modal, |el, modal| el.child(modal))
@@ -668,32 +778,34 @@ fn main() {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
-            KeyBinding::new("space", TogglePlayback, None),
-            // Arrows plus the TUI's vim keys; no text inputs exist yet to conflict with.
-            KeyBinding::new("up", MoveUp, None),
-            KeyBinding::new("k", MoveUp, None),
-            KeyBinding::new("down", MoveDown, None),
-            KeyBinding::new("j", MoveDown, None),
-            KeyBinding::new("pageup", PageUp, None),
-            KeyBinding::new("pagedown", PageDown, None),
-            KeyBinding::new("home", SelectFirst, None),
-            KeyBinding::new("end", SelectLast, None),
-            KeyBinding::new("enter", Activate, None),
-            KeyBinding::new("left", FocusLibrary, None),
-            KeyBinding::new("h", FocusLibrary, None),
-            KeyBinding::new("right", FocusTracks, None),
-            KeyBinding::new("l", FocusTracks, None),
+            // Everything else is scoped to the lists so plain letters can type into the
+            // search box (whose context adds `search`, defeating the `!search` predicate).
+            KeyBinding::new("space", TogglePlayback, LIST_KEYS),
+            KeyBinding::new("up", MoveUp, LIST_KEYS),
+            KeyBinding::new("k", MoveUp, LIST_KEYS),
+            KeyBinding::new("down", MoveDown, LIST_KEYS),
+            KeyBinding::new("j", MoveDown, LIST_KEYS),
+            KeyBinding::new("pageup", PageUp, LIST_KEYS),
+            KeyBinding::new("pagedown", PageDown, LIST_KEYS),
+            KeyBinding::new("home", SelectFirst, LIST_KEYS),
+            KeyBinding::new("end", SelectLast, LIST_KEYS),
+            KeyBinding::new("enter", Activate, LIST_KEYS),
+            KeyBinding::new("left", FocusLibrary, LIST_KEYS),
+            KeyBinding::new("h", FocusLibrary, LIST_KEYS),
+            KeyBinding::new("right", FocusTracks, LIST_KEYS),
+            KeyBinding::new("l", FocusTracks, LIST_KEYS),
             // Transport, roughly the TUI's default keymap.
-            KeyBinding::new("ctrl-right", NextTrack, None),
-            KeyBinding::new("ctrl-left", PreviousTrack, None),
-            KeyBinding::new("s", ToggleShuffle, None),
-            KeyBinding::new("r", CycleRepeat, None),
-            KeyBinding::new("m", ToggleMute, None),
-            KeyBinding::new("shift-right", SeekForward, None),
-            KeyBinding::new("shift-left", SeekBackward, None),
-            KeyBinding::new("shift-q", ToggleQueue, None),
-            KeyBinding::new("shift-d", OpenDevices, None),
-            KeyBinding::new("escape", Dismiss, None),
+            KeyBinding::new("ctrl-right", NextTrack, LIST_KEYS),
+            KeyBinding::new("ctrl-left", PreviousTrack, LIST_KEYS),
+            KeyBinding::new("s", ToggleShuffle, LIST_KEYS),
+            KeyBinding::new("r", CycleRepeat, LIST_KEYS),
+            KeyBinding::new("m", ToggleMute, LIST_KEYS),
+            KeyBinding::new("shift-right", SeekForward, LIST_KEYS),
+            KeyBinding::new("shift-left", SeekBackward, LIST_KEYS),
+            KeyBinding::new("shift-q", ToggleQueue, LIST_KEYS),
+            KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
+            KeyBinding::new("escape", Dismiss, LIST_KEYS),
+            KeyBinding::new("/", FocusSearch, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
