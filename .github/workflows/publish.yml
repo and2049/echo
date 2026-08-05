@@ -35,6 +35,7 @@ jobs:
 
       - name: Update Version in Cargo.toml
         shell: bash
+        # Member crates inherit via version.workspace = true, so the root is the only bump.
         run: |
           perl -0pi -e 's/(^version = ")[^"]+(")/${1}${{ inputs.version }}${2}/m' Cargo.toml
 
@@ -66,7 +67,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: echo-${{ matrix.target }}
+          name: spotify-tui-${{ matrix.target }}
           path: |
             target/release/*.msi
             target/release/*.dmg

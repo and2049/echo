@@ -2,11 +2,11 @@
 set -eu
 
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exe="$dir/echo"
+exe="$dir/spotify"
 
 if [ ! -x "$exe" ]; then
     if command -v zenity >/dev/null 2>&1; then
-        zenity --error --title=Echo --text="echo binary not found at $exe"
+        zenity --error --title=Echo --text="spotify binary not found at $exe"
     fi
     exit 1
 fi

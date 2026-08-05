@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    print!("\x1b]0;echo\x07");
+    print!("\x1b]0;spotify\x07");
     i18n::init();
 
     let original_hook = panic::take_hook();
