@@ -51,7 +51,7 @@ cargo build --release
 运行二进制文件：
 
 ```bash
-./target/release/echo
+./target/release/spotify
 ```
 
 首次运行时，echo 会提示您输入 `Client ID` 和 `Client Secret`，然后打开浏览器以通过 Spotify 进行身份验证。

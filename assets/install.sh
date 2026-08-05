@@ -14,7 +14,7 @@
 
 set -eu
 
-BINARY_NAME="echo"
+BINARY_NAME="spotify"
 ICON_NAME="echo"
 APP_NAME="Echo"
 REPO="and2049/echo"
@@ -25,7 +25,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 find_repo_root() {
     dir=$1
     while [ "$dir" != "/" ]; do
-        if [ -f "$dir/assets/echo.desktop" ] && [ -d "$dir/icons" ]; then
+        if [ -f "$dir/assets/spotify.desktop" ] && [ -d "$dir/icons" ]; then
             echo "$dir"
             return 0
         fi
@@ -46,7 +46,7 @@ BIN_HOME="${HOME}/.local/bin"
 ICON_DIR="$DATA_HOME/icons/hicolor"
 APP_DIR="$DATA_HOME/applications"
 BIN_PATH="$BIN_HOME/$BINARY_NAME"
-LAUNCHER_PATH="$BIN_HOME/echo-launcher"
+LAUNCHER_PATH="$BIN_HOME/spotify-launcher"
 DESKTOP_PATH="$APP_DIR/$BINARY_NAME.desktop"
 
 TMP_DIR=""
@@ -61,7 +61,7 @@ Install echo as a desktop application on Linux.
 
 Arguments:
   BINARY            Path to an AppImage or echo binary to install.
-                    If omitted, auto-detects ./echo-*.AppImage or ./echo,
+                    If omitted, auto-detects ./*.AppImage or ./echo,
                     or downloads the latest AppImage from GitHub releases.
 
 Options:
@@ -117,8 +117,8 @@ setup_remote_assets() {
     download "$RAW_BASE/icons/64x64.png"        "$TMP_DIR/icons/64x64.png"        || true
     download "$RAW_BASE/icons/128x128.png"      "$TMP_DIR/icons/128x128.png"      || true
     download "$RAW_BASE/icons/128x128@2x.png"   "$TMP_DIR/icons/128x128@2x.png"   || true
-    download "$RAW_BASE/assets/echo.desktop"    "$TMP_DIR/assets/echo.desktop"    || err "Failed to download desktop entry."
-    download "$RAW_BASE/assets/echo-launcher"   "$TMP_DIR/assets/echo-launcher"   || true
+    download "$RAW_BASE/assets/spotify.desktop"    "$TMP_DIR/assets/spotify.desktop"    || err "Failed to download desktop entry."
+    download "$RAW_BASE/assets/spotify-launcher"   "$TMP_DIR/assets/spotify-launcher"   || true
 
     REPO_ROOT="$TMP_DIR"
 }
@@ -137,7 +137,7 @@ download_latest_appimage() {
     fi
 
     info "Downloading $_appimage_url"
-    DOWNLOADED_APPIMAGE="$REPO_ROOT/echo-latest.AppImage"
+    DOWNLOADED_APPIMAGE="$REPO_ROOT/echo-tui-latest.AppImage"
     download "$_appimage_url" "$DOWNLOADED_APPIMAGE"
 }
 
@@ -179,8 +179,8 @@ install() {
     if [ $# -ge 1 ]; then
         SRC=$1
     elif [ "$IS_LOCAL" -eq 1 ]; then
-        if ls "$REPO_ROOT"/echo-*.AppImage >/dev/null 2>&1; then
-            SRC=$(ls "$REPO_ROOT"/echo-*.AppImage | head -n1)
+        if ls "$REPO_ROOT"/*.AppImage >/dev/null 2>&1; then
+            SRC=$(ls "$REPO_ROOT"/*.AppImage | head -n1)
         elif [ -f "$REPO_ROOT/$BINARY_NAME" ]; then
             SRC="$REPO_ROOT/$BINARY_NAME"
         elif [ -f "$REPO_ROOT/target/release/$BINARY_NAME" ]; then
@@ -229,7 +229,7 @@ Install it with:  sudo apt-get install libfuse2
     chmod +x "$BIN_PATH"
 
     info "Installing launcher to $LAUNCHER_PATH"
-    LAUNCHER_SRC="$REPO_ROOT/assets/echo-launcher"
+    LAUNCHER_SRC="$REPO_ROOT/assets/spotify-launcher"
     if [ -f "$LAUNCHER_SRC" ]; then
         cp -f "$LAUNCHER_SRC" "$LAUNCHER_PATH"
     else
@@ -237,10 +237,10 @@ Install it with:  sudo apt-get install libfuse2
 #!/bin/sh
 set -eu
 dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exe="$dir/echo"
+exe="$dir/spotify"
 if [ ! -x "$exe" ]; then
     if command -v zenity >/dev/null 2>&1; then
-        zenity --error --title=Echo --text="echo binary not found at $exe"
+        zenity --error --title=Echo --text="spotify binary not found at $exe"
     fi
     exit 1
 fi
@@ -288,7 +288,7 @@ LAUNCHEREOF
     fi
 
     info "Installing desktop entry to $DESKTOP_PATH"
-    DESKTOP_SRC="$REPO_ROOT/assets/echo.desktop"
+    DESKTOP_SRC="$REPO_ROOT/assets/spotify.desktop"
     if [ -f "$DESKTOP_SRC" ]; then
         cp -f "$DESKTOP_SRC" "$DESKTOP_PATH"
     else
