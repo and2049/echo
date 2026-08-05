@@ -15,7 +15,7 @@ use echo_core::models::LibraryNode;
 use echo_core::thumbnails::ThumbState;
 use gpui::{
     AnyElement, Context, MouseButton, MouseDownEvent, SharedString, Window, div, img, prelude::*,
-    px, relative, uniform_list,
+    px, relative, svg, uniform_list,
 };
 
 use crate::theme::{ToGpui, WINDOW_BG, WINDOW_FG};
@@ -143,6 +143,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .child({
             // The TUI's Browse nodes, as quick links.
             let browse_link = |id: &'static str,
+                               icon: &'static str,
                                label: &'static str,
                                open: fn(&mut echo_core::app::AppState)
                                    -> Option<echo_core::events::AppEvent>| {
@@ -150,6 +151,10 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     .id(id)
                     .px_3()
                     .py_1()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_2()
                     .text_sm()
                     .text_color(muted)
                     .hover(|style| style.bg(muted.opacity(0.1)))
@@ -160,6 +165,14 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                         }
                         cx.notify();
                     }))
+                    .child(
+                        svg()
+                            .path(icon)
+                            .flex_none()
+                            .w(px(14.0))
+                            .h(px(14.0))
+                            .text_color(muted),
+                    )
                     .child(label)
             };
             div()
@@ -169,12 +182,14 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .pb_1()
                 .child(browse_link(
                     "top-tracks",
-                    "⭐ Top Tracks",
+                    "icons/star.svg",
+                    "Top Tracks",
                     echo_core::intent::open_top_tracks,
                 ))
                 .child(browse_link(
                     "recently-played",
-                    "🕒 Recently Played",
+                    "icons/clock.svg",
+                    "Recently Played",
                     echo_core::intent::open_recently_played,
                 ))
         })
@@ -196,11 +211,14 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                         .map(|ix| {
                             // Folders carry no cover; playlists and albums get a thumb box even
                             // while (or if never) loaded, so the text column stays aligned.
-                            let (label, label_color, indent_px, thumb_url, has_thumb): (
+                            // Folders get a chevron icon, pinned playlists a pin icon.
+                            let (label, label_color, indent_px, thumb_url, has_thumb, chevron, pinned): (
                                 SharedString,
                                 _,
                                 f32,
                                 Option<String>,
+                                bool,
+                                Option<&'static str>,
                                 bool,
                             ) = if tab == LibraryTab::Albums {
                                 let album = &this.state.data.saved_albums[ix];
@@ -208,43 +226,41 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     .thumb_url
                                     .clone()
                                     .or_else(|| album.image_url.clone());
-                                (album.name.clone().into(), fg, 0.0, url, true)
+                                (album.name.clone().into(), fg, 0.0, url, true, None, false)
                             } else {
                                 match &this.state.data.library_view[ix] {
                                     LibraryNode::Folder(f) => (
-                                        format!(
-                                            "{} {}",
-                                            if f.is_open { "▼" } else { "▶" },
-                                            f.name
-                                        )
-                                        .into(),
+                                        f.name.clone().into(),
                                         accent,
                                         0.0,
                                         None,
                                         false,
+                                        Some(if f.is_open {
+                                            "icons/arrow-down.svg"
+                                        } else {
+                                            "icons/arrow-right.svg"
+                                        }),
+                                        false,
                                     ),
                                     LibraryNode::Playlist { playlist, indent } => {
-                                        let pin = if this
+                                        let pinned = this
                                             .state
                                             .ui
                                             .library_config
                                             .pinned
-                                            .contains(&playlist.id)
-                                        {
-                                            "📌 "
-                                        } else {
-                                            ""
-                                        };
+                                            .contains(&playlist.id);
                                         let url = playlist
                                             .thumb_url
                                             .clone()
                                             .or_else(|| playlist.image_url.clone());
                                         (
-                                            format!("{pin}{}", playlist.name).into(),
+                                            playlist.name.clone().into(),
                                             fg,
                                             *indent as f32 * 14.0,
                                             url,
                                             true,
+                                            None,
+                                            pinned,
                                         )
                                     }
                                 }
@@ -276,9 +292,13 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child("♪")
+                                        .child(
+                                            svg()
+                                                .path("icons/music-note.svg")
+                                                .w(px(12.0))
+                                                .h(px(12.0))
+                                                .text_color(muted),
+                                        )
                                         .into_any_element(),
                                 }
                             });
@@ -376,7 +396,27 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     }
                                     cx.notify();
                                 }))
+                                .when_some(chevron, |el, icon| {
+                                    el.child(
+                                        svg()
+                                            .path(icon)
+                                            .flex_none()
+                                            .w(px(12.0))
+                                            .h(px(12.0))
+                                            .text_color(accent),
+                                    )
+                                })
                                 .when_some(thumb, |el, thumb| el.child(thumb))
+                                .when(pinned, |el| {
+                                    el.child(
+                                        svg()
+                                            .path("icons/pin.svg")
+                                            .flex_none()
+                                            .w(px(12.0))
+                                            .h(px(12.0))
+                                            .text_color(muted),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .overflow_hidden()
@@ -617,7 +657,14 @@ fn search_bar(
                 window.focus(&this.search_focus, cx);
                 cx.notify();
             }))
-            .child(div().text_sm().text_color(muted).child("🔍"))
+            .child(
+                svg()
+                    .path("icons/search.svg")
+                    .flex_none()
+                    .w(px(14.0))
+                    .h(px(14.0))
+                    .text_color(muted),
+            )
             .child(if query.is_empty() && !focused {
                 div()
                     .text_sm()
@@ -923,7 +970,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
         })
 }
 
-/// A cover thumbnail box riding the core thumbnail cache, or a ♪ placeholder.
+/// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
 fn thumb_element(
     this: &mut EchoApp,
     url: Option<&str>,
@@ -952,9 +999,13 @@ fn thumb_element(
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_xs()
-                .text_color(muted)
-                .child("♪");
+                .child(
+                    svg()
+                        .path("icons/music-note.svg")
+                        .w(px((edge * 0.45).max(10.0)))
+                        .h(px((edge * 0.45).max(10.0)))
+                        .text_color(muted),
+                );
             if round { el.rounded_full() } else { el.rounded_sm() }.into_any_element()
         }
     }
@@ -1390,7 +1441,13 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                             this.dispatch(event);
                             cx.notify();
                         }))
-                        .child("←"),
+                        .child(
+                            svg()
+                                .path("icons/arrow-left.svg")
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .text_color(muted),
+                        ),
                 )
                 .when_some(header_image, |el, image| {
                     el.child(

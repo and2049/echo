@@ -8,6 +8,7 @@
 //! The tokio runtime lives on the main function's stack and stays entered for the lifetime of
 //! the UI, so worker tasks keep running on its threads while GPUI blocks in `run()`.
 
+mod assets;
 mod images;
 mod theme;
 mod views;
@@ -22,7 +23,7 @@ use echo_core::events::AppEvent;
 use gpui::{
     App, Bounds, ClickEvent, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollStrategy,
     SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
-    div, img, prelude::*, px, size,
+    div, img, prelude::*, px, size, svg,
 };
 use gpui_platform::application;
 use theme::{ToGpui, WINDOW_BG, WINDOW_FG};
@@ -1016,16 +1017,24 @@ impl EchoApp {
             format_time(playback.duration_ms)
         )
         .into();
-        let play_glyph: SharedString = if playback.is_playing { "⏸" } else { "▶" }.into();
+        let play_icon = if playback.is_playing {
+            "icons/pause.svg"
+        } else {
+            "icons/play.svg"
+        };
 
         let shuffle_color = if playback.is_shuffled { accent } else { muted };
-        let (repeat_glyph, repeat_color) = match playback.repeat_mode.as_str() {
-            "Track" => ("🔂", accent),
-            "Context" => ("🔁", accent),
-            _ => ("🔁", muted),
+        let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
+            "Track" => ("icons/repeat-one.svg", accent),
+            "Context" => ("icons/repeat.svg", accent),
+            _ => ("icons/repeat.svg", muted),
         };
         let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
-        let mute_glyph = if playback.volume == 0 { "🔇" } else { "🔊" };
+        let mute_icon = if playback.volume == 0 {
+            "icons/volume-off.svg"
+        } else {
+            "icons/volume-high.svg"
+        };
         let queue_color = if self.state.ui.active_view == ActiveView::Queue {
             accent
         } else {
@@ -1101,7 +1110,7 @@ impl EchoApp {
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
-            .child(icon_button("previous", "⏮", fg, cx, |this, cx| {
+            .child(icon_button("previous", "icons/previous.svg", fg, cx, |this, cx| {
                 this.play_previous(cx)
             }))
             .child(
@@ -1114,13 +1123,19 @@ impl EchoApp {
                     .items_center()
                     .justify_center()
                     .rounded_full()
-                    .text_color(accent)
-                    .text_xl()
                     .hover(|style| style.bg(accent.opacity(0.15)))
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
-                    .child(play_glyph),
+                    .child(
+                        svg()
+                            .path(play_icon)
+                            .w(px(22.0))
+                            .h(px(22.0))
+                            .text_color(accent),
+                    ),
             )
-            .child(icon_button("next", "⏭", fg, cx, |this, cx| this.play_next(cx)))
+            .child(icon_button("next", "icons/next.svg", fg, cx, |this, cx| {
+                this.play_next(cx)
+            }))
             .child(match cover {
                 Some(image) => img(image)
                     .flex_none()
@@ -1137,8 +1152,13 @@ impl EchoApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(muted)
-                    .child("♪")
+                    .child(
+                        svg()
+                            .path("icons/music-note.svg")
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .text_color(muted),
+                    )
                     .into_any_element(),
             })
             .child(
@@ -1150,10 +1170,10 @@ impl EchoApp {
                     .child(div().text_color(fg).text_sm().child(title))
                     .child(div().text_color(muted).text_xs().child(artist)),
             )
-            .child(icon_button("shuffle", "🔀", shuffle_color, cx, |this, cx| {
+            .child(icon_button("shuffle", "icons/shuffle.svg", shuffle_color, cx, |this, cx| {
                 this.toggle_shuffle(cx)
             }))
-            .child(icon_button("repeat", repeat_glyph, repeat_color, cx, |this, cx| {
+            .child(icon_button("repeat", repeat_icon, repeat_color, cx, |this, cx| {
                 this.cycle_repeat(cx)
             }))
             .child(
@@ -1267,19 +1287,19 @@ impl EchoApp {
                     .size_full(),
                 ))
             })
-            .child(icon_button("lyrics", "🎤", lyrics_color, cx, |this, cx| {
+            .child(icon_button("lyrics", "icons/mic.svg", lyrics_color, cx, |this, cx| {
                 this.toggle_lyrics(cx)
             }))
-            .child(icon_button("themes", "🎨", muted, cx, |this, cx| {
+            .child(icon_button("themes", "icons/paint-board.svg", muted, cx, |this, cx| {
                 this.toggle_themes(cx)
             }))
-            .child(icon_button("queue", "☰", queue_color, cx, |this, cx| {
+            .child(icon_button("queue", "icons/playlist.svg", queue_color, cx, |this, cx| {
                 this.toggle_queue(cx)
             }))
-            .child(icon_button("devices", "🖥", muted, cx, |this, cx| {
+            .child(icon_button("devices", "icons/computer.svg", muted, cx, |this, cx| {
                 this.open_devices(cx)
             }))
-            .child(icon_button("mute", mute_glyph, muted, cx, |this, cx| {
+            .child(icon_button("mute", mute_icon, muted, cx, |this, cx| {
                 this.toggle_mute(cx)
             }))
             .child(
@@ -1324,10 +1344,11 @@ impl EchoApp {
     }
 }
 
-/// A small round glyph button for the playback bar.
+/// A small round icon button for the playback bar. `icon` is an embedded SVG path (see
+/// [`assets`]), tinted with `color` like any themed text.
 fn icon_button(
     id: &'static str,
-    glyph: &'static str,
+    icon: &'static str,
     color: Hsla,
     cx: &mut Context<EchoApp>,
     on_click: impl Fn(&mut EchoApp, &mut Context<EchoApp>) + 'static,
@@ -1341,10 +1362,9 @@ fn icon_button(
         .items_center()
         .justify_center()
         .rounded_full()
-        .text_color(color)
         .hover(move |style| style.bg(color.opacity(0.15)))
         .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx)))
-        .child(glyph)
+        .child(svg().path(icon).w(px(16.0)).h(px(16.0)).text_color(color))
 }
 
 impl Render for EchoApp {
@@ -1505,7 +1525,7 @@ fn main() {
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();
 
-    application().run(move |cx: &mut App| {
+    application().with_assets(assets::Assets).run(move |cx: &mut App| {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
