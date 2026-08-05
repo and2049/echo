@@ -648,7 +648,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.ui.active_library_tab = match state.ui.active_library_tab {
                     echo_core::app::LibraryTab::Playlists => echo_core::app::LibraryTab::Albums,
                     echo_core::app::LibraryTab::Albums => echo_core::app::LibraryTab::Browse,
-                    echo_core::app::LibraryTab::Browse => echo_core::app::LibraryTab::Playlists,
+                    // Artists is desktop-only; fold it into the cycle defensively.
+                    echo_core::app::LibraryTab::Browse | echo_core::app::LibraryTab::Artists => {
+                        echo_core::app::LibraryTab::Playlists
+                    }
                 };
                 state.ui.selected_playlist_index = 0;
                 if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {

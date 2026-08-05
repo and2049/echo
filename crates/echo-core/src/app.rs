@@ -343,11 +343,14 @@ pub enum AppMode {
     Visual,
 }
 
+/// Sidebar tabs. `Browse` is TUI-only (the desktop shows browse links permanently);
+/// `Artists` is desktop-only (the TUI reaches followed artists through Browse).
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum LibraryTab {
     Playlists,
     Albums,
     Browse,
+    Artists,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

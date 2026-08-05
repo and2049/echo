@@ -21,7 +21,7 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, ClickEvent, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollStrategy,
+    App, Bounds, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollStrategy,
     SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
     div, img, prelude::*, px, size, svg,
 };
@@ -95,6 +95,13 @@ pub(crate) struct ContextMenuState {
     pub position: gpui::Point<Pixels>,
 }
 
+/// Which bar a pointer drag is currently scrubbing.
+#[derive(Clone, Copy, PartialEq)]
+enum Scrub {
+    Seek,
+    Volume,
+}
+
 /// What a context-menu item does; resolved against the row the menu was opened on.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MenuAction {
@@ -129,10 +136,13 @@ pub(crate) struct EchoApp {
     pub(crate) theme_modal_open: bool,
     /// Right-click menu over a sidebar row; the TUI reaches these through keys instead.
     pub(crate) context_menu: Option<ContextMenuState>,
-    /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
-    /// position into a fraction of the bar.
+    /// Written by a canvas overlay each paint; read by the scrub handlers to turn a pointer's
+    /// window position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
     volume_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// A drag-to-scrub in progress on the seek or volume bar; pointer moves update the state
+    /// optimistically and the worker event fires on release.
+    scrubbing: Option<Scrub>,
     focus_handle: FocusHandle,
 }
 
@@ -225,6 +235,7 @@ impl EchoApp {
             context_menu: None,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
+            scrubbing: None,
             focus_handle,
         }
     }
@@ -252,6 +263,7 @@ impl EchoApp {
                 .map_or(0, |data| data.albums.len()),
             _ => match self.state.ui.active_library_tab {
                 LibraryTab::Albums => self.state.data.saved_albums.len(),
+                LibraryTab::Artists => self.state.data.followed_artists.len(),
                 _ => self.state.data.library_view.len(),
             },
         }
@@ -350,6 +362,9 @@ impl EchoApp {
                         LibraryTab::Albums => {
                             echo_core::intent::open_album(&mut self.state, index)
                         }
+                        LibraryTab::Artists => {
+                            echo_core::intent::open_followed_artist(&mut self.state, index)
+                        }
                         _ => echo_core::intent::open_library_entry(&mut self.state, index),
                     }
                 }
@@ -418,8 +433,7 @@ impl EchoApp {
                 self.state.clear_pending_artist_page();
                 self.dispatch(AppEvent::CancelArtistPageLoad);
             } else {
-                let event = echo_core::intent::back_to_artist_list(&mut self.state);
-                self.dispatch(event);
+                self.close_artist_page(cx);
             }
         } else if self.state.ui.active_view == ActiveView::SearchResults {
             // Mirrors the TUI: leaving search results drops them entirely.
@@ -730,9 +744,15 @@ impl EchoApp {
             ActiveView::Library => {
                 self.state.ui.active_library_tab = match self.state.ui.active_library_tab {
                     LibraryTab::Playlists => LibraryTab::Albums,
+                    LibraryTab::Albums => LibraryTab::Artists,
                     _ => LibraryTab::Playlists,
                 };
                 self.state.ui.selected_playlist_index = 0;
+                if self.state.ui.active_library_tab == LibraryTab::Artists
+                    && self.state.data.followed_artists.is_empty()
+                {
+                    self.dispatch(AppEvent::FetchFollowedArtists);
+                }
             }
             _ => {}
         }
@@ -972,6 +992,67 @@ impl EchoApp {
         let volume = (fraction.clamp(0.0, 1.0) * 100.0).round() as u8;
         let event = echo_core::intent::set_volume(&mut self.state, volume);
         self.dispatch(event);
+        cx.notify();
+    }
+
+    // Drag-to-scrub: mouse-down on a bar starts it, window-level mouse-move updates the state
+    // optimistically for live feedback, and release fires the worker event once.
+
+    fn scrub_bounds(&self, target: Scrub) -> Bounds<Pixels> {
+        match target {
+            Scrub::Seek => self.seek_bounds.get(),
+            Scrub::Volume => self.volume_bounds.get(),
+        }
+    }
+
+    fn begin_scrub(&mut self, target: Scrub, x: Pixels, cx: &mut Context<Self>) {
+        self.scrubbing = Some(target);
+        self.update_scrub(x, cx);
+    }
+
+    fn update_scrub(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(target) = self.scrubbing else { return };
+        let bounds = self.scrub_bounds(target);
+        if bounds.size.width <= px(0.0) {
+            return;
+        }
+        let fraction = ((x - bounds.origin.x) / bounds.size.width).clamp(0.0, 1.0);
+        match target {
+            Scrub::Seek => {
+                if self.state.playback.duration_ms > 0
+                    && self.state.playback.playing_track_id.is_some()
+                {
+                    let target_ms = (self.state.playback.duration_ms as f32 * fraction) as u32;
+                    self.state.playback.set_optimistic_progress(target_ms);
+                }
+            }
+            Scrub::Volume => {
+                self.state.playback.volume = (fraction * 100.0).round() as u32;
+            }
+        }
+        cx.notify();
+    }
+
+    fn finish_scrub(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(target) = self.scrubbing.take() else { return };
+        let bounds = self.scrub_bounds(target);
+        if bounds.size.width <= px(0.0) {
+            cx.notify();
+            return;
+        }
+        let fraction = ((x - bounds.origin.x) / bounds.size.width).clamp(0.0, 1.0);
+        match target {
+            Scrub::Seek => self.seek_to_fraction(fraction, cx),
+            Scrub::Volume => self.set_volume_fraction(fraction, cx),
+        }
+    }
+
+    /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
+    /// TUI's full-page artist list, so there is no ArtistList view to return to.
+    pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.active_view = ActiveView::Library;
+        self.state.clear_pending_artist_page();
+        self.dispatch(AppEvent::CancelArtistPageLoad);
         cx.notify();
     }
 
@@ -1282,14 +1363,12 @@ impl EchoApp {
                     .flex_grow(1.0)
                     .py_2()
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
-                        let bounds = this.seek_bounds.get();
-                        if bounds.size.width > px(0.0) {
-                            let fraction =
-                                (event.position().x - bounds.origin.x) / bounds.size.width;
-                            this.seek_to_fraction(fraction, cx);
-                        }
-                    }))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                            this.begin_scrub(Scrub::Seek, event.position.x, cx);
+                        }),
+                    )
                     .child(
                         div()
                             .relative()
@@ -1372,14 +1451,12 @@ impl EchoApp {
                     .w(px(90.0))
                     .py_2()
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
-                        let bounds = this.volume_bounds.get();
-                        if bounds.size.width > px(0.0) {
-                            let fraction =
-                                (event.position().x - bounds.origin.x) / bounds.size.width;
-                            this.set_volume_fraction(fraction, cx);
-                        }
-                    }))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                            this.begin_scrub(Scrub::Volume, event.position.x, cx);
+                        }),
+                    )
                     .child(
                         div()
                             .relative()
@@ -1475,6 +1552,23 @@ impl Render for EchoApp {
         div()
             .key_context(LIST_CONTEXT)
             .track_focus(&self.focus_handle)
+            // Scrubs track the pointer at the window level so dragging keeps working when the
+            // pointer leaves the bar; release (or a move without the button) ends them.
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                if this.scrubbing.is_some() {
+                    if event.pressed_button == Some(gpui::MouseButton::Left) {
+                        this.update_scrub(event.position.x, cx);
+                    } else {
+                        this.finish_scrub(event.position.x, cx);
+                    }
+                }
+            }))
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, event: &gpui::MouseUpEvent, _window, cx| {
+                    this.finish_scrub(event.position.x, cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
                 this.toggle_playback(cx)
             }))

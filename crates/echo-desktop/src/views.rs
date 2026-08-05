@@ -79,6 +79,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
     let tab = app.state.ui.active_library_tab;
     let count = match tab {
         LibraryTab::Albums => app.state.data.saved_albums.len(),
+        LibraryTab::Artists => app.state.data.followed_artists.len(),
         _ => app.state.data.library_view.len(),
     };
 
@@ -94,6 +95,9 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.state.ui.active_library_tab = target;
                 this.state.ui.selected_playlist_index = 0;
+                if target == LibraryTab::Artists && this.state.data.followed_artists.is_empty() {
+                    this.dispatch(echo_core::events::AppEvent::FetchFollowedArtists);
+                }
                 cx.notify();
             }))
             .child(label)
@@ -113,32 +117,13 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .flex_row()
                 .gap_1()
                 .p_2()
-                .child(tab_button("Playlists", LibraryTab::Playlists, tab != LibraryTab::Albums))
+                .child(tab_button(
+                    "Playlists",
+                    LibraryTab::Playlists,
+                    tab == LibraryTab::Playlists,
+                ))
                 .child(tab_button("Albums", LibraryTab::Albums, tab == LibraryTab::Albums))
-                .child({
-                    // Not a LibraryTab: mirrors the TUI's Browse → Followed Artists node.
-                    let active = matches!(
-                        app.state.ui.active_view,
-                        ActiveView::ArtistList | ActiveView::ArtistPage
-                    );
-                    div()
-                        .id("artists-tab")
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .text_sm()
-                        .text_color(if active { accent } else { muted })
-                        .hover(|style| style.bg(accent.opacity(0.1)))
-                        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                            if let Some(event) =
-                                echo_core::intent::open_artist_list(&mut this.state)
-                            {
-                                this.dispatch(event);
-                            }
-                            cx.notify();
-                        }))
-                        .child("Artists")
-                }),
+                .child(tab_button("Artists", LibraryTab::Artists, tab == LibraryTab::Artists)),
         )
         .child({
             // The TUI's Browse nodes, as quick links.
@@ -209,10 +194,11 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
 
                     let rows: Vec<_> = range
                         .map(|ix| {
-                            // Folders carry no cover; playlists and albums get a thumb box even
-                            // while (or if never) loaded, so the text column stays aligned.
-                            // Folders get a chevron icon, pinned playlists a pin icon.
-                            let (label, label_color, indent_px, thumb_url, has_thumb, chevron, pinned): (
+                            // Folders carry no cover; playlists, albums and artists get a
+                            // thumb box even while (or if never) loaded, so the text column
+                            // stays aligned. Folders get a chevron icon, pinned playlists a
+                            // pin icon; artist thumbs are circular.
+                            let (label, label_color, indent_px, thumb_url, has_thumb, chevron, pinned, round_thumb): (
                                 SharedString,
                                 _,
                                 f32,
@@ -220,13 +206,26 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 bool,
                                 Option<&'static str>,
                                 bool,
+                                bool,
                             ) = if tab == LibraryTab::Albums {
                                 let album = &this.state.data.saved_albums[ix];
                                 let url = album
                                     .thumb_url
                                     .clone()
                                     .or_else(|| album.image_url.clone());
-                                (album.name.clone().into(), fg, 0.0, url, true, None, false)
+                                (album.name.clone().into(), fg, 0.0, url, true, None, false, false)
+                            } else if tab == LibraryTab::Artists {
+                                let artist = &this.state.data.followed_artists[ix];
+                                (
+                                    artist.name.clone().into(),
+                                    fg,
+                                    0.0,
+                                    artist.image_url.clone(),
+                                    true,
+                                    None,
+                                    false,
+                                    true,
+                                )
                             } else {
                                 match &this.state.data.library_view[ix] {
                                     LibraryNode::Folder(f) => (
@@ -240,6 +239,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         } else {
                                             "icons/arrow-right.svg"
                                         }),
+                                        false,
                                         false,
                                     ),
                                     LibraryNode::Playlist { playlist, indent } => {
@@ -261,6 +261,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             true,
                                             None,
                                             pinned,
+                                            false,
                                         )
                                     }
                                 }
@@ -277,29 +278,33 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     }
                                 });
                                 match artwork.and_then(|artwork| this.images.get(&artwork)) {
-                                    Some(image) => img(image)
-                                        .flex_none()
-                                        .w(px(THUMB_EDGE))
-                                        .h(px(THUMB_EDGE))
-                                        .rounded_sm()
-                                        .into_any_element(),
-                                    None => div()
-                                        .flex_none()
-                                        .w(px(THUMB_EDGE))
-                                        .h(px(THUMB_EDGE))
-                                        .rounded_sm()
-                                        .bg(muted.opacity(0.15))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            svg()
-                                                .path("icons/music-note.svg")
-                                                .w(px(12.0))
-                                                .h(px(12.0))
-                                                .text_color(muted),
-                                        )
-                                        .into_any_element(),
+                                    Some(image) => {
+                                        let el = img(image)
+                                            .flex_none()
+                                            .w(px(THUMB_EDGE))
+                                            .h(px(THUMB_EDGE));
+                                        if round_thumb { el.rounded_full() } else { el.rounded_sm() }
+                                            .into_any_element()
+                                    }
+                                    None => {
+                                        let el = div()
+                                            .flex_none()
+                                            .w(px(THUMB_EDGE))
+                                            .h(px(THUMB_EDGE))
+                                            .bg(muted.opacity(0.15))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                                svg()
+                                                    .path("icons/music-note.svg")
+                                                    .w(px(12.0))
+                                                    .h(px(12.0))
+                                                    .text_color(muted),
+                                            );
+                                        if round_thumb { el.rounded_full() } else { el.rounded_sm() }
+                                            .into_any_element()
+                                    }
                                 }
                             });
 
@@ -307,7 +312,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                             // pinned block and the loose list; every playlist-tab row is a
                             // drop target (the intent rejects invalid ones).
                             let drag_source: Option<(String, SharedString)> =
-                                if tab != LibraryTab::Albums {
+                                if tab == LibraryTab::Playlists {
                                     match &this.state.data.library_view[ix] {
                                         LibraryNode::Playlist { playlist, .. }
                                             if !is_fixed_library_row(&playlist.id) =>
@@ -338,17 +343,20 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .hover(|style| style.bg(muted.opacity(0.1)))
                                 .cursor_pointer()
-                                .on_mouse_down(
-                                    MouseButton::Right,
-                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
-                                        this.state.ui.selected_playlist_index = ix;
-                                        this.context_menu = Some(crate::ContextMenuState {
-                                            index: ix,
-                                            position: event.position,
-                                        });
-                                        cx.notify();
-                                    }),
-                                )
+                                .when(tab != LibraryTab::Artists, |el| {
+                                    // Artists have no row actions, so no context menu.
+                                    el.on_mouse_down(
+                                        MouseButton::Right,
+                                        cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                            this.state.ui.selected_playlist_index = ix;
+                                            this.context_menu = Some(crate::ContextMenuState {
+                                                index: ix,
+                                                position: event.position,
+                                            });
+                                            cx.notify();
+                                        }),
+                                    )
+                                })
                                 .when_some(drag_source, |el, (id, name)| {
                                     let border = muted.opacity(0.4);
                                     el.on_drag(
@@ -364,7 +372,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         },
                                     )
                                 })
-                                .when(tab != LibraryTab::Albums, |el| {
+                                .when(tab == LibraryTab::Playlists, |el| {
                                     el.drag_over::<DraggedPlaylist>(move |style, _, _, _| {
                                         style.bg(accent.opacity(0.2))
                                     })
@@ -385,6 +393,12 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     let event = match this.state.ui.active_library_tab {
                                         LibraryTab::Albums => {
                                             echo_core::intent::open_album(&mut this.state, ix)
+                                        }
+                                        LibraryTab::Artists => {
+                                            echo_core::intent::open_followed_artist(
+                                                &mut this.state,
+                                                ix,
+                                            )
                                         }
                                         _ => echo_core::intent::open_library_entry(
                                             &mut this.state,
@@ -1437,9 +1451,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         .text_color(muted)
                         .hover(|style| style.bg(muted.opacity(0.15)))
                         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                            let event = echo_core::intent::back_to_artist_list(&mut this.state);
-                            this.dispatch(event);
-                            cx.notify();
+                            this.close_artist_page(cx);
                         }))
                         .child(
                             svg()
