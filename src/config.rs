@@ -356,6 +356,8 @@ pub struct LibraryConfig {
     pub bitrate: u32,
     #[serde(default = "default_normalisation")]
     pub normalisation: bool,
+    #[serde(default = "default_normalisation_pregain")]
+    pub normalisation_pregain: f64,
 }
 
 fn default_volume() -> u32 {
@@ -368,6 +370,10 @@ fn default_bitrate() -> u32 {
 
 fn default_normalisation() -> bool {
     true
+}
+
+fn default_normalisation_pregain() -> f64 {
+    3.0
 }
 
 fn default_enable_visualizer() -> bool {
@@ -398,6 +404,7 @@ impl Default for LibraryConfig {
             library_thumbnails: false,
             bitrate: 320,
             normalisation: true,
+            normalisation_pregain: default_normalisation_pregain(),
         }
     }
 }

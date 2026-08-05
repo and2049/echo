@@ -194,13 +194,18 @@ Track sorting and navigation operate on already-loaded data. They do not issue S
 
 ## Audio Quality
 
-Echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. Both live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
+Echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. These live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
 
 ```toml
 [library]
-bitrate = 320         # 96, 160, or 320
-normalisation = true  # Even out loudness between tracks, like the Spotify app.
+bitrate = 320               # 96, 160, or 320
+normalisation = true        # Even out loudness between tracks, like the Spotify app.
+normalisation_pregain = 3.0 # dB added back after normalisation. Raise if playback is too quiet.
 ```
+
+Normalisation attenuates each track by its ReplayGain value, which is typically several dB on modern masters. `normalisation_pregain` adds that headroom back so playback lands at a comparable level to the Spotify app. The gain is applied ahead of librespot's dynamic limiter, so raising it does not clip. Setting `normalisation = false` skips the gain stage entirely for bit-exact full-scale output, at the cost of loudness jumps between tracks.
+
+Volume is applied entirely client-side — Spotify streams arrive at full scale, and echo attenuates them itself, so the device's volume slider in other Spotify clients is inactive. Both Spotify and local playback use the same cubic volume curve, so a given percentage sounds the same whichever source is playing, and 100% is unity gain on both.
 
 Echo opens the output device as stereo at 44.1 kHz — librespot's native rate, so no resampling — whenever the device supports it. Devices that do not offer 44.1 kHz (most Windows endpoints default to 48 kHz) fall back to the device's own default rate.
 
