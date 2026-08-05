@@ -16,7 +16,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use echo_core::app::{ActiveView, LibraryTab};
+use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
@@ -36,6 +36,8 @@ actions!(
         MoveDown,
         PageUp,
         PageDown,
+        HalfPageUp,
+        HalfPageDown,
         SelectFirst,
         SelectLast,
         Activate,
@@ -48,12 +50,30 @@ actions!(
         ToggleMute,
         SeekForward,
         SeekBackward,
+        SeekStart,
+        VolumeUp,
+        VolumeDown,
+        VolumeUpBig,
+        VolumeDownBig,
         ToggleQueue,
         OpenDevices,
         Dismiss,
         FocusSearch,
         ToggleLyrics,
-        ToggleThemes
+        ToggleInlineLyrics,
+        ToggleThemes,
+        JumpToCurrent,
+        OpenCommand,
+        CommandSearch,
+        NewPlaylistPrompt,
+        RenamePrompt,
+        AddToQueue,
+        TogglePin,
+        CycleTab,
+        Refresh,
+        OpenFilter,
+        NextMatch,
+        PrevMatch
     ]
 );
 
@@ -73,6 +93,8 @@ pub(crate) struct EchoApp {
     pub(crate) images: images::ImageCache,
     pub(crate) search_input: String,
     pub(crate) search_focus: FocusHandle,
+    /// Focus target for the vim-style `:` command bar and `/` filter bar.
+    command_focus: FocusHandle,
     pub(crate) setup_id_focus: FocusHandle,
     pub(crate) setup_secret_focus: FocusHandle,
     pub(crate) library_scroll: UniformListScrollHandle,
@@ -129,6 +151,18 @@ impl EchoApp {
                     if app.state.playback.is_playing {
                         cx.notify();
                     }
+                    // Status messages carry an expiry the TUI checks each frame; here the
+                    // periodic tick retires them.
+                    if app
+                        .state
+                        .ui
+                        .status_message_expiry
+                        .is_some_and(|expiry| expiry <= std::time::Instant::now())
+                    {
+                        app.state.ui.status_message = None;
+                        app.state.ui.status_message_expiry = None;
+                        cx.notify();
+                    }
                     let visualizing = app.state.playback.is_playing
                         && app.state.ui.library_config.enable_visualizer
                         && app.state.playback.audio_visualization.is_some();
@@ -154,6 +188,7 @@ impl EchoApp {
             images: images::ImageCache::default(),
             search_input: String::new(),
             search_focus: cx.focus_handle(),
+            command_focus: cx.focus_handle(),
             setup_id_focus: cx.focus_handle(),
             setup_secret_focus: cx.focus_handle(),
             library_scroll: UniformListScrollHandle::new(),
@@ -329,37 +364,357 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Escape: close whatever is topmost.
+    /// Escape / `h` / backspace: close whatever is topmost, else go back — the same ordering
+    /// as the TUI's back handling, with the desktop-only modals checked first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
-        match () {
-            _ if self.state.ui.device_modal_open => {
-                self.state.ui.device_modal_open = false;
+        if self.state.ui.device_modal_open {
+            self.state.ui.device_modal_open = false;
+        } else if self.theme_modal_open {
+            self.theme_modal_open = false;
+        } else if self.state.ui.lyrics_modal_open {
+            self.state.ui.lyrics_modal_open = false;
+        } else if self.state.pop_view_history() {
+            self.state.clear_pending_artist_page();
+            if self.state.data.tracklist_image_url.is_some() {
+                self.dispatch(AppEvent::ReloadHeaderImage);
             }
-            _ if self.theme_modal_open => {
-                self.theme_modal_open = false;
-            }
-            _ if self.state.ui.lyrics_modal_open => {
-                self.state.ui.lyrics_modal_open = false;
-            }
-            _ if self.state.ui.active_view == ActiveView::ArtistPage => {
+        } else if self.state.ui.active_view == ActiveView::TrackList {
+            self.state.ui.active_view = if self.search_has_results() {
+                ActiveView::SearchResults
+            } else {
+                ActiveView::Library
+            };
+        } else if self.state.ui.active_view == ActiveView::ArtistPage {
+            if self.search_has_results() {
+                self.state.ui.active_view = ActiveView::SearchResults;
+                self.state.clear_pending_artist_page();
+                self.dispatch(AppEvent::CancelArtistPageLoad);
+            } else {
                 let event = echo_core::intent::back_to_artist_list(&mut self.state);
                 self.dispatch(event);
             }
-            _ if self.state.ui.active_view == ActiveView::SearchResults => {
-                // Mirrors the TUI's `q` from search results: drop them entirely.
-                self.state.ui.active_view = ActiveView::Library;
-                self.state.data.search_results = Default::default();
-                self.state.ui.search_context_query.clear();
-                self.state.ui.status_message = None;
+        } else if self.state.ui.active_view == ActiveView::SearchResults {
+            // Mirrors the TUI: leaving search results drops them entirely.
+            self.state.ui.active_view = ActiveView::Library;
+            self.state.data.search_results = Default::default();
+            self.state.ui.search_context_query.clear();
+            self.state.ui.status_message = None;
+            if self.state.data.tracklist_image_url.is_some() {
+                self.dispatch(AppEvent::ReloadHeaderImage);
             }
-            _ if self.state.ui.active_view == ActiveView::Queue
-                || self.state.ui.active_view == ActiveView::ArtistList =>
-            {
-                self.state.ui.active_view = ActiveView::Library;
+        } else if self.state.ui.active_view == ActiveView::Queue
+            || self.state.ui.active_view == ActiveView::ArtistList
+        {
+            self.state.ui.active_view = ActiveView::Library;
+            if self.state.data.tracklist_image_url.is_some() {
+                self.dispatch(AppEvent::ReloadHeaderImage);
+            }
+        }
+        cx.notify();
+    }
+
+    fn search_has_results(&self) -> bool {
+        !self.state.data.search_results.tracks.is_empty()
+            || !self.state.data.search_results.albums.is_empty()
+            || !self.state.data.search_results.artists.is_empty()
+    }
+
+    // Vim-style command mode (`:`) and track filter (`/`) — a bar above the playback bar that
+    // owns key handling while one of the modes is active. The command registry itself is
+    // `echo_core::commands`, shared with the TUI.
+
+    fn open_command(&mut self, prefill: &str, window: &mut Window, cx: &mut Context<Self>) {
+        echo_core::commands::clear_suggestions(&mut self.state);
+        self.state.ui.mode = AppMode::Command;
+        self.state.ui.command_buffer = prefill.to_string();
+        self.state.ui.status_message = None;
+        window.focus(&self.command_focus.clone(), cx);
+        cx.notify();
+    }
+
+    fn open_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.ui.mode = AppMode::Search;
+        self.state.ui.search_query.clear();
+        self.state.ui.search_matches.clear();
+        self.state.ui.status_message = None;
+        window.focus(&self.command_focus.clone(), cx);
+        cx.notify();
+    }
+
+    /// `e` in the sidebar: prefill `:rename` with the selected playlist/folder name.
+    fn rename_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.ui.active_view != ActiveView::Library {
+            return;
+        }
+        let Some(node) = self
+            .state
+            .data
+            .library_view
+            .get(self.state.ui.selected_playlist_index)
+        else {
+            return;
+        };
+        let name = match node {
+            echo_core::models::LibraryNode::Playlist { playlist, .. } => playlist.name.clone(),
+            echo_core::models::LibraryNode::Folder(f) => f.name.clone(),
+        };
+        self.open_command(&format!("rename {name}"), window, cx);
+    }
+
+    fn handle_command_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                if let Some(event) = echo_core::commands::submit(&mut self.state) {
+                    self.dispatch(event);
+                }
+                window.focus(&self.focus_handle.clone(), cx);
+                // `:q` and friends land here.
+                if !self.state.ui.is_running {
+                    cx.quit();
+                }
+            }
+            "escape" => {
+                echo_core::commands::clear_suggestions(&mut self.state);
+                self.state.ui.mode = AppMode::Normal;
+                self.state.ui.command_buffer.clear();
+                window.focus(&self.focus_handle.clone(), cx);
+            }
+            "tab" => {
+                echo_core::commands::cycle_suggestion(
+                    &mut self.state,
+                    !event.keystroke.modifiers.shift,
+                );
+            }
+            "backspace" => {
+                echo_core::commands::clear_suggestions(&mut self.state);
+                self.state.ui.command_buffer.pop();
+            }
+            "v" if event.keystroke.modifiers.control => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    echo_core::commands::clear_suggestions(&mut self.state);
+                    self.state
+                        .ui
+                        .command_buffer
+                        .extend(text.chars().filter(|c| *c != '\r' && *c != '\n'));
+                }
+            }
+            _ => {
+                if let Some(text) = event.keystroke.key_char.as_deref() {
+                    echo_core::commands::clear_suggestions(&mut self.state);
+                    self.state.ui.command_buffer.push_str(text);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn handle_filter_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                self.state.ui.mode = AppMode::Normal;
+                if !self.state.ui.search_matches.is_empty() {
+                    self.state.ui.selected_track_index = self.state.ui.search_matches[0];
+                    self.scroll_to_selected_track();
+                }
+                window.focus(&self.focus_handle.clone(), cx);
+            }
+            "escape" => {
+                self.state.ui.mode = AppMode::Normal;
+                self.state.ui.search_query.clear();
+                self.state.ui.search_matches.clear();
+                window.focus(&self.focus_handle.clone(), cx);
+            }
+            "backspace" => {
+                self.state.ui.search_query.pop();
+                echo_core::intent::update_search_matches(&mut self.state);
+                self.scroll_to_selected_track();
+            }
+            _ => {
+                if let Some(text) = event.keystroke.key_char.as_deref() {
+                    self.state.ui.search_query.push_str(text);
+                    echo_core::intent::update_search_matches(&mut self.state);
+                    self.scroll_to_selected_track();
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn next_match(&mut self, forward: bool, cx: &mut Context<Self>) {
+        echo_core::intent::next_search_match(&mut self.state, forward);
+        self.scroll_to_selected_track();
+        cx.notify();
+    }
+
+    fn scroll_to_selected_track(&mut self) {
+        self.tracks_scroll
+            .scroll_to_item(self.state.ui.selected_track_index, ScrollStrategy::Nearest);
+    }
+
+    /// `g c`: select whatever is playing, loading its context first when needed.
+    fn jump_to_current(&mut self, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::intent::jump_to_current_context(&mut self.state) {
+            self.dispatch(event);
+        }
+        if self.state.ui.active_view == ActiveView::TrackList {
+            self.tracks_scroll
+                .scroll_to_item(self.state.ui.selected_track_index, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    fn add_to_queue(&mut self, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::intent::queue_selected_track(&self.state) {
+            self.dispatch(event);
+            self.state.ui.status_message = Some("Added to queue".to_string());
+            self.state.ui.status_message_expiry =
+                Some(std::time::Instant::now() + Duration::from_secs(3));
+        }
+        cx.notify();
+    }
+
+    fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        echo_core::intent::toggle_pin_selected(&mut self.state);
+        cx.notify();
+    }
+
+    fn refresh_view(&mut self, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::intent::refresh_view(&mut self.state) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn adjust_volume(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let event = echo_core::intent::adjust_volume(&mut self.state, delta);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn seek_start(&mut self, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::intent::seek_to(&mut self.state, 0) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    /// Tab: cycle the tabs of whichever tabbed view is active. The desktop has no Browse
+    /// library tab — those entries live in the sidebar — so the library just flips between
+    /// Playlists and Albums.
+    fn cycle_tab(&mut self, cx: &mut Context<Self>) {
+        match self.state.ui.active_view {
+            ActiveView::SearchResults => {
+                self.state.ui.active_search_tab = match self.state.ui.active_search_tab {
+                    SearchTab::Tracks => SearchTab::Albums,
+                    SearchTab::Albums => SearchTab::Artists,
+                    SearchTab::Artists => SearchTab::Tracks,
+                };
+                self.state.ui.selected_search_index = 0;
+            }
+            ActiveView::Library => {
+                self.state.ui.active_library_tab = match self.state.ui.active_library_tab {
+                    LibraryTab::Playlists => LibraryTab::Albums,
+                    _ => LibraryTab::Playlists,
+                };
+                self.state.ui.selected_playlist_index = 0;
             }
             _ => {}
         }
         cx.notify();
+    }
+
+    fn toggle_inline_lyrics(&mut self, cx: &mut Context<Self>) {
+        echo_core::intent::toggle_condensed_lyrics(&mut self.state);
+        cx.notify();
+    }
+
+    /// The `:`/`/` bar. Rendered only while one of the two modes is active; carries the
+    /// search key context so plain letters type instead of triggering list bindings.
+    fn render_command_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = &self.state.ui.active_theme;
+        let fg = theme.text.gpui(WINDOW_FG());
+        let muted = theme.text_muted.gpui(WINDOW_FG());
+        let accent = theme.primary.gpui(WINDOW_FG());
+
+        let is_command = self.state.ui.mode == AppMode::Command;
+        let prefix: SharedString = if is_command { ":" } else { "/" }.into();
+        let buffer = if is_command {
+            self.state.ui.command_buffer.clone()
+        } else {
+            self.state.ui.search_query.clone()
+        };
+        let suggestions = self.state.ui.command_suggestions.clone();
+        let selected_suggestion = self.state.ui.command_suggestion_index;
+        let match_hint: Option<SharedString> = (!is_command
+            && !self.state.ui.search_query.is_empty())
+        .then(|| format!("{} matches", self.state.ui.search_matches.len()).into());
+
+        div()
+            .id("command-bar")
+            .key_context(SEARCH_CONTEXT)
+            .track_focus(&self.command_focus)
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.state.ui.mode == AppMode::Command {
+                    this.handle_command_key(event, window, cx);
+                } else {
+                    this.handle_filter_key(event, window, cx);
+                }
+            }))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .px_4()
+            .py_1()
+            .border_t_1()
+            .border_color(muted.opacity(0.3))
+            .when(is_command && !suggestions.is_empty(), |el| {
+                el.child(div().flex().flex_row().gap_2().overflow_hidden().children(
+                    suggestions.into_iter().enumerate().map(|(index, suggestion)| {
+                        let selected = selected_suggestion == Some(index);
+                        div()
+                            .px_2()
+                            .rounded_sm()
+                            .text_xs()
+                            .map(|el| {
+                                if selected {
+                                    el.bg(accent.opacity(0.25)).text_color(fg)
+                                } else {
+                                    el.text_color(muted)
+                                }
+                            })
+                            .child(SharedString::from(suggestion))
+                    }),
+                ))
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_1()
+                    .child(div().text_sm().text_color(accent).child(prefix))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(fg)
+                            .child(SharedString::from(format!("{buffer}▏"))),
+                    )
+                    .when_some(match_hint, |el, hint| {
+                        el.child(div().flex_grow(1.0))
+                            .child(div().text_xs().text_color(muted).child(hint))
+                    }),
+            )
     }
 
     /// Typing for the two setup fields. Credentials are pasted more often than typed, so
@@ -592,6 +947,43 @@ impl EchoApp {
             .cloned()
             .and_then(|artwork| self.images.get(&artwork));
 
+        // The TUI's condensed-lyrics line: current lyric (accented) with the next one below,
+        // riding the same playback tick that advances the seek bar.
+        let inline_lyrics = self
+            .state
+            .ui
+            .condensed_lyrics_enabled
+            .then(|| {
+                if let Some(lyrics) = self.state.playback.current_lyrics.as_ref() {
+                    if lyrics.lines.is_empty() {
+                        return ("No lyrics found.".to_string(), String::new());
+                    }
+                    let progress = self.state.playback.display_progress_ms();
+                    let mut current = 0;
+                    for (index, line) in lyrics.lines.iter().enumerate() {
+                        if line.start_ms <= progress {
+                            current = index;
+                        } else {
+                            break;
+                        }
+                    }
+                    (
+                        lyrics.lines[current].text.clone(),
+                        lyrics
+                            .lines
+                            .get(current + 1)
+                            .map(|line| line.text.clone())
+                            .unwrap_or_default(),
+                    )
+                } else if !self.state.playback.playing_track_title.is_empty() {
+                    ("No lyrics found.".to_string(), String::new())
+                } else {
+                    (String::new(), String::new())
+                }
+            })
+            .filter(|(current, _)| !current.is_empty());
+        let bar_height = if inline_lyrics.is_some() { 96.0 } else { 72.0 };
+
         let seek_bounds = self.seek_bounds.clone();
         let volume_bounds = self.volume_bounds.clone();
 
@@ -600,7 +992,7 @@ impl EchoApp {
             .flex_row()
             .items_center()
             .gap_3()
-            .h(px(72.0))
+            .h(px(bar_height))
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
@@ -660,11 +1052,47 @@ impl EchoApp {
                 this.cycle_repeat(cx)
             }))
             .child(
+                div()
+                    .flex_grow(1.0)
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .overflow_hidden()
+                    .when_some(inline_lyrics, |el, (current, next)| {
+                        el.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .mb_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(accent)
+                                        .whitespace_nowrap()
+                                        .max_w_full()
+                                        .overflow_hidden()
+                                        .child(SharedString::from(current)),
+                                )
+                                .when(!next.is_empty(), |el| {
+                                    el.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .whitespace_nowrap()
+                                            .max_w_full()
+                                            .overflow_hidden()
+                                            .child(SharedString::from(next)),
+                                    )
+                                }),
+                        )
+                    })
+                    .child(
                 // Progress track: the canvas overlay records the track's bounds each paint, and
                 // a click anywhere in the (taller) hit area seeks to that fraction.
                 div()
                     .id("seek-bar")
-                    .flex_grow(1.0)
+                    .w_full()
                     .py_2()
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
@@ -697,6 +1125,7 @@ impl EchoApp {
                                     .bg(accent)
                                     .w(gpui::relative(fraction)),
                             ),
+                    ),
                     ),
             )
             .child(
@@ -817,8 +1246,24 @@ impl Render for EchoApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
+        let muted = theme.text_muted.gpui(WINDOW_FG());
 
         // Built ahead of the chain because they borrow self mutably, like the other views.
+        let command_bar = matches!(self.state.ui.mode, AppMode::Command | AppMode::Search)
+            .then(|| self.render_command_bar(cx).into_any_element());
+        let status_line = (self.state.ui.mode == AppMode::Normal)
+            .then(|| self.state.ui.status_message.clone())
+            .flatten()
+            .map(|message| {
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(SharedString::from(message))
+                    .into_any_element()
+            });
         let lyrics_modal = self
             .state
             .ui
@@ -872,6 +1317,44 @@ impl Render for EchoApp {
             }))
             .on_action(cx.listener(|this, _: &ToggleLyrics, _window, cx| this.toggle_lyrics(cx)))
             .on_action(cx.listener(|this, _: &ToggleThemes, _window, cx| this.toggle_themes(cx)))
+            .on_action(cx.listener(|this, _: &HalfPageUp, _window, cx| {
+                this.move_selection(-PAGE_ROWS / 2, cx)
+            }))
+            .on_action(cx.listener(|this, _: &HalfPageDown, _window, cx| {
+                this.move_selection(PAGE_ROWS / 2, cx)
+            }))
+            .on_action(cx.listener(|this, _: &SeekStart, _window, cx| this.seek_start(cx)))
+            .on_action(cx.listener(|this, _: &VolumeUp, _window, cx| this.adjust_volume(1, cx)))
+            .on_action(cx.listener(|this, _: &VolumeDown, _window, cx| this.adjust_volume(-1, cx)))
+            .on_action(cx.listener(|this, _: &VolumeUpBig, _window, cx| this.adjust_volume(5, cx)))
+            .on_action(
+                cx.listener(|this, _: &VolumeDownBig, _window, cx| this.adjust_volume(-5, cx)),
+            )
+            .on_action(cx.listener(|this, _: &JumpToCurrent, _window, cx| this.jump_to_current(cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenCommand, window, cx| this.open_command("", window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &CommandSearch, window, cx| {
+                this.open_command("search ", window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &NewPlaylistPrompt, window, cx| {
+                if this.state.ui.active_view == ActiveView::Library {
+                    this.open_command("newplaylist ", window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &RenamePrompt, window, cx| {
+                this.rename_prompt(window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &AddToQueue, _window, cx| this.add_to_queue(cx)))
+            .on_action(cx.listener(|this, _: &TogglePin, _window, cx| this.toggle_pin(cx)))
+            .on_action(cx.listener(|this, _: &CycleTab, _window, cx| this.cycle_tab(cx)))
+            .on_action(cx.listener(|this, _: &Refresh, _window, cx| this.refresh_view(cx)))
+            .on_action(cx.listener(|this, _: &OpenFilter, window, cx| this.open_filter(window, cx)))
+            .on_action(cx.listener(|this, _: &NextMatch, _window, cx| this.next_match(true, cx)))
+            .on_action(cx.listener(|this, _: &PrevMatch, _window, cx| this.next_match(false, cx)))
+            .on_action(cx.listener(|this, _: &ToggleInlineLyrics, _window, cx| {
+                this.toggle_inline_lyrics(cx)
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -886,6 +1369,8 @@ impl Render for EchoApp {
                     .child(views::sidebar(self, cx))
                     .child(views::main_area(self, window, cx)),
             )
+            .when_some(status_line, |el, line| el.child(line))
+            .when_some(command_bar, |el, bar| el.child(bar))
             .child(self.render_playback_bar(cx))
             .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
@@ -923,23 +1408,59 @@ fn main() {
             KeyBinding::new("home", SelectFirst, LIST_KEYS),
             KeyBinding::new("end", SelectLast, LIST_KEYS),
             KeyBinding::new("enter", Activate, LIST_KEYS),
+            // `z` is the TUI's Enter alias.
+            KeyBinding::new("z", Activate, LIST_KEYS),
             KeyBinding::new("left", FocusLibrary, LIST_KEYS),
-            KeyBinding::new("h", FocusLibrary, LIST_KEYS),
             KeyBinding::new("right", FocusTracks, LIST_KEYS),
             KeyBinding::new("l", FocusTracks, LIST_KEYS),
-            // Transport, roughly the TUI's default keymap.
+            // Vim motions, matching the TUI's navigation handler.
+            KeyBinding::new("g g", SelectFirst, LIST_KEYS),
+            KeyBinding::new("shift-g", SelectLast, LIST_KEYS),
+            KeyBinding::new("g c", JumpToCurrent, LIST_KEYS),
+            KeyBinding::new("ctrl-u", HalfPageUp, LIST_KEYS),
+            KeyBinding::new("ctrl-d", HalfPageDown, LIST_KEYS),
+            KeyBinding::new("ctrl-b", PageUp, LIST_KEYS),
+            KeyBinding::new("ctrl-f", PageDown, LIST_KEYS),
+            // `h` is "back" in the TUI, not "focus sidebar" — the left arrow keeps that role.
+            KeyBinding::new("h", Dismiss, LIST_KEYS),
+            KeyBinding::new("backspace", Dismiss, LIST_KEYS),
+            KeyBinding::new("escape", Dismiss, LIST_KEYS),
+            KeyBinding::new("tab", CycleTab, LIST_KEYS),
+            // Transport, the TUI's default keymap.
             KeyBinding::new("ctrl-right", NextTrack, LIST_KEYS),
             KeyBinding::new("ctrl-left", PreviousTrack, LIST_KEYS),
+            KeyBinding::new("]", NextTrack, LIST_KEYS),
+            KeyBinding::new("[", PreviousTrack, LIST_KEYS),
             KeyBinding::new("s", ToggleShuffle, LIST_KEYS),
             KeyBinding::new("r", CycleRepeat, LIST_KEYS),
-            KeyBinding::new("m", ToggleMute, LIST_KEYS),
+            KeyBinding::new("shift-m", ToggleMute, LIST_KEYS),
             KeyBinding::new("shift-right", SeekForward, LIST_KEYS),
             KeyBinding::new("shift-left", SeekBackward, LIST_KEYS),
+            KeyBinding::new(".", SeekForward, LIST_KEYS),
+            KeyBinding::new(",", SeekBackward, LIST_KEYS),
+            KeyBinding::new("0", SeekStart, LIST_KEYS),
+            KeyBinding::new("=", VolumeUp, LIST_KEYS),
+            KeyBinding::new("-", VolumeDown, LIST_KEYS),
+            KeyBinding::new("shift-=", VolumeUpBig, LIST_KEYS),
+            KeyBinding::new("shift--", VolumeDownBig, LIST_KEYS),
+            // Views, prompts and toggles.
+            KeyBinding::new("q", AddToQueue, LIST_KEYS),
             KeyBinding::new("shift-q", ToggleQueue, LIST_KEYS),
             KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
-            KeyBinding::new("escape", Dismiss, LIST_KEYS),
-            KeyBinding::new("/", FocusSearch, LIST_KEYS),
+            KeyBinding::new("shift-r", Refresh, LIST_KEYS),
+            KeyBinding::new("m", TogglePin, LIST_KEYS),
+            KeyBinding::new(":", OpenCommand, LIST_KEYS),
+            KeyBinding::new("f", CommandSearch, LIST_KEYS),
+            KeyBinding::new("c", NewPlaylistPrompt, LIST_KEYS),
+            KeyBinding::new("e", RenamePrompt, LIST_KEYS),
+            // `/` filters the loaded track list like the TUI; the global search box gets
+            // ctrl-k (and stays clickable).
+            KeyBinding::new("/", OpenFilter, LIST_KEYS),
+            KeyBinding::new("n", NextMatch, LIST_KEYS),
+            KeyBinding::new("shift-n", PrevMatch, LIST_KEYS),
+            KeyBinding::new("ctrl-k", FocusSearch, LIST_KEYS),
             KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
+            KeyBinding::new("ctrl-shift-l", ToggleInlineLyrics, LIST_KEYS),
             KeyBinding::new("t", ToggleThemes, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {

@@ -232,10 +232,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 .modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL)
             {
-                state.ui.condensed_lyrics_enabled = !state.ui.condensed_lyrics_enabled;
-                let mut app_config = echo_core::config::AppConfig::load();
-                app_config.library.condensed_lyrics_enabled = state.ui.condensed_lyrics_enabled;
-                let _ = app_config.save();
+                echo_core::intent::toggle_condensed_lyrics(state);
             } else {
                 state.ui.lyrics_modal_open = !state.ui.lyrics_modal_open;
             }
@@ -288,29 +285,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.ui.status_message = None;
         }
         KeyCode::Char('n') if !state.ui.search_matches.is_empty() => {
-            if let Some(&next_idx) = state
-                .ui
-                .search_matches
-                .iter()
-                .find(|&&i| i > state.ui.selected_track_index)
-            {
-                state.ui.selected_track_index = next_idx;
-            } else {
-                state.ui.selected_track_index = state.ui.search_matches[0];
-            }
+            echo_core::intent::next_search_match(state, true);
         }
         KeyCode::Char('N') if !state.ui.search_matches.is_empty() => {
-            if let Some(&prev_idx) = state
-                .ui
-                .search_matches
-                .iter()
-                .rev()
-                .find(|&&i| i < state.ui.selected_track_index)
-            {
-                state.ui.selected_track_index = prev_idx;
-            } else {
-                state.ui.selected_track_index = *state.ui.search_matches.last().unwrap();
-            }
+            echo_core::intent::next_search_match(state, false);
         }
         KeyCode::Char('d') | KeyCode::Char('x') if state.ui.active_view == ActiveView::Library => {
             if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
@@ -516,25 +494,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.compute_library_view();
         }
         KeyCode::Char('m') if state.ui.active_view == ActiveView::Library => {
-            if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
-                return None;
-            }
-            if state.ui.selected_playlist_index < state.data.library_view.len()
-                && let echo_core::models::LibraryNode::Playlist { playlist, .. } =
-                    &state.data.library_view[state.ui.selected_playlist_index]
-            {
-                let id = &playlist.id;
-                if id == "LIKED_SONGS" || id == "local-library" {
-                    return None;
-                }
-                if state.ui.library_config.pinned.contains(id) {
-                    state.ui.library_config.pinned.retain(|p| p != id);
-                } else {
-                    state.ui.library_config.pinned.push(id.clone());
-                }
-                state.save_library_config();
-                state.compute_library_view();
-            }
+            echo_core::intent::toggle_pin_selected(state);
         }
         KeyCode::Char('h') | KeyCode::Esc | KeyCode::Backspace => {
             if state.pop_view_history() {
@@ -573,29 +533,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('q') => {
-            let track_id = if state.ui.active_view == ActiveView::TrackList {
-                state
-                    .data
-                    .tracks
-                    .get(state.ui.selected_track_index)
-                    .map(|t| t.id.clone())
-            } else if state.ui.active_view == ActiveView::SearchResults {
-                if state.ui.active_search_tab == echo_core::app::SearchTab::Tracks {
-                    state
-                        .data
-                        .search_results
-                        .tracks
-                        .get(state.ui.selected_search_index)
-                        .map(|t| t.id.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            if let Some(id) = track_id {
-                return Some(AppEvent::AddToQueue(vec![id]));
-            }
+            return echo_core::intent::queue_selected_track(state);
         }
         KeyCode::Char('Q') => {
             return Some(echo_core::intent::open_queue(state));
@@ -682,25 +620,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             });
         }
         KeyCode::Char('R') => {
-            if state.ui.active_view == ActiveView::ArtistPage
-                && let Some(data) = state.data.artist_page_data.as_ref()
-            {
-                if state.data.artist_albums_loading {
-                    state.ui.status_message =
-                        Some("Artist albums refresh already in progress.".to_string());
-                    state.ui.status_message_expiry =
-                        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                    return None;
-                }
-                state.data.artist_albums_loading = true;
-                state.ui.status_message = Some("Refreshing artist albums...".to_string());
-                return Some(AppEvent::RefreshArtistAlbums {
-                    artist_id: data.artist_id.clone(),
-                });
-            } else if state.ui.active_view == ActiveView::Library {
-                state.ui.status_message = Some("Refreshing library...".to_string());
-                return Some(AppEvent::RefreshLibraryLists);
-            }
+            return echo_core::intent::refresh_view(state);
         }
         KeyCode::Char('r') => {
             let next_mode = match state.playback.repeat_mode.as_str() {
@@ -712,28 +632,16 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(AppEvent::SetRepeatMode(next_mode.to_string()));
         }
         KeyCode::Char('=') => {
-            let next_vol = (state.playback.volume + 1).min(100);
-            state.playback.volume = next_vol;
-            state.save_volume();
-            return Some(AppEvent::SetVolume(next_vol as u8));
+            return Some(echo_core::intent::adjust_volume(state, 1));
         }
         KeyCode::Char('-') => {
-            let next_vol = state.playback.volume.saturating_sub(1);
-            state.playback.volume = next_vol;
-            state.save_volume();
-            return Some(AppEvent::SetVolume(next_vol as u8));
+            return Some(echo_core::intent::adjust_volume(state, -1));
         }
         KeyCode::Char('+') => {
-            let next_vol = (state.playback.volume + 5).min(100);
-            state.playback.volume = next_vol;
-            state.save_volume();
-            return Some(AppEvent::SetVolume(next_vol as u8));
+            return Some(echo_core::intent::adjust_volume(state, 5));
         }
         KeyCode::Char('_') => {
-            let next_vol = state.playback.volume.saturating_sub(5);
-            state.playback.volume = next_vol;
-            state.save_volume();
-            return Some(AppEvent::SetVolume(next_vol as u8));
+            return Some(echo_core::intent::adjust_volume(state, -5));
         }
         KeyCode::Tab => {
             if state.ui.active_view == ActiveView::Library {

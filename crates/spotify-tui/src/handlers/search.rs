@@ -1,4 +1,4 @@
-use echo_core::app::{ActiveView, AppMode, AppState};
+use echo_core::app::{AppMode, AppState};
 use echo_core::events::AppEvent;
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -11,11 +11,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Backspace => {
             state.ui.search_query.pop();
-            update_search_matches(state);
+            echo_core::intent::update_search_matches(state);
         }
         KeyCode::Char(c) => {
             state.ui.search_query.push(c);
-            update_search_matches(state);
+            echo_core::intent::update_search_matches(state);
         }
         KeyCode::Enter => {
             state.ui.mode = AppMode::Normal;
@@ -26,29 +26,4 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         _ => {}
     }
     None
-}
-
-fn update_search_matches(state: &mut AppState) {
-    state.ui.search_matches.clear();
-    if state.ui.search_query.is_empty() {
-        return;
-    }
-
-    let query = state.ui.search_query.to_lowercase();
-
-    // We only search tracks if we are in TrackList view
-    if state.ui.active_view == ActiveView::TrackList {
-        for (i, track) in state.data.tracks.iter().enumerate() {
-            if track.name.to_lowercase().contains(&query)
-                || track.artist.to_lowercase().contains(&query)
-            {
-                state.ui.search_matches.push(i);
-            }
-        }
-
-        // Implement incsearch logic: jump cursor to the first match immediately
-        if !state.ui.search_matches.is_empty() {
-            state.ui.selected_track_index = state.ui.search_matches[0];
-        }
-    }
 }

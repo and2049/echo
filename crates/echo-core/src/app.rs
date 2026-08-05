@@ -333,7 +333,7 @@ pub enum SearchTab {
     Artists,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum AppMode {
     Setup,
     Authenticating,

@@ -520,7 +520,7 @@ fn search_bar(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Search — press /")
+                    .child("Search — ctrl-k")
                     .into_any_element()
             } else {
                 div()

@@ -9,6 +9,7 @@ pub mod app;
 pub mod apply_worker_event;
 pub mod artwork;
 pub mod bootstrap;
+pub mod commands;
 pub mod config;
 pub mod events;
 pub mod i18n;
