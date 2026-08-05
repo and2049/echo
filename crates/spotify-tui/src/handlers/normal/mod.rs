@@ -662,15 +662,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('Q') => {
-            state.push_view_history();
-            state.ui.active_view = ActiveView::Queue;
-            state.ui.selected_queue_index = 0;
-            return Some(AppEvent::FetchQueue);
+            return Some(echo_core::intent::open_queue(state));
         }
         KeyCode::Char('D') => {
-            state.ui.device_modal_open = true;
-            state.ui.selected_device_index = 0;
-            return Some(AppEvent::FetchDevices);
+            return Some(echo_core::intent::open_device_picker(state));
         }
         KeyCode::Char(' ') => {
             state.playback.is_playing = !state.playback.is_playing;

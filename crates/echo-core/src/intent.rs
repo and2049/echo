@@ -179,6 +179,30 @@ pub fn toggle_mute(state: &mut AppState) -> AppEvent {
     AppEvent::SetVolume(volume as u8)
 }
 
+/// Switches to the queue view and asks the worker for the live queue.
+pub fn open_queue(state: &mut AppState) -> AppEvent {
+    state.push_view_history();
+    state.ui.active_view = crate::app::ActiveView::Queue;
+    state.ui.selected_queue_index = 0;
+    AppEvent::FetchQueue
+}
+
+/// Opens the device-picker modal and asks the worker for the device list.
+pub fn open_device_picker(state: &mut AppState) -> AppEvent {
+    state.ui.device_modal_open = true;
+    state.ui.selected_device_index = 0;
+    AppEvent::FetchDevices
+}
+
+/// Transfers playback to device `index` and closes the picker. `None` if the row doesn't exist
+/// or the device has no id (restricted devices come back id-less from the API).
+pub fn transfer_to_device(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    let device = state.data.devices.get(index)?;
+    state.ui.device_modal_open = false;
+    let id = device.id.clone();
+    (!id.is_empty()).then(|| AppEvent::TransferPlayback(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -47,7 +47,10 @@ actions!(
         CycleRepeat,
         ToggleMute,
         SeekForward,
-        SeekBackward
+        SeekBackward,
+        ToggleQueue,
+        OpenDevices,
+        Dismiss
     ]
 );
 
@@ -61,6 +64,7 @@ pub(crate) struct EchoApp {
     pub(crate) images: images::ImageCache,
     pub(crate) library_scroll: UniformListScrollHandle,
     pub(crate) tracks_scroll: UniformListScrollHandle,
+    pub(crate) queue_scroll: UniformListScrollHandle,
     /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
     /// position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -126,16 +130,22 @@ impl EchoApp {
             images: images::ImageCache::default(),
             library_scroll: UniformListScrollHandle::new(),
             tracks_scroll: UniformListScrollHandle::new(),
+            queue_scroll: UniformListScrollHandle::new(),
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             focus_handle,
         }
     }
 
-    /// Rows in whichever list `active_view` gives keyboard focus.
+    /// Rows in whatever currently has keyboard focus: the device modal when open, else the
+    /// `active_view` list — the same routing the TUI's navigation handler does.
     fn list_len(&self) -> usize {
+        if self.state.ui.device_modal_open {
+            return self.state.data.devices.len();
+        }
         match self.state.ui.active_view {
             ActiveView::TrackList => self.state.data.tracks.len(),
+            ActiveView::Queue => self.state.data.queue.len(),
             _ => match self.state.ui.active_library_tab {
                 LibraryTab::Albums => self.state.data.saved_albums.len(),
                 _ => self.state.data.library_view.len(),
@@ -144,12 +154,23 @@ impl EchoApp {
     }
 
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.state.ui.active_view == ActiveView::TrackList {
-            self.state.ui.selected_track_index = index;
-            self.tracks_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+        if self.state.ui.device_modal_open {
+            self.state.ui.selected_device_index = index;
         } else {
-            self.state.ui.selected_playlist_index = index;
-            self.library_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+            match self.state.ui.active_view {
+                ActiveView::TrackList => {
+                    self.state.ui.selected_track_index = index;
+                    self.tracks_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+                ActiveView::Queue => {
+                    self.state.ui.selected_queue_index = index;
+                    self.queue_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+                _ => {
+                    self.state.ui.selected_playlist_index = index;
+                    self.library_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                }
+            }
         }
         cx.notify();
     }
@@ -159,10 +180,14 @@ impl EchoApp {
         if len == 0 {
             return;
         }
-        let current = if self.state.ui.active_view == ActiveView::TrackList {
-            self.state.ui.selected_track_index
+        let current = if self.state.ui.device_modal_open {
+            self.state.ui.selected_device_index
         } else {
-            self.state.ui.selected_playlist_index
+            match self.state.ui.active_view {
+                ActiveView::TrackList => self.state.ui.selected_track_index,
+                ActiveView::Queue => self.state.ui.selected_queue_index,
+                _ => self.state.ui.selected_playlist_index,
+            }
         };
         self.set_selection(current.saturating_add_signed(delta).min(len - 1), cx);
     }
@@ -176,18 +201,57 @@ impl EchoApp {
 
     /// Enter on the focused list — the same intents the row click handlers use.
     fn activate_selection(&mut self, cx: &mut Context<Self>) {
-        let event = if self.state.ui.active_view == ActiveView::TrackList {
-            let index = self.state.ui.selected_track_index;
-            echo_core::intent::play_track_at(&mut self.state, index)
+        let event = if self.state.ui.device_modal_open {
+            let index = self.state.ui.selected_device_index;
+            echo_core::intent::transfer_to_device(&mut self.state, index)
         } else {
-            let index = self.state.ui.selected_playlist_index;
-            match self.state.ui.active_library_tab {
-                LibraryTab::Albums => echo_core::intent::open_album(&mut self.state, index),
-                _ => echo_core::intent::open_library_entry(&mut self.state, index),
+            match self.state.ui.active_view {
+                ActiveView::TrackList => {
+                    let index = self.state.ui.selected_track_index;
+                    echo_core::intent::play_track_at(&mut self.state, index)
+                }
+                // The queue is browse-only: the API can't jump to a queue position.
+                ActiveView::Queue => None,
+                _ => {
+                    let index = self.state.ui.selected_playlist_index;
+                    match self.state.ui.active_library_tab {
+                        LibraryTab::Albums => {
+                            echo_core::intent::open_album(&mut self.state, index)
+                        }
+                        _ => echo_core::intent::open_library_entry(&mut self.state, index),
+                    }
+                }
             }
         };
         if let Some(event) = event {
             self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.active_view == ActiveView::Queue {
+            // Mirrors the TUI's `q` from the queue view.
+            self.state.ui.active_view = ActiveView::Library;
+        } else {
+            let event = echo_core::intent::open_queue(&mut self.state);
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn open_devices(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::open_device_picker(&mut self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    /// Escape: close whatever is topmost.
+    fn dismiss(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.device_modal_open {
+            self.state.ui.device_modal_open = false;
+        } else if self.state.ui.active_view == ActiveView::Queue {
+            self.state.ui.active_view = ActiveView::Library;
         }
         cx.notify();
     }
@@ -318,6 +382,11 @@ impl EchoApp {
         };
         let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
         let mute_glyph = if playback.volume == 0 { "🔇" } else { "🔊" };
+        let queue_color = if self.state.ui.active_view == ActiveView::Queue {
+            accent
+        } else {
+            muted
+        };
 
         // The pixelate transfer trick from the TUI: keep showing the previous cover while the
         // current one refetches.
@@ -444,6 +513,12 @@ impl EchoApp {
                     .text_xs()
                     .child(time_label),
             )
+            .child(icon_button("queue", "☰", queue_color, cx, |this, cx| {
+                this.toggle_queue(cx)
+            }))
+            .child(icon_button("devices", "🖥", muted, cx, |this, cx| {
+                this.open_devices(cx)
+            }))
             .child(icon_button("mute", mute_glyph, muted, cx, |this, cx| {
                 this.toggle_mute(cx)
             }))
@@ -517,6 +592,13 @@ impl Render for EchoApp {
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
 
+        // Built ahead of the chain because it borrows self mutably, like the other views.
+        let device_modal = self
+            .state
+            .ui
+            .device_modal_open
+            .then(|| views::device_modal(self, cx).into_any_element());
+
         div()
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
@@ -546,6 +628,10 @@ impl Render for EchoApp {
             .on_action(
                 cx.listener(|this, _: &SeekBackward, _window, cx| this.seek_relative(-5, cx)),
             )
+            .on_action(cx.listener(|this, _: &ToggleQueue, _window, cx| this.toggle_queue(cx)))
+            .on_action(cx.listener(|this, _: &OpenDevices, _window, cx| this.open_devices(cx)))
+            .on_action(cx.listener(|this, _: &Dismiss, _window, cx| this.dismiss(cx)))
+            .relative()
             .flex()
             .flex_col()
             .size_full()
@@ -560,6 +646,7 @@ impl Render for EchoApp {
                     .child(views::main_area(self, cx)),
             )
             .child(self.render_playback_bar(cx))
+            .when_some(device_modal, |el, modal| el.child(modal))
     }
 }
 
@@ -604,6 +691,9 @@ fn main() {
             KeyBinding::new("m", ToggleMute, None),
             KeyBinding::new("shift-right", SeekForward, None),
             KeyBinding::new("shift-left", SeekBackward, None),
+            KeyBinding::new("shift-q", ToggleQueue, None),
+            KeyBinding::new("shift-d", OpenDevices, None),
+            KeyBinding::new("escape", Dismiss, None),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
