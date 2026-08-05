@@ -1,0 +1,18 @@
+[package]
+name = "spotify-tui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "spotify"
+path = "src/main.rs"
+
+[dependencies]
+echo-core = { workspace = true }
+
+anyhow = { workspace = true }
+crossterm = { workspace = true }
+ratatui = { workspace = true }
+tokio = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
