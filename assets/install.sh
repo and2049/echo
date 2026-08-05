@@ -129,7 +129,14 @@ download_latest_appimage() {
     _api_url="https://api.github.com/repos/${REPO}/releases/latest"
     download "$_api_url" "$_api_json" || { rm -f "$_api_json"; err "Failed to query GitHub releases API."; }
 
-    _appimage_url=$(grep "browser_download_url.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
+    # Releases carry two AppImages: the Echo desktop app (echo-desktop_*) and the TUI
+    # (spotify_* — AppImages are named after their main binary). This script installs the
+    # TUI one, which becomes the on-PATH `spotify` command; the fallback covers older
+    # single-asset releases.
+    _appimage_url=$(grep "browser_download_url.*spotify.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
+    if [ -z "$_appimage_url" ]; then
+        _appimage_url=$(grep "browser_download_url.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
+    fi
     rm -f "$_api_json"
 
     if [ -z "$_appimage_url" ]; then
@@ -179,7 +186,9 @@ install() {
     if [ $# -ge 1 ]; then
         SRC=$1
     elif [ "$IS_LOCAL" -eq 1 ]; then
-        if ls "$REPO_ROOT"/*.AppImage >/dev/null 2>&1; then
+        if ls "$REPO_ROOT"/spotify*.AppImage >/dev/null 2>&1; then
+            SRC=$(ls "$REPO_ROOT"/spotify*.AppImage | head -n1)
+        elif ls "$REPO_ROOT"/*.AppImage >/dev/null 2>&1; then
             SRC=$(ls "$REPO_ROOT"/*.AppImage | head -n1)
         elif [ -f "$REPO_ROOT/$BINARY_NAME" ]; then
             SRC="$REPO_ROOT/$BINARY_NAME"

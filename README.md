@@ -35,10 +35,18 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 
 ### Installation
 
-Download and run installer:
-https://github.com/and2049/echo/releases
+Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **Echo** package installs the desktop app *and* the `spotify` terminal command:
 
-### AppImage Setup (Linux)
+- **Windows** (`echo-desktop_*.msi`): installs the desktop app and adds the install directory to `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again.
+- **macOS** (`Echo_*.dmg`): drag `Echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
+
+  ```bash
+  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  ```
+
+- **Linux** (`.deb`): installs the desktop app plus `/usr/bin/spotify`. Prefer just the TUI? Use the TUI AppImage below (`spotify_*.AppImage`) instead — don't install both, they'd both own `spotify`.
+
+### TUI AppImage Setup (Linux)
 
 On Ubuntu 22.04+ the AppImage runtime requires `libfuse2`:
 

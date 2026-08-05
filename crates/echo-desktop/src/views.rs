@@ -18,7 +18,7 @@ use gpui::{
     px, relative, svg, uniform_list,
 };
 
-use crate::theme::{ToGpui, WINDOW_BG, WINDOW_FG};
+use crate::theme::{ToGpui, WINDOW_FG};
 use crate::{EchoApp, MenuAction, format_time};
 
 const SIDEBAR_WIDTH: f32 = 260.0;
