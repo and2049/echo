@@ -453,6 +453,184 @@ pub fn open_recently_played(state: &mut AppState) -> Option<AppEvent> {
     None
 }
 
+// Vim-style motions and toggles shared by both frontends.
+
+/// `g c`: jump the selection (or the whole view) to whatever is currently playing.
+pub fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
+    let Some(track_id) = state.playback.playing_track_id.clone() else {
+        state.ui.status_message = Some("Nothing is currently playing".to_string());
+        return None;
+    };
+    if state.ui.active_view == ActiveView::TrackList
+        && let Some(index) = state.data.tracks.iter().position(|track| track.id == track_id)
+    {
+        state.ui.selected_track_index = index;
+        return None;
+    }
+    if state.playback.playing_track_source == Some(TrackSource::Local) {
+        state.show_local_library();
+        state.ui.selected_track_index = state
+            .data
+            .tracks
+            .iter()
+            .position(|track| track.id == track_id)
+            .unwrap_or(0);
+        return None;
+    }
+    if let Some(album_id) = state.playback.playing_track_album_id.clone() {
+        let context = TrackListContext::album(
+            album_id,
+            "Current album".to_string(),
+            state.playback.playing_track_artist.clone(),
+            None,
+        );
+        state.begin_tracklist_load(context.clone());
+        return Some(AppEvent::LoadContextTracks(context));
+    }
+    state.ui.status_message = Some("The current playback context is unavailable".to_string());
+    None
+}
+
+/// `q`: append the selected track (track list or search tracks tab) to the playback queue.
+pub fn queue_selected_track(state: &AppState) -> Option<AppEvent> {
+    let track_id = match state.ui.active_view {
+        ActiveView::TrackList => state
+            .data
+            .tracks
+            .get(state.ui.selected_track_index)
+            .map(|t| t.id.clone()),
+        ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => state
+            .data
+            .search_results
+            .tracks
+            .get(state.ui.selected_search_index)
+            .map(|t| t.id.clone()),
+        _ => None,
+    };
+    track_id.map(|id| AppEvent::AddToQueue(vec![id]))
+}
+
+/// `m`: pin or unpin the selected sidebar playlist.
+pub fn toggle_pin_selected(state: &mut AppState) {
+    if state.ui.active_view != ActiveView::Library
+        || state.ui.active_library_tab == crate::app::LibraryTab::Albums
+    {
+        return;
+    }
+    if state.ui.selected_playlist_index < state.data.library_view.len()
+        && let LibraryNode::Playlist { playlist, .. } =
+            &state.data.library_view[state.ui.selected_playlist_index]
+    {
+        let id = &playlist.id;
+        if id == "LIKED_SONGS" || id == "local-library" {
+            return;
+        }
+        if state.ui.library_config.pinned.contains(id) {
+            state.ui.library_config.pinned.retain(|p| p != id);
+        } else {
+            state.ui.library_config.pinned.push(id.clone());
+        }
+        state.save_library_config();
+        state.compute_library_view();
+    }
+}
+
+/// `=`/`-`/`+`/`_`: step the volume by `delta`, clamped to 0–100.
+pub fn adjust_volume(state: &mut AppState, delta: i32) -> AppEvent {
+    let next = (state.playback.volume as i32 + delta).clamp(0, 100) as u8;
+    set_volume(state, next)
+}
+
+/// Ctrl-L: toggle the inline lyric line in the playback bar, persisted like the TUI does.
+pub fn toggle_condensed_lyrics(state: &mut AppState) {
+    state.ui.condensed_lyrics_enabled = !state.ui.condensed_lyrics_enabled;
+    let mut app_config = crate::config::AppConfig::load();
+    app_config.library.condensed_lyrics_enabled = state.ui.condensed_lyrics_enabled;
+    let _ = app_config.save();
+}
+
+/// `R`: refresh whatever the active view shows (artist albums or the library lists).
+pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
+    if state.ui.active_view == ActiveView::ArtistPage
+        && let Some(data) = state.data.artist_page_data.as_ref()
+    {
+        if state.data.artist_albums_loading {
+            state.ui.status_message =
+                Some("Artist albums refresh already in progress.".to_string());
+            state.ui.status_message_expiry =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            return None;
+        }
+        state.data.artist_albums_loading = true;
+        state.ui.status_message = Some("Refreshing artist albums...".to_string());
+        return Some(AppEvent::RefreshArtistAlbums {
+            artist_id: data.artist_id.clone(),
+        });
+    }
+    if state.ui.active_view == ActiveView::Library {
+        state.ui.status_message = Some("Refreshing library...".to_string());
+        return Some(AppEvent::RefreshLibraryLists);
+    }
+    None
+}
+
+// The `/` filter: an incsearch over the loaded track list, navigated with n/N.
+
+/// Recomputes `search_matches` for the current filter query and jumps to the first hit.
+pub fn update_search_matches(state: &mut AppState) {
+    state.ui.search_matches.clear();
+    if state.ui.search_query.is_empty() {
+        return;
+    }
+
+    let query = state.ui.search_query.to_lowercase();
+
+    // Only the track list is filterable.
+    if state.ui.active_view == ActiveView::TrackList {
+        for (i, track) in state.data.tracks.iter().enumerate() {
+            if track.name.to_lowercase().contains(&query)
+                || track.artist.to_lowercase().contains(&query)
+            {
+                state.ui.search_matches.push(i);
+            }
+        }
+
+        // incsearch: jump to the first match immediately.
+        if !state.ui.search_matches.is_empty() {
+            state.ui.selected_track_index = state.ui.search_matches[0];
+        }
+    }
+}
+
+/// `n`/`N`: cycle the selection through the filter matches, wrapping at either end.
+pub fn next_search_match(state: &mut AppState, forward: bool) {
+    if state.ui.search_matches.is_empty() {
+        return;
+    }
+    if forward {
+        if let Some(&next_idx) = state
+            .ui
+            .search_matches
+            .iter()
+            .find(|&&i| i > state.ui.selected_track_index)
+        {
+            state.ui.selected_track_index = next_idx;
+        } else {
+            state.ui.selected_track_index = state.ui.search_matches[0];
+        }
+    } else if let Some(&prev_idx) = state
+        .ui
+        .search_matches
+        .iter()
+        .rev()
+        .find(|&&i| i < state.ui.selected_track_index)
+    {
+        state.ui.selected_track_index = prev_idx;
+    } else {
+        state.ui.selected_track_index = *state.ui.search_matches.last().unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

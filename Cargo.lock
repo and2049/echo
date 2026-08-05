@@ -1841,6 +1841,7 @@ dependencies = [
  "gpui_platform",
  "image",
  "tokio",
+ "webbrowser",
 ]
 
 [[package]]

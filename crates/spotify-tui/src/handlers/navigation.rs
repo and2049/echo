@@ -95,7 +95,7 @@ pub fn command_for_key(state: &mut AppState, key: &KeyEvent) -> NavigationKey {
 
 pub fn execute(state: &mut AppState, command: NavigationCommand) -> Option<AppEvent> {
     if command == NavigationCommand::CurrentContext {
-        return jump_to_current_context(state);
+        return echo_core::intent::jump_to_current_context(state);
     }
     let len = selected_list_len(state);
     if len == 0 {
@@ -116,41 +116,6 @@ pub fn execute(state: &mut AppState, command: NavigationCommand) -> Option<AppEv
         browse::select_node_from_library_index(state);
         return browse::load_event_if_needed(state);
     }
-    None
-}
-
-fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
-    let Some(track_id) = state.playback.playing_track_id.clone() else {
-        state.ui.status_message = Some("Nothing is currently playing".to_string());
-        return None;
-    };
-    if state.ui.active_view == ActiveView::TrackList
-        && let Some(index) = state.data.tracks.iter().position(|track| track.id == track_id)
-    {
-        state.ui.selected_track_index = index;
-        return None;
-    }
-    if state.playback.playing_track_source == Some(echo_core::models::TrackSource::Local) {
-        state.show_local_library();
-        state.ui.selected_track_index = state
-            .data
-            .tracks
-            .iter()
-            .position(|track| track.id == track_id)
-            .unwrap_or(0);
-        return None;
-    }
-    if let Some(album_id) = state.playback.playing_track_album_id.clone() {
-        let context = echo_core::models::TrackListContext::album(
-            album_id,
-            "Current album".to_string(),
-            state.playback.playing_track_artist.clone(),
-            None,
-        );
-        state.begin_tracklist_load(context.clone());
-        return Some(AppEvent::LoadContextTracks(context));
-    }
-    state.ui.status_message = Some("The current playback context is unavailable".to_string());
     None
 }
 
