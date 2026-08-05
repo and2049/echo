@@ -7,11 +7,9 @@ use std::panic;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-use echo_core::{app, apply_worker_event, config, i18n, image_tasks, thumbnails};
+use echo_core::{apply_worker_event, i18n, image_tasks, thumbnails};
 
-use echo_core::app::AppState;
-use echo_core::events::{AppEvent, WorkerEvent};
-use echo_core::worker::Worker;
+use echo_core::events::AppEvent;
 use tui::Tui;
 use tui::theme::ToRatatui;
 
@@ -35,50 +33,13 @@ async fn main() -> Result<()> {
         original_hook(panic_info);
     }));
 
-    let (app_tx, worker_rx) = mpsc::channel::<AppEvent>(32);
-    let (worker_tx, mut app_rx) = mpsc::channel::<WorkerEvent>(32);
-    let worker_tx_clone = worker_tx.clone();
-
-    let worker = Worker::new(worker_rx, worker_tx, app_tx.clone());
-    tokio::spawn(async move {
-        worker.run().await;
-    });
-
-    let config = config::AppConfig::load();
-    let mut state = AppState::new();
-    let cache = config::AppConfig::load_cache();
-    state.data.liked_tracks = cache.liked_tracks.clone();
-    if let Some(playlists) = cache.get_playlists() {
-        state.data.playlists = playlists;
-        state.compute_library_view();
-    }
-    if let Some(albums) = cache.get_saved_albums() {
-        state.data.saved_albums = albums;
-    }
-    if let Some(tracks) = cache.get_top_tracks() {
-        state.data.top_tracks = tracks;
-    }
-    if let Some(tracks) = cache.get_recently_played() {
-        state.data.recently_played = tracks;
-    }
-    if let Some(artists) = cache.get_followed_artists() {
-        state.data.followed_artists = artists;
-    }
-    state.ui.library_config = config.library.clone();
-
-    if config.spotify_credentials.is_some() {
-        state.ui.mode = app::AppMode::Authenticating;
-        let _ = app_tx.send(AppEvent::StartAuth).await;
-    } else if config.library.local_music_dir.is_some() {
-        state.ui.mode = app::AppMode::Normal;
-    } else {
-        state.ui.mode = app::AppMode::Setup;
-    }
-    if let Some(path) = startup_local_auto_refresh_path(&config) {
-        let _ = app_tx
-            .send(AppEvent::StartLocalLibraryAutoRefresh(path))
-            .await;
-    }
+    let echo_core::bootstrap::Bootstrap {
+        mut state,
+        config: _config,
+        app_tx,
+        mut app_rx,
+        worker_tx: worker_tx_clone,
+    } = echo_core::bootstrap::init();
 
     let mut tui = Tui::new()?;
     tui.enter()?;
@@ -110,7 +71,7 @@ async fn main() -> Result<()> {
             let outgoing_event = handlers::handle_event(&mut state, &key);
 
             if !state.ui.is_running {
-                let _ = app_tx.send(AppEvent::Quit).await;
+                let _ = app_tx.send(AppEvent::Quit);
             } else if let Some(ev) = outgoing_event {
                 if let AppEvent::LoadContextTracks(ref context) = ev {
                     if let Some(url) = context.image_url.as_ref() {
@@ -121,7 +82,7 @@ async fn main() -> Result<()> {
                             state.ui.library_config.cover_img_pixels,
                         );
                     }
-                    let _ = app_tx.send(ev).await;
+                    let _ = app_tx.send(ev);
                 } else if let AppEvent::ReloadHeaderImage = ev {
                     if let Some(url) = &state.data.tracklist_image_url {
                         image_tasks::spawn_header_for_url(
@@ -131,7 +92,7 @@ async fn main() -> Result<()> {
                         );
                     }
                 } else {
-                    let _ = app_tx.send(ev).await;
+                    let _ = app_tx.send(ev);
                 }
             }
         }
@@ -143,8 +104,7 @@ async fn main() -> Result<()> {
                 &mut state,
                 &app_tx,
                 &worker_tx_clone,
-            )
-            .await;
+            );
         }
 
         if needs_draw {
@@ -161,10 +121,6 @@ async fn main() -> Result<()> {
 
     tui.exit()?;
     Ok(())
-}
-
-fn startup_local_auto_refresh_path(config: &config::AppConfig) -> Option<std::path::PathBuf> {
-    config.library.local_music_dir.clone()
 }
 
 #[cfg(target_os = "linux")]
@@ -224,23 +180,3 @@ fn launch_in_terminal() -> ! {
     std::process::exit(1);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn configured_local_path_starts_auto_refresh_on_startup() {
-        let path = std::path::PathBuf::from("/music");
-        let mut config = config::AppConfig::default();
-        config.library.local_music_dir = Some(path.clone());
-
-        assert_eq!(startup_local_auto_refresh_path(&config), Some(path));
-    }
-
-    #[test]
-    fn missing_local_path_skips_auto_refresh_on_startup() {
-        let config = config::AppConfig::default();
-
-        assert_eq!(startup_local_auto_refresh_path(&config), None);
-    }
-}

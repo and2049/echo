@@ -7,7 +7,7 @@ use crate::{
     models::PlaybackItem,
 };
 
-pub fn handle_tick(state: &mut AppState, app_tx: &mpsc::Sender<AppEvent>) {
+pub fn handle_tick(state: &mut AppState, app_tx: &mpsc::UnboundedSender<AppEvent>) {
     if state.playback.is_playing {
         state.playback.progress_ms += 100;
         state.playback.playback_last_updated_at = Some(std::time::Instant::now());
@@ -15,14 +15,14 @@ pub fn handle_tick(state: &mut AppState, app_tx: &mpsc::Sender<AppEvent>) {
             && state.playback.progress_ms >= state.playback.duration_ms
         {
             state.playback.is_playing = false;
-            let _ = app_tx.try_send(AppEvent::ForcePlaybackSync);
+            let _ = app_tx.send(AppEvent::ForcePlaybackSync);
         }
     }
 }
 
-pub async fn handle_playback_started(
+pub fn handle_playback_started(
     state: &mut AppState,
-    app_tx: &mpsc::Sender<AppEvent>,
+    app_tx: &mpsc::UnboundedSender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
     item: PlaybackItem,
 ) {
@@ -49,8 +49,7 @@ pub async fn handle_playback_started(
                 item.title.clone(),
                 item.artist.clone(),
                 item.duration_ms,
-            ))
-            .await;
+            ));
     }
 
     if let Some(url) = item.image_url {
@@ -61,13 +60,13 @@ pub async fn handle_playback_started(
             state.ui.library_config.cover_img_pixels,
         );
     } else {
-        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
+        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id));
     }
 }
 
-pub async fn handle_sync_playback_state(
+pub fn handle_sync_playback_state(
     state: &mut AppState,
-    app_tx: &mpsc::Sender<AppEvent>,
+    app_tx: &mpsc::UnboundedSender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
     is_playing: bool,
     is_shuffled: bool,
@@ -85,7 +84,7 @@ pub async fn handle_sync_playback_state(
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if let Some(item) = item {
-        apply_synced_playback_item(item, state, app_tx, worker_tx).await;
+        apply_synced_playback_item(item, state, app_tx, worker_tx);
     }
 }
 
@@ -151,10 +150,10 @@ pub fn handle_audio_visualization_ready(
     state.playback.enable_visualizer = Some(flag);
 }
 
-async fn apply_synced_playback_item(
+fn apply_synced_playback_item(
     item: PlaybackItem,
     state: &mut AppState,
-    app_tx: &mpsc::Sender<AppEvent>,
+    app_tx: &mpsc::UnboundedSender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
 ) {
     let track_changed = state.playback.playing_track_id.as_deref() != Some(item.id.as_str());
@@ -181,8 +180,7 @@ async fn apply_synced_playback_item(
                     item.title.clone(),
                     item.artist.clone(),
                     item.duration_ms,
-                ))
-                .await;
+                ));
         }
     }
 
@@ -201,6 +199,6 @@ async fn apply_synced_playback_item(
             );
         }
     } else if track_changed || state.playback.playing_track_artist.is_empty() {
-        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
+        let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id));
     }
 }

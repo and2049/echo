@@ -15,12 +15,12 @@ pub fn handle_force_redraw(state: &mut AppState) {
     state.ui.needs_terminal_clear = true;
 }
 
-pub async fn handle_force_context_refresh(state: &AppState, app_tx: &mpsc::Sender<AppEvent>) {
+pub fn handle_force_context_refresh(state: &AppState, app_tx: &mpsc::UnboundedSender<AppEvent>) {
     if state.ui.active_view == app::ActiveView::TrackList
         && let Some(context) = state.data.active_tracklist_context.clone()
         && context.requires_worker_load()
     {
-        let _ = app_tx.send(AppEvent::RefreshContextTracks(context)).await;
+        let _ = app_tx.send(AppEvent::RefreshContextTracks(context));
     }
 }
 

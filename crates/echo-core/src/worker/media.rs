@@ -17,7 +17,7 @@ pub enum MediaUpdate {
     Playback(bool, u32),
 }
 
-pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sender<AppEvent>) {
+pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::UnboundedSender<AppEvent>) {
     std::thread::spawn(move || {
         #[cfg(not(target_os = "windows"))]
         let hwnd = None;
@@ -51,16 +51,16 @@ pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Sen
             let is_playing = playing_clone.load(std::sync::atomic::Ordering::Relaxed);
             match desired_playback_state(&e, is_playing) {
                 Some(playing) => {
-                    let _ = app_tx_clone.blocking_send(AppEvent::TogglePlayback(playing));
+                    let _ = app_tx_clone.send(AppEvent::TogglePlayback(playing));
                 }
                 None => match e {
                     MediaControlEvent::Next => {
-                        let _ = app_tx_clone.blocking_send(AppEvent::NextTrack {
+                        let _ = app_tx_clone.send(AppEvent::NextTrack {
                             current_track_id: None,
                         });
                     }
                     MediaControlEvent::Previous => {
-                        let _ = app_tx_clone.blocking_send(AppEvent::PreviousTrack {
+                        let _ = app_tx_clone.send(AppEvent::PreviousTrack {
                             current_track_id: None,
                         });
                     }
