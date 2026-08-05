@@ -11,6 +11,8 @@ path = "src/main.rs"
 echo-core = { workspace = true }
 
 anyhow = { workspace = true }
+# Same 0.25 line as gpui's internal image dep, so `image::Frame`s can cross into RenderImage.
+image = { workspace = true }
 tokio = { workspace = true }
 
 # Pinned to the same rev because gpui_platform is not yet published to crates.io and
