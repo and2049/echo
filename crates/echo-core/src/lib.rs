@@ -13,6 +13,7 @@ pub mod config;
 pub mod events;
 pub mod i18n;
 pub mod image_tasks;
+pub mod intent;
 pub mod models;
 pub mod platform;
 pub mod theme;

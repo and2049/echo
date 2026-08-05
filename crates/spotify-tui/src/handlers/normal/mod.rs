@@ -243,72 +243,15 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         }
         KeyCode::Enter | KeyCode::Char('z') => {
             if state.ui.active_view == ActiveView::Library {
-                let context = if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
-                    if state.ui.selected_playlist_index < state.data.saved_albums.len() {
-                        let album = &state.data.saved_albums[state.ui.selected_playlist_index];
-                        Some(TrackListContext::album(
-                            album.id.clone(),
-                            album.name.clone(),
-                            album.artists.clone(),
-                            album.image_url.clone(),
-                        ))
-                    } else {
-                        None
-                    }
+                let index = state.ui.selected_playlist_index;
+                if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
+                    return echo_core::intent::open_album(state, index);
                 } else if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
                     if let Some(event) = browse::enter_active_node(state) {
                         return Some(event);
                     }
-                    None
                 } else {
-                    if let Some(node) = state
-                        .data
-                        .library_view
-                        .get(state.ui.selected_playlist_index)
-                        .cloned()
-                    {
-                        match node {
-                            echo_core::models::LibraryNode::Playlist { playlist, .. } => {
-                                if playlist.id == "local-library" {
-                                    state.show_local_library();
-                                    None
-                                } else if playlist.id.starts_with("local-playlist:") {
-                                    state.show_local_playlist(&playlist.id, playlist.name.clone());
-                                    None
-                                } else {
-                                    Some(TrackListContext::playlist(
-                                        playlist.id.clone(),
-                                        playlist.name.clone(),
-                                        playlist.owner.clone(),
-                                        playlist.owner_id.clone(),
-                                        playlist.image_url.clone(),
-                                    ))
-                                }
-                            }
-                            echo_core::models::LibraryNode::Folder(f) => {
-                                let folder_name = f.name.clone();
-                                if let Some(folder) = state
-                                    .ui
-                                    .library_config
-                                    .folders
-                                    .iter_mut()
-                                    .find(|fd| fd.name == folder_name)
-                                {
-                                    folder.is_open = !folder.is_open;
-                                }
-                                state.save_library_config();
-                                state.compute_library_view();
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    }
-                };
-
-                if let Some(context) = context {
-                    state.begin_tracklist_load(context.clone());
-                    return Some(AppEvent::LoadContextTracks(context));
+                    return echo_core::intent::open_library_entry(state, index);
                 }
             } else if state.ui.active_view == ActiveView::TrackList {
                 return tracklist::play_selected(state);

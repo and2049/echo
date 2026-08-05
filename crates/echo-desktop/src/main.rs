@@ -9,6 +9,7 @@
 //! the UI, so worker tasks keep running on its threads while GPUI blocks in `run()`.
 
 mod theme;
+mod views;
 
 use std::time::Duration;
 
@@ -23,10 +24,10 @@ use theme::{ToGpui, WINDOW_BG, WINDOW_FG};
 
 actions!(echo, [Quit, TogglePlayback]);
 
-struct EchoApp {
-    state: echo_core::app::AppState,
-    app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
-    worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
+pub(crate) struct EchoApp {
+    pub(crate) state: echo_core::app::AppState,
+    pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+    pub(crate) worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
     focus_handle: FocusHandle,
 }
 
@@ -95,6 +96,22 @@ impl EchoApp {
         self.state.playback.is_playing = desired;
         let _ = self.app_tx.send(AppEvent::TogglePlayback(desired));
         cx.notify();
+    }
+
+    /// Sends an intent-produced event to the worker, with the same side channel the TUI's main
+    /// loop has: a LoadContextTracks with cover art also kicks off the header image fetch.
+    pub(crate) fn dispatch(&mut self, event: AppEvent) {
+        if let AppEvent::LoadContextTracks(ref context) = event
+            && let Some(url) = context.image_url.as_ref()
+        {
+            self.state.data.tracklist_image_url = Some(url.clone());
+            echo_core::image_tasks::spawn_header_for_url(
+                url,
+                self.worker_tx.clone(),
+                self.state.ui.library_config.cover_img_pixels,
+            );
+        }
+        let _ = self.app_tx.send(event);
     }
 
     fn render_playback_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -188,7 +205,6 @@ impl Render for EchoApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
-        let muted = theme.text_muted.gpui(WINDOW_FG());
 
         div()
             .track_focus(&self.focus_handle)
@@ -200,34 +216,19 @@ impl Render for EchoApp {
             .size_full()
             .bg(bg)
             .child(
-                // Placeholder body — the library and track list land here in the next phase.
                 div()
                     .flex_grow(1.0)
                     .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(muted)
-                    .child(status_line(&self.state)),
+                    .flex_row()
+                    .overflow_hidden()
+                    .child(views::sidebar(self, cx))
+                    .child(views::main_area(self, cx)),
             )
             .child(self.render_playback_bar(cx))
     }
 }
 
-/// A one-line summary of where the app is, until real views land.
-fn status_line(state: &echo_core::app::AppState) -> SharedString {
-    use echo_core::app::AppMode;
-    match state.ui.mode {
-        AppMode::Setup => "Set up Spotify credentials in the terminal app first: run `spotify`".into(),
-        AppMode::Authenticating => "Authenticating with Spotify…".into(),
-        _ => {
-            let playlists = state.data.playlists.len();
-            let albums = state.data.saved_albums.len();
-            format!("Library loaded: {playlists} playlists, {albums} albums").into()
-        }
-    }
-}
-
-fn format_time(ms: u32) -> String {
+pub(crate) fn format_time(ms: u32) -> String {
     let seconds = ms / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
