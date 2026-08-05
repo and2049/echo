@@ -14,9 +14,11 @@ use std::sync::Arc;
 
 /// The longest edge a cover is kept at.
 ///
-/// Covers are drawn into boxes at most 20 samples across, so anything larger is thrown away at
-/// draw time anyway; capping here bounds what the caches hold.
-pub const MAX_COVER_EDGE: u32 = 256;
+/// Spotify serves covers at 640px, and frontends with real pixel output (a terminal speaking
+/// kitty/sixel, or the desktop app) want all of it — capping lower is a visible resolution loss
+/// there. The half-block sampler throws away the excess at draw time either way, so the cap only
+/// bounds what the caches hold: a handful of covers at ~1.6 MB each.
+pub const MAX_COVER_EDGE: u32 = 640;
 
 /// The edge length a library thumbnail is kept at.
 ///
@@ -222,7 +224,7 @@ mod tests {
 
     #[test]
     fn an_oversized_cover_is_capped_to_the_max_edge() {
-        let art = Artwork::decode(&red_png(640), 0, MAX_COVER_EDGE).expect("decode");
+        let art = Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 0, MAX_COVER_EDGE).expect("decode");
         assert_eq!(art.width.max(art.height), MAX_COVER_EDGE);
         assert_eq!(art.pixels.len() as u32, art.width * art.height * 4);
     }
@@ -245,7 +247,7 @@ mod tests {
     fn pixelation_survives_the_downscale() {
         // A pixelated cover keeps hard blocks; check it still decodes to the capped size and did
         // not go transparent or empty along the way.
-        let art = Artwork::decode(&red_png(640), 8, MAX_COVER_EDGE).expect("decode");
+        let art = Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 8, MAX_COVER_EDGE).expect("decode");
         assert_eq!(art.width.max(art.height), MAX_COVER_EDGE);
         assert_eq!(&art.pixels[0..4], &[255, 0, 0, 255]);
     }
