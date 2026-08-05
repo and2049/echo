@@ -12,15 +12,17 @@ mod images;
 mod theme;
 mod views;
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use echo_core::app::{ActiveView, LibraryTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, Context, FocusHandle, KeyBinding, ScrollStrategy, SharedString,
-    UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, div, img, prelude::*,
-    px, size,
+    App, Bounds, ClickEvent, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollStrategy,
+    SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
+    div, img, prelude::*, px, size,
 };
 use gpui_platform::application;
 use theme::{ToGpui, WINDOW_BG, WINDOW_FG};
@@ -38,7 +40,14 @@ actions!(
         SelectLast,
         Activate,
         FocusLibrary,
-        FocusTracks
+        FocusTracks,
+        NextTrack,
+        PreviousTrack,
+        ToggleShuffle,
+        CycleRepeat,
+        ToggleMute,
+        SeekForward,
+        SeekBackward
     ]
 );
 
@@ -52,6 +61,10 @@ pub(crate) struct EchoApp {
     pub(crate) images: images::ImageCache,
     pub(crate) library_scroll: UniformListScrollHandle,
     pub(crate) tracks_scroll: UniformListScrollHandle,
+    /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
+    /// position into a fraction of the bar.
+    seek_bounds: Rc<Cell<Bounds<Pixels>>>,
+    volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     focus_handle: FocusHandle,
 }
 
@@ -113,6 +126,8 @@ impl EchoApp {
             images: images::ImageCache::default(),
             library_scroll: UniformListScrollHandle::new(),
             tracks_scroll: UniformListScrollHandle::new(),
+            seek_bounds: Rc::default(),
+            volume_bounds: Rc::default(),
             focus_handle,
         }
     }
@@ -191,11 +206,63 @@ impl EchoApp {
         }
     }
 
+    // Transport, all via the shared intents (optimistic flip + worker event).
+
     fn toggle_playback(&mut self, cx: &mut Context<Self>) {
-        let desired = !self.state.playback.is_playing;
-        // Optimistic flip; the worker's next SyncPlaybackState corrects any divergence.
-        self.state.playback.is_playing = desired;
-        let _ = self.app_tx.send(AppEvent::TogglePlayback(desired));
+        let event = echo_core::intent::toggle_playback(&mut self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn play_next(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::next_track(&self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn play_previous(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::previous_track(&self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::toggle_shuffle(&mut self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::cycle_repeat(&mut self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn toggle_mute(&mut self, cx: &mut Context<Self>) {
+        let event = echo_core::intent::toggle_mute(&mut self.state);
+        self.dispatch(event);
+        cx.notify();
+    }
+
+    fn seek_relative(&mut self, seconds: i64, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::intent::seek_by(&mut self.state, seconds) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn seek_to_fraction(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        let target = (self.state.playback.duration_ms as f32 * fraction.clamp(0.0, 1.0)) as u32;
+        if let Some(event) = echo_core::intent::seek_to(&mut self.state, target) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn set_volume_fraction(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        let volume = (fraction.clamp(0.0, 1.0) * 100.0).round() as u8;
+        let event = echo_core::intent::set_volume(&mut self.state, volume);
+        self.dispatch(event);
         cx.notify();
     }
 
@@ -243,6 +310,15 @@ impl EchoApp {
         .into();
         let play_glyph: SharedString = if playback.is_playing { "⏸" } else { "▶" }.into();
 
+        let shuffle_color = if playback.is_shuffled { accent } else { muted };
+        let (repeat_glyph, repeat_color) = match playback.repeat_mode.as_str() {
+            "Track" => ("🔂", accent),
+            "Context" => ("🔁", accent),
+            _ => ("🔁", muted),
+        };
+        let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
+        let mute_glyph = if playback.volume == 0 { "🔇" } else { "🔊" };
+
         // The pixelate transfer trick from the TUI: keep showing the previous cover while the
         // current one refetches.
         let cover = self
@@ -254,15 +330,21 @@ impl EchoApp {
             .cloned()
             .and_then(|artwork| self.images.get(&artwork));
 
+        let seek_bounds = self.seek_bounds.clone();
+        let volume_bounds = self.volume_bounds.clone();
+
         div()
             .flex()
             .flex_row()
             .items_center()
-            .gap_4()
+            .gap_3()
             .h(px(72.0))
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
+            .child(icon_button("previous", "⏮", fg, cx, |this, cx| {
+                this.play_previous(cx)
+            }))
             .child(
                 div()
                     .id("play-pause")
@@ -279,6 +361,7 @@ impl EchoApp {
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
                     .child(play_glyph),
             )
+            .child(icon_button("next", "⏭", fg, cx, |this, cx| this.play_next(cx)))
             .child(match cover {
                 Some(image) => img(image)
                     .flex_none()
@@ -303,24 +386,55 @@ impl EchoApp {
                 div()
                     .flex_col()
                     .flex_none()
-                    .w(px(260.0))
+                    .w(px(220.0))
                     .overflow_hidden()
                     .child(div().text_color(fg).text_sm().child(title))
                     .child(div().text_color(muted).text_xs().child(artist)),
             )
+            .child(icon_button("shuffle", "🔀", shuffle_color, cx, |this, cx| {
+                this.toggle_shuffle(cx)
+            }))
+            .child(icon_button("repeat", repeat_glyph, repeat_color, cx, |this, cx| {
+                this.cycle_repeat(cx)
+            }))
             .child(
-                // Progress track with a filled portion.
+                // Progress track: the canvas overlay records the track's bounds each paint, and
+                // a click anywhere in the (taller) hit area seeks to that fraction.
                 div()
+                    .id("seek-bar")
                     .flex_grow(1.0)
-                    .h(px(6.0))
-                    .rounded_full()
-                    .bg(muted.opacity(0.25))
+                    .py_2()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
+                        let bounds = this.seek_bounds.get();
+                        if bounds.size.width > px(0.0) {
+                            let fraction =
+                                (event.position().x - bounds.origin.x) / bounds.size.width;
+                            this.seek_to_fraction(fraction, cx);
+                        }
+                    }))
                     .child(
                         div()
-                            .h_full()
+                            .relative()
+                            .w_full()
+                            .h(px(6.0))
                             .rounded_full()
-                            .bg(accent)
-                            .w(gpui::relative(fraction)),
+                            .bg(muted.opacity(0.25))
+                            .child(
+                                canvas(
+                                    move |bounds, _window, _cx| seek_bounds.set(bounds),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(accent)
+                                    .w(gpui::relative(fraction)),
+                            ),
                     ),
             )
             .child(
@@ -330,7 +444,72 @@ impl EchoApp {
                     .text_xs()
                     .child(time_label),
             )
+            .child(icon_button("mute", mute_glyph, muted, cx, |this, cx| {
+                this.toggle_mute(cx)
+            }))
+            .child(
+                div()
+                    .id("volume-bar")
+                    .flex_none()
+                    .w(px(90.0))
+                    .py_2()
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _window, cx| {
+                        let bounds = this.volume_bounds.get();
+                        if bounds.size.width > px(0.0) {
+                            let fraction =
+                                (event.position().x - bounds.origin.x) / bounds.size.width;
+                            this.set_volume_fraction(fraction, cx);
+                        }
+                    }))
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(px(6.0))
+                            .rounded_full()
+                            .bg(muted.opacity(0.25))
+                            .child(
+                                canvas(
+                                    move |bounds, _window, _cx| volume_bounds.set(bounds),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(fg)
+                                    .w(gpui::relative(volume_fraction)),
+                            ),
+                    ),
+            )
     }
+}
+
+/// A small round glyph button for the playback bar.
+fn icon_button(
+    id: &'static str,
+    glyph: &'static str,
+    color: Hsla,
+    cx: &mut Context<EchoApp>,
+    on_click: impl Fn(&mut EchoApp, &mut Context<EchoApp>) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex_none()
+        .w(px(32.0))
+        .h(px(32.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .text_color(color)
+        .hover(move |style| style.bg(color.opacity(0.15)))
+        .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx)))
+        .child(glyph)
 }
 
 impl Render for EchoApp {
@@ -356,6 +535,17 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
             .on_action(cx.listener(|this, _: &FocusLibrary, _window, cx| this.focus_library(cx)))
             .on_action(cx.listener(|this, _: &FocusTracks, _window, cx| this.focus_tracks(cx)))
+            .on_action(cx.listener(|this, _: &NextTrack, _window, cx| this.play_next(cx)))
+            .on_action(cx.listener(|this, _: &PreviousTrack, _window, cx| this.play_previous(cx)))
+            .on_action(cx.listener(|this, _: &ToggleShuffle, _window, cx| this.toggle_shuffle(cx)))
+            .on_action(cx.listener(|this, _: &CycleRepeat, _window, cx| this.cycle_repeat(cx)))
+            .on_action(cx.listener(|this, _: &ToggleMute, _window, cx| this.toggle_mute(cx)))
+            .on_action(
+                cx.listener(|this, _: &SeekForward, _window, cx| this.seek_relative(5, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &SeekBackward, _window, cx| this.seek_relative(-5, cx)),
+            )
             .flex()
             .flex_col()
             .size_full()
@@ -406,6 +596,14 @@ fn main() {
             KeyBinding::new("h", FocusLibrary, None),
             KeyBinding::new("right", FocusTracks, None),
             KeyBinding::new("l", FocusTracks, None),
+            // Transport, roughly the TUI's default keymap.
+            KeyBinding::new("ctrl-right", NextTrack, None),
+            KeyBinding::new("ctrl-left", PreviousTrack, None),
+            KeyBinding::new("s", ToggleShuffle, None),
+            KeyBinding::new("r", CycleRepeat, None),
+            KeyBinding::new("m", ToggleMute, None),
+            KeyBinding::new("shift-right", SeekForward, None),
+            KeyBinding::new("shift-left", SeekBackward, None),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
