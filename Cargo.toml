@@ -28,6 +28,7 @@ lofty = "0.24.0"
 notify = "8.2.0"
 parking_lot = "0.12.5"
 ratatui = "0.30.0"
+ratatui-image = { version = "11.0.2", default-features = false, features = ["image-defaults", "crossterm"] }
 reqwest = { version = "0.13.4", features = ["json"] }
 rodio = "0.21.1"
 rspotify = { version = "0.16.1", features = ["cli"] }

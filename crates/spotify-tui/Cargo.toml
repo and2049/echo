@@ -12,7 +12,9 @@ echo-core = { workspace = true }
 
 anyhow = { workspace = true }
 crossterm = { workspace = true }
+image = { workspace = true }
 ratatui = { workspace = true }
+ratatui-image = { workspace = true }
 tokio = { workspace = true }
 unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }

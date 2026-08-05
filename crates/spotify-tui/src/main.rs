@@ -40,6 +40,10 @@ async fn main() -> Result<()> {
         worker_tx: worker_tx_clone,
     } = echo_core::bootstrap::init();
 
+    // Queries the terminal for a pixel graphics protocol (kitty/sixel/iTerm2) before entering
+    // the alternate screen; without one, covers fall back to half-block cells.
+    tui::image::init_picker();
+
     let mut tui = Tui::new()?;
     tui.enter()?;
 
