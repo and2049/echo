@@ -8,26 +8,50 @@
 //! The tokio runtime lives on the main function's stack and stays entered for the lifetime of
 //! the UI, so worker tasks keep running on its threads while GPUI blocks in `run()`.
 
+mod images;
 mod theme;
 mod views;
 
 use std::time::Duration;
 
+use echo_core::app::{ActiveView, LibraryTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, Context, FocusHandle, KeyBinding, SharedString, Window, WindowBounds,
-    WindowOptions, actions, div, prelude::*, px, size,
+    App, Bounds, Context, FocusHandle, KeyBinding, ScrollStrategy, SharedString,
+    UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, div, img, prelude::*,
+    px, size,
 };
 use gpui_platform::application;
 use theme::{ToGpui, WINDOW_BG, WINDOW_FG};
 
-actions!(echo, [Quit, TogglePlayback]);
+actions!(
+    echo,
+    [
+        Quit,
+        TogglePlayback,
+        MoveUp,
+        MoveDown,
+        PageUp,
+        PageDown,
+        SelectFirst,
+        SelectLast,
+        Activate,
+        FocusLibrary,
+        FocusTracks
+    ]
+);
+
+/// Keyboard page distance; the TUI uses a similar fixed stride.
+const PAGE_ROWS: isize = 10;
 
 pub(crate) struct EchoApp {
     pub(crate) state: echo_core::app::AppState,
     pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     pub(crate) worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
+    pub(crate) images: images::ImageCache,
+    pub(crate) library_scroll: UniformListScrollHandle,
+    pub(crate) tracks_scroll: UniformListScrollHandle,
     focus_handle: FocusHandle,
 }
 
@@ -86,7 +110,84 @@ impl EchoApp {
             state,
             app_tx,
             worker_tx,
+            images: images::ImageCache::default(),
+            library_scroll: UniformListScrollHandle::new(),
+            tracks_scroll: UniformListScrollHandle::new(),
             focus_handle,
+        }
+    }
+
+    /// Rows in whichever list `active_view` gives keyboard focus.
+    fn list_len(&self) -> usize {
+        match self.state.ui.active_view {
+            ActiveView::TrackList => self.state.data.tracks.len(),
+            _ => match self.state.ui.active_library_tab {
+                LibraryTab::Albums => self.state.data.saved_albums.len(),
+                _ => self.state.data.library_view.len(),
+            },
+        }
+    }
+
+    fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.state.ui.active_view == ActiveView::TrackList {
+            self.state.ui.selected_track_index = index;
+            self.tracks_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+        } else {
+            self.state.ui.selected_playlist_index = index;
+            self.library_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+        }
+        cx.notify();
+    }
+
+    fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let len = self.list_len();
+        if len == 0 {
+            return;
+        }
+        let current = if self.state.ui.active_view == ActiveView::TrackList {
+            self.state.ui.selected_track_index
+        } else {
+            self.state.ui.selected_playlist_index
+        };
+        self.set_selection(current.saturating_add_signed(delta).min(len - 1), cx);
+    }
+
+    fn select_last(&mut self, cx: &mut Context<Self>) {
+        let len = self.list_len();
+        if len > 0 {
+            self.set_selection(len - 1, cx);
+        }
+    }
+
+    /// Enter on the focused list — the same intents the row click handlers use.
+    fn activate_selection(&mut self, cx: &mut Context<Self>) {
+        let event = if self.state.ui.active_view == ActiveView::TrackList {
+            let index = self.state.ui.selected_track_index;
+            echo_core::intent::play_track_at(&mut self.state, index)
+        } else {
+            let index = self.state.ui.selected_playlist_index;
+            match self.state.ui.active_library_tab {
+                LibraryTab::Albums => echo_core::intent::open_album(&mut self.state, index),
+                _ => echo_core::intent::open_library_entry(&mut self.state, index),
+            }
+        };
+        if let Some(event) = event {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    fn focus_library(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.active_view = ActiveView::Library;
+        cx.notify();
+    }
+
+    fn focus_tracks(&mut self, cx: &mut Context<Self>) {
+        // Nothing to focus before a context has been opened.
+        if !self.state.data.tracks.is_empty() || self.state.data.active_tracklist_context.is_some()
+        {
+            self.state.ui.active_view = ActiveView::TrackList;
+            cx.notify();
         }
     }
 
@@ -114,7 +215,7 @@ impl EchoApp {
         let _ = self.app_tx.send(event);
     }
 
-    fn render_playback_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_playback_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let fg = theme.text.gpui(WINDOW_FG());
         let muted = theme.text_muted.gpui(WINDOW_FG());
@@ -142,6 +243,17 @@ impl EchoApp {
         .into();
         let play_glyph: SharedString = if playback.is_playing { "⏸" } else { "▶" }.into();
 
+        // The pixelate transfer trick from the TUI: keep showing the previous cover while the
+        // current one refetches.
+        let cover = self
+            .state
+            .playback
+            .playing_track_image
+            .as_ref()
+            .or(self.state.playback.previous_track_image.as_ref())
+            .cloned()
+            .and_then(|artwork| self.images.get(&artwork));
+
         div()
             .flex()
             .flex_row()
@@ -167,6 +279,26 @@ impl EchoApp {
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
                     .child(play_glyph),
             )
+            .child(match cover {
+                Some(image) => img(image)
+                    .flex_none()
+                    .w(px(48.0))
+                    .h(px(48.0))
+                    .rounded_md()
+                    .into_any_element(),
+                None => div()
+                    .flex_none()
+                    .w(px(48.0))
+                    .h(px(48.0))
+                    .rounded_md()
+                    .bg(muted.opacity(0.15))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(muted)
+                    .child("♪")
+                    .into_any_element(),
+            })
             .child(
                 div()
                     .flex_col()
@@ -211,6 +343,19 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
                 this.toggle_playback(cx)
             }))
+            .on_action(cx.listener(|this, _: &MoveUp, _window, cx| this.move_selection(-1, cx)))
+            .on_action(cx.listener(|this, _: &MoveDown, _window, cx| this.move_selection(1, cx)))
+            .on_action(
+                cx.listener(|this, _: &PageUp, _window, cx| this.move_selection(-PAGE_ROWS, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &PageDown, _window, cx| this.move_selection(PAGE_ROWS, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SelectFirst, _window, cx| this.set_selection(0, cx)))
+            .on_action(cx.listener(|this, _: &SelectLast, _window, cx| this.select_last(cx)))
+            .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
+            .on_action(cx.listener(|this, _: &FocusLibrary, _window, cx| this.focus_library(cx)))
+            .on_action(cx.listener(|this, _: &FocusTracks, _window, cx| this.focus_tracks(cx)))
             .flex()
             .flex_col()
             .size_full()
@@ -247,6 +392,20 @@ fn main() {
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
             KeyBinding::new("space", TogglePlayback, None),
+            // Arrows plus the TUI's vim keys; no text inputs exist yet to conflict with.
+            KeyBinding::new("up", MoveUp, None),
+            KeyBinding::new("k", MoveUp, None),
+            KeyBinding::new("down", MoveDown, None),
+            KeyBinding::new("j", MoveDown, None),
+            KeyBinding::new("pageup", PageUp, None),
+            KeyBinding::new("pagedown", PageDown, None),
+            KeyBinding::new("home", SelectFirst, None),
+            KeyBinding::new("end", SelectLast, None),
+            KeyBinding::new("enter", Activate, None),
+            KeyBinding::new("left", FocusLibrary, None),
+            KeyBinding::new("h", FocusLibrary, None),
+            KeyBinding::new("right", FocusTracks, None),
+            KeyBinding::new("l", FocusTracks, None),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {

@@ -3,18 +3,27 @@
 //! Both are thin projections of [`AppState`]: rows come straight from `library_view` /
 //! `saved_albums` / `tracks`, and activating a row goes through [`echo_core::intent`], the same
 //! functions the TUI's Enter key uses.
+//!
+//! Thumbnails ride the core's [`echo_core::thumbnails`] cache. Rendering a row requests its
+//! cover; `drain_pending` (called after each row batch) spawns the fetches, and the resulting
+//! worker events repaint. Unlike the TUI this ignores the `library_thumbnails` config toggle —
+//! that flag exists because thumbnails cost real estate and glitch on some terminals, neither of
+//! which applies here.
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab};
 use echo_core::models::LibraryNode;
-use gpui::{Context, SharedString, div, prelude::*, px, uniform_list};
+use echo_core::thumbnails::ThumbState;
+use gpui::{AnyElement, Context, SharedString, div, img, prelude::*, px, uniform_list};
 
 use crate::theme::{ToGpui, WINDOW_FG};
 use crate::{EchoApp, format_time};
 
 const SIDEBAR_WIDTH: f32 = 260.0;
+const SIDEBAR_ROW_HEIGHT: f32 = 34.0;
 const ROW_HEIGHT: f32 = 30.0;
+const THUMB_EDGE: f32 = 26.0;
 
-pub fn sidebar(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -72,58 +81,113 @@ pub fn sidebar(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
 
-                    range
+                    let rows: Vec<_> = range
                         .map(|ix| {
-                            let (label, label_color, indent_px): (SharedString, _, f32) =
-                                if tab == LibraryTab::Albums {
-                                    let album = &this.state.data.saved_albums[ix];
-                                    (album.name.clone().into(), fg, 0.0)
-                                } else {
-                                    match &this.state.data.library_view[ix] {
-                                        LibraryNode::Folder(f) => (
-                                            format!(
-                                                "{} {}",
-                                                if f.is_open { "▼" } else { "▶" },
-                                                f.name
-                                            )
-                                            .into(),
-                                            accent,
-                                            0.0,
-                                        ),
-                                        LibraryNode::Playlist { playlist, indent } => {
-                                            let pin = if this
-                                                .state
-                                                .ui
-                                                .library_config
-                                                .pinned
-                                                .contains(&playlist.id)
-                                            {
-                                                "📌 "
-                                            } else {
-                                                ""
-                                            };
-                                            (
-                                                format!("{pin}{}", playlist.name).into(),
-                                                fg,
-                                                *indent as f32 * 14.0,
-                                            )
-                                        }
+                            // Folders carry no cover; playlists and albums get a thumb box even
+                            // while (or if never) loaded, so the text column stays aligned.
+                            let (label, label_color, indent_px, thumb_url, has_thumb): (
+                                SharedString,
+                                _,
+                                f32,
+                                Option<String>,
+                                bool,
+                            ) = if tab == LibraryTab::Albums {
+                                let album = &this.state.data.saved_albums[ix];
+                                let url = album
+                                    .thumb_url
+                                    .clone()
+                                    .or_else(|| album.image_url.clone());
+                                (album.name.clone().into(), fg, 0.0, url, true)
+                            } else {
+                                match &this.state.data.library_view[ix] {
+                                    LibraryNode::Folder(f) => (
+                                        format!(
+                                            "{} {}",
+                                            if f.is_open { "▼" } else { "▶" },
+                                            f.name
+                                        )
+                                        .into(),
+                                        accent,
+                                        0.0,
+                                        None,
+                                        false,
+                                    ),
+                                    LibraryNode::Playlist { playlist, indent } => {
+                                        let pin = if this
+                                            .state
+                                            .ui
+                                            .library_config
+                                            .pinned
+                                            .contains(&playlist.id)
+                                        {
+                                            "📌 "
+                                        } else {
+                                            ""
+                                        };
+                                        let url = playlist
+                                            .thumb_url
+                                            .clone()
+                                            .or_else(|| playlist.image_url.clone());
+                                        (
+                                            format!("{pin}{}", playlist.name).into(),
+                                            fg,
+                                            *indent as f32 * 14.0,
+                                            url,
+                                            true,
+                                        )
                                     }
-                                };
+                                }
+                            };
+
+                            let thumb: Option<AnyElement> = has_thumb.then(|| {
+                                let artwork = thumb_url.as_deref().and_then(|url| {
+                                    this.state.ui.thumbnails.request(url);
+                                    match this.state.ui.thumbnails.get(url) {
+                                        Some(ThumbState::Ready { artwork }) => {
+                                            Some(artwork.clone())
+                                        }
+                                        _ => None,
+                                    }
+                                });
+                                match artwork.and_then(|artwork| this.images.get(&artwork)) {
+                                    Some(image) => img(image)
+                                        .flex_none()
+                                        .w(px(THUMB_EDGE))
+                                        .h(px(THUMB_EDGE))
+                                        .rounded_sm()
+                                        .into_any_element(),
+                                    None => div()
+                                        .flex_none()
+                                        .w(px(THUMB_EDGE))
+                                        .h(px(THUMB_EDGE))
+                                        .rounded_sm()
+                                        .bg(muted.opacity(0.15))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("♪")
+                                        .into_any_element(),
+                                }
+                            });
 
                             div()
                                 .id(ix)
-                                .h(px(ROW_HEIGHT))
+                                .h(px(SIDEBAR_ROW_HEIGHT))
                                 .px_3()
                                 .pl(px(12.0 + indent_px))
                                 .flex()
+                                .flex_row()
                                 .items_center()
+                                .gap_2()
                                 .text_sm()
                                 .text_color(label_color)
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .hover(|style| style.bg(muted.opacity(0.1)))
                                 .cursor_pointer()
                                 .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.state.ui.selected_playlist_index = ix;
                                     let event = match this.state.ui.active_library_tab {
                                         LibraryTab::Albums => {
                                             echo_core::intent::open_album(&mut this.state, ix)
@@ -138,6 +202,7 @@ pub fn sidebar(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                                     }
                                     cx.notify();
                                 }))
+                                .when_some(thumb, |el, thumb| el.child(thumb))
                                 .child(
                                     div()
                                         .overflow_hidden()
@@ -146,16 +211,21 @@ pub fn sidebar(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                                         .child(label),
                                 )
                         })
-                        .collect()
+                        .collect();
+
+                    // Kick off fetches for whatever the rows above just requested.
+                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+
+                    rows
                 }),
             )
+            .track_scroll(&app.library_scroll)
             .flex_grow(1.0),
         )
 }
 
-pub fn main_area(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    let theme = &app.state.ui.active_theme;
-    let muted = theme.text_muted.gpui(WINDOW_FG());
+pub fn main_area(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
 
     let body = if app.state.ui.active_view == ActiveView::TrackList {
         track_list(app, cx).into_any_element()
@@ -179,7 +249,7 @@ pub fn main_area(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
         .child(body)
 }
 
-fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
@@ -191,6 +261,13 @@ fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
         .as_ref()
         .map(|context| (context.title.clone(), context.subtitle.clone()))
         .unwrap_or_default();
+
+    let header_image = app
+        .state
+        .ui
+        .active_library_header_image
+        .clone()
+        .and_then(|artwork| app.images.get(&artwork));
 
     let count = app.state.data.tracks.len();
     // No explicit loading flag in core: an empty list under an active context is "loading".
@@ -207,13 +284,35 @@ fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                 .px_4()
                 .py_3()
                 .flex()
-                .flex_col()
-                .child(div().text_lg().text_color(fg).child(SharedString::from(context_title)))
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .when_some(header_image, |el, image| {
+                    el.child(
+                        img(image)
+                            .flex_none()
+                            .w(px(72.0))
+                            .h(px(72.0))
+                            .rounded_md(),
+                    )
+                })
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(SharedString::from(context_author)),
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .text_lg()
+                                .text_color(fg)
+                                .child(SharedString::from(context_title)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(SharedString::from(context_author)),
+                        ),
                 ),
         )
         .child(if loading {
@@ -234,6 +333,8 @@ fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
+                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let selected = this.state.ui.selected_track_index;
                     let playing_id = this.state.playback.playing_track_id.clone();
 
                     range
@@ -251,9 +352,11 @@ fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                                 .items_center()
                                 .gap_3()
                                 .text_sm()
+                                .when(ix == selected, |el| el.bg(selected_bg))
                                 .hover(|style| style.bg(muted.opacity(0.08)))
                                 .cursor_pointer()
                                 .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.state.ui.selected_track_index = ix;
                                     if let Some(event) =
                                         echo_core::intent::play_track_at(&mut this.state, ix)
                                     {
@@ -309,6 +412,7 @@ fn track_list(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                         .collect()
                 }),
             )
+            .track_scroll(&app.tracks_scroll)
             .flex_grow(1.0)
             .into_any_element()
         })
