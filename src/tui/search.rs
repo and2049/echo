@@ -1,4 +1,5 @@
 use crate::app::{ActiveView, AppState, SearchTab};
+use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     DURATION_COLUMN_WIDTH, format_duration_text, truncate_to_width_with_ellipsis,
 };
@@ -103,7 +104,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                         state.ui
                             .active_theme
                             .selected_style()
-                            .bg(state.ui.active_theme.primary)
+                            .bg(state.ui.active_theme.primary.rat())
                     } else if i == sel {
                         state.ui.active_theme.selected_style()
                     } else {

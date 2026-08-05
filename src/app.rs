@@ -3,8 +3,7 @@ use crate::models::{
     ActionMenuContext, ArtistPageData, BrowseNode, LocalLibrary, LocalPlaylists, Playlist,
     SearchResults, Track, TrackListContext, TrackSource,
 };
-use ratatui::buffer::Buffer;
-use ratatui::style::{Color, Style};
+use crate::theme::ResolvedTheme;
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -68,10 +67,7 @@ pub struct UIState {
     // Library config (mutable user settings)
     pub library_config: LibraryConfig,
     // Image rendering
-    pub image_picker: Option<ratatui_image::picker::Picker>,
-    pub active_library_header_image: Option<ratatui_image::protocol::StatefulProtocol>,
-    pub header_image_cache: Option<Buffer>,
-    pub header_image_dirty: bool,
+    pub active_library_header_image: Option<crate::artwork::SharedArtwork>,
     pub thumbnails: crate::thumbnails::ThumbnailCache,
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
@@ -137,10 +133,7 @@ impl UIState {
             setup_client_secret: String::new(),
             setup_focus_secret: false,
             library_config,
-            image_picker: None,
             active_library_header_image: None,
-            header_image_cache: None,
-            header_image_dirty: false,
             thumbnails: crate::thumbnails::ThumbnailCache::default(),
             operation_register: vec![],
             track_sort: TrackSort::Original,
@@ -161,9 +154,8 @@ pub struct PlaybackState {
     pub playing_track_artist_id: Option<String>,
     pub playing_track_source: Option<TrackSource>,
     pub playing_track_local_path: Option<std::path::PathBuf>,
-    pub playing_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
-    pub previous_track_image: Option<ratatui_image::protocol::StatefulProtocol>,
-    pub playing_track_image_cache: Option<ratatui::buffer::Buffer>,
+    pub playing_track_image: Option<crate::artwork::SharedArtwork>,
+    pub previous_track_image: Option<crate::artwork::SharedArtwork>,
     pub fetching_track_id: Option<String>,
     pub device_name: String,
     pub repeat_mode: String,
@@ -193,7 +185,6 @@ impl Default for PlaybackState {
             playing_track_local_path: None,
             playing_track_image: None,
             previous_track_image: None,
-            playing_track_image_cache: None,
             fetching_track_id: None,
             device_name: "echo-rs".to_string(),
             repeat_mode: "Off".to_string(),
@@ -367,69 +358,6 @@ pub enum TrackSort {
     Album,
     Duration,
     Added,
-}
-
-// ---------------------------------------------------------------------------
-// ResolvedTheme
-// ---------------------------------------------------------------------------
-
-pub struct ResolvedTheme {
-    pub primary: Color,
-    pub secondary: Color,
-    pub background: Color,
-    pub text: Color,
-    pub text_muted: Color,
-    pub highlight_bg: Color,
-    pub highlight_fg: Color,
-    pub selection_bg: Color,
-    pub selected_item: Color,
-    pub error: Color,
-}
-
-impl ResolvedTheme {
-    pub fn from_theme(theme: &Theme) -> Self {
-        use std::str::FromStr;
-        Self {
-            primary: Color::from_str(&theme.primary).unwrap_or(Color::Cyan),
-            secondary: Color::from_str(&theme.secondary).unwrap_or(Color::Yellow),
-            background: Color::from_str(&theme.background).unwrap_or(Color::Reset),
-            text: Color::from_str(&theme.text).unwrap_or(Color::White),
-            text_muted: Color::from_str(&theme.text_muted).unwrap_or(Color::DarkGray),
-            highlight_bg: Color::from_str(&theme.highlight_bg).unwrap_or(Color::White),
-            highlight_fg: Color::from_str(&theme.highlight_fg).unwrap_or(Color::Black),
-            selection_bg: Color::from_str(&theme.highlight_bg).unwrap_or(Color::White),
-            selected_item: Color::from_str(&theme.highlight_fg).unwrap_or(Color::Black),
-            error: Color::from_str(&theme.error).unwrap_or(Color::Red),
-        }
-    }
-
-    pub fn base_style(&self) -> Style {
-        Style::default().fg(self.text).bg(self.background)
-    }
-
-    pub fn muted_style(&self) -> Style {
-        self.base_style().fg(self.text_muted)
-    }
-
-    pub fn primary_style(&self) -> Style {
-        self.base_style().fg(self.primary)
-    }
-
-    pub fn secondary_style(&self) -> Style {
-        self.base_style().fg(self.secondary)
-    }
-
-    pub fn error_style(&self) -> Style {
-        self.base_style().fg(self.error)
-    }
-
-    pub fn selected_style(&self) -> Style {
-        Style::default().fg(self.highlight_fg).bg(self.highlight_bg)
-    }
-
-    pub fn gauge_style(&self) -> Style {
-        Style::default().fg(self.text).bg(self.text_muted)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -715,12 +643,12 @@ impl AppState {
     pub fn set_library_thumbnails(&mut self, enabled: bool) {
         self.ui.library_config.library_thumbnails = enabled;
         self.save_library_config();
-        let message = if !enabled {
-            "Library thumbnails off".to_string()
-        } else if self.ui.image_picker.is_some() {
+        // Half-block rendering needs nothing from the terminal beyond colour, so there is no
+        // longer a "no image support" case to warn about.
+        let message = if enabled {
             "Library thumbnails on".to_string()
         } else {
-            "Library thumbnails on (no terminal image support; showing compact list)".to_string()
+            "Library thumbnails off".to_string()
         };
         self.ui.status_message = Some(message);
         self.ui.status_message_expiry =
@@ -845,8 +773,6 @@ impl AppState {
 
     fn clear_header_image(&mut self) {
         self.ui.active_library_header_image = None;
-        self.ui.header_image_cache = None;
-        self.ui.header_image_dirty = false;
     }
 }
 

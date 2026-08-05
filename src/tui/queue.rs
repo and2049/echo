@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     format_duration_text, format_time, stabilize_terminal_emoji_width,
     truncate_to_width_with_ellipsis,
@@ -65,7 +66,7 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
                 state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.ui.active_theme.primary)
+                    .bg(state.ui.active_theme.primary.rat())
             } else if i == sel {
                 state.ui.active_theme.selected_style()
             } else {
@@ -90,8 +91,8 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
             Row::new(vec![
                 liked_cell,
                 Cell::from(name),
-                Cell::from(artist).style(style.fg(state.ui.active_theme.text_muted)),
-                Cell::from(dur).style(style.fg(state.ui.active_theme.text_muted)),
+                Cell::from(artist).style(style.fg(state.ui.active_theme.text_muted.rat())),
+                Cell::from(dur).style(style.fg(state.ui.active_theme.text_muted.rat())),
             ])
             .style(style)
         })

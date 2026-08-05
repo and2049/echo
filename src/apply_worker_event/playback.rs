@@ -35,7 +35,6 @@ pub async fn handle_playback_started(
     state.playback.playing_track_source = Some(item.source);
     state.playback.playing_track_local_path = item.local_path.clone();
     state.playback.previous_track_image = state.playback.playing_track_image.take();
-    state.playback.playing_track_image_cache = None;
     state.playback.duration_ms = item.duration_ms;
     state.playback.progress_ms = 0;
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
@@ -55,15 +54,12 @@ pub async fn handle_playback_started(
     }
 
     if let Some(url) = item.image_url {
-        if let Some(ref picker) = state.ui.image_picker {
-            image_tasks::spawn_track_image_processing(
-                item.id,
-                url,
-                picker,
-                worker_tx.clone(),
-                state.ui.library_config.cover_img_pixels,
-            );
-        }
+        image_tasks::spawn_track_image_processing(
+            item.id,
+            url,
+            worker_tx.clone(),
+            state.ui.library_config.cover_img_pixels,
+        );
     } else {
         let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;
     }
@@ -113,13 +109,10 @@ pub fn handle_track_metadata_loaded(
     state.playback.playing_track_title = title;
     state.playback.playing_track_artist = artist;
 
-    if let Some(url) = image_url
-        && let Some(ref picker) = state.ui.image_picker
-    {
+    if let Some(url) = image_url {
         image_tasks::spawn_track_image_processing(
             track_id,
             url,
-            picker,
             worker_tx.clone(),
             state.ui.library_config.cover_img_pixels,
         );
@@ -129,12 +122,11 @@ pub fn handle_track_metadata_loaded(
 pub fn handle_track_image_processed(
     state: &mut AppState,
     track_id: String,
-    protocol: ratatui_image::protocol::StatefulProtocol,
+    artwork: crate::artwork::SharedArtwork,
 ) {
     if state.playback.playing_track_id.as_deref() == Some(track_id.as_str()) {
-        state.playback.playing_track_image = Some(protocol);
+        state.playback.playing_track_image = Some(artwork);
         state.playback.previous_track_image = None;
-        state.playback.playing_track_image_cache = None;
         if state.playback.fetching_track_id.as_deref() == Some(track_id.as_str()) {
             state.playback.fetching_track_id = None;
         }
@@ -178,7 +170,6 @@ async fn apply_synced_playback_item(
 
     if track_changed {
         state.playback.previous_track_image = state.playback.playing_track_image.take();
-        state.playback.playing_track_image_cache = None;
 
         if state.playback.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
             state.playback.current_lyric_track_id = Some(item.id.clone());
@@ -196,21 +187,18 @@ async fn apply_synced_playback_item(
     }
 
     if let Some(url) = item.image_url {
-        if let Some(ref picker) = state.ui.image_picker {
-            let should_process_image = track_changed
-                || (state.playback.playing_track_image.is_none()
-                    && state.playback.fetching_track_id.as_deref() != Some(item.id.as_str()));
+        let should_process_image = track_changed
+            || (state.playback.playing_track_image.is_none()
+                && state.playback.fetching_track_id.as_deref() != Some(item.id.as_str()));
 
-            if should_process_image {
-                state.playback.fetching_track_id = Some(item.id.clone());
-                image_tasks::spawn_track_image_processing(
-                    item.id.clone(),
-                    url,
-                    picker,
-                    worker_tx.clone(),
-                    state.ui.library_config.cover_img_pixels,
-                );
-            }
+        if should_process_image {
+            state.playback.fetching_track_id = Some(item.id.clone());
+            image_tasks::spawn_track_image_processing(
+                item.id.clone(),
+                url,
+                worker_tx.clone(),
+                state.ui.library_config.cover_img_pixels,
+            );
         }
     } else if track_changed || state.playback.playing_track_artist.is_empty() {
         let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id)).await;

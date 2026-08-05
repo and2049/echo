@@ -1,9 +1,11 @@
 pub mod artist;
+pub mod image;
 pub mod library;
 pub mod playback;
 pub mod queue;
 pub mod render;
 pub mod search;
+pub mod theme;
 
 use anyhow::Result;
 use crossterm::style::{Color as CrosstermColor, ResetColor, SetBackgroundColor};

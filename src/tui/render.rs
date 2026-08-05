@@ -1,4 +1,5 @@
 use crate::app::{ActiveView, AppMode, AppState};
+use crate::tui::theme::{ThemeStyles, ToRatatui};
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -97,8 +98,8 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             .map(|(i, s)| {
                 let style = if Some(i) == state.ui.command_suggestion_index {
                     ratatui::style::Style::default()
-                        .bg(state.ui.active_theme.highlight_bg)
-                        .fg(state.ui.active_theme.highlight_fg)
+                        .bg(state.ui.active_theme.highlight_bg.rat())
+                        .fg(state.ui.active_theme.highlight_fg.rat())
                 } else {
                     state.ui.active_theme.base_style()
                 };
@@ -326,7 +327,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
                 let text = format!("{} ({}%){}", d.name, d.volume_percent, active_marker);
 
                 if d.is_active && i != state.ui.selected_device_index {
-                    style = style.fg(state.ui.active_theme.primary);
+                    style = style.fg(state.ui.active_theme.primary.rat());
                 }
 
                 ratatui::widgets::ListItem::new(text).style(style)

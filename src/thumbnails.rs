@@ -20,8 +20,7 @@ const MAX_DISK_FILES: usize = 500;
 pub enum ThumbState {
     Loading,
     Ready {
-        protocol: Box<ratatui_image::protocol::StatefulProtocol>,
-        buffer: Option<ratatui::buffer::Buffer>,
+        artwork: crate::artwork::SharedArtwork,
     },
     Failed,
 }
@@ -41,6 +40,11 @@ impl ThumbnailCache {
             return;
         }
         self.pending.push(url.to_string());
+    }
+
+    /// Whether any request is waiting for `drain_pending`.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
     }
 
     pub fn get(&self, url: &str) -> Option<&ThumbState> {
@@ -137,10 +141,6 @@ pub fn drain_pending(state: &mut AppState, tx: &mpsc::Sender<WorkerEvent>) {
     if state.ui.thumbnails.pending.is_empty() {
         return;
     }
-    let Some(picker) = state.ui.image_picker.clone() else {
-        state.ui.thumbnails.pending.clear();
-        return;
-    };
     if !state.ui.thumbnails.disk_pruned {
         state.ui.thumbnails.disk_pruned = true;
         prune_disk(MAX_DISK_FILES);
@@ -159,7 +159,7 @@ pub fn drain_pending(state: &mut AppState, tx: &mpsc::Sender<WorkerEvent>) {
             .thumbnails
             .entries
             .insert(url.clone(), ThumbState::Loading);
-        crate::image_tasks::spawn_thumbnail_processing(url.clone(), &picker, tx.clone());
+        crate::image_tasks::spawn_thumbnail_processing(url.clone(), tx.clone());
         slots -= 1;
     }
     state.ui.thumbnails.evict_if_needed(&visible);

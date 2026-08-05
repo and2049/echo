@@ -1,11 +1,9 @@
 use crate::models::{
     PlaybackItem, PlaybackTarget, Playlist, SearchResults, Track, TrackListContext,
 };
-use crossterm::event::KeyEvent;
 use std::path::PathBuf;
 
 pub enum AppEvent {
-    Key(KeyEvent),
     LoadContextTracks(TrackListContext),
     RefreshContextTracks(TrackListContext),
     RefreshLibraryLists,
@@ -126,15 +124,15 @@ pub enum WorkerEvent {
     },
     TrackImageProcessed {
         track_id: String,
-        protocol: ratatui_image::protocol::StatefulProtocol,
+        artwork: crate::artwork::SharedArtwork,
     },
     SearchResultsLoaded(SearchResults),
     QueueLoaded(Vec<Track>),
     TracksQueued(usize),
-    HeaderImageProcessed(ratatui_image::protocol::StatefulProtocol),
+    HeaderImageProcessed(crate::artwork::SharedArtwork),
     ThumbnailProcessed {
         url: String,
-        protocol: Option<ratatui_image::protocol::StatefulProtocol>,
+        artwork: Option<crate::artwork::SharedArtwork>,
     },
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
     DevicesLoaded(Vec<crate::models::Device>),

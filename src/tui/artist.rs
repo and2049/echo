@@ -3,15 +3,14 @@ use crate::{
     tui::render::{
         padded_library_list, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
     },
+    tui::theme::{ThemeStyles, ToRatatui},
 };
 use ratatui::{
     Frame,
-    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     widgets::{
-        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, StatefulWidget, Table,
-        TableState,
+        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, Table, TableState,
     },
 };
 
@@ -97,8 +96,8 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         return;
     };
 
-    let has_image = artist_image_url.is_some()
-        && (state.ui.active_library_header_image.is_some() || state.ui.header_image_cache.is_some());
+    let has_image =
+        artist_image_url.is_some() && state.ui.active_library_header_image.is_some();
     let (header_area, albums_area) = if has_image {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -214,28 +213,8 @@ fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, art
         height: 5,
     };
 
-    if state.ui.header_image_dirty {
-        if let Some(ref mut protocol) = state.ui.active_library_header_image {
-            let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
-            let mut cached = Buffer::empty(cache_area);
-            let image = ratatui_image::StatefulImage::default();
-            StatefulWidget::render(image, cache_area, &mut cached, protocol);
-            state.ui.header_image_cache = Some(cached);
-        }
-        state.ui.header_image_dirty = false;
-    }
-
-    if let Some(ref cached) = state.ui.header_image_cache {
-        let buf = frame.buffer_mut();
-        for y in 0..cached.area.height.min(img_area.height) {
-            for x in 0..cached.area.width.min(img_area.width) {
-                let src = &cached[(x, y)];
-                let dst = &mut buf[(img_area.x + x, img_area.y + y)];
-                dst.set_style(src.style());
-                dst.set_symbol(src.symbol());
-                dst.set_skip(src.skip);
-            }
-        }
+    if let Some(artwork) = state.ui.active_library_header_image.clone() {
+        crate::tui::image::draw(frame.buffer_mut(), img_area, &artwork);
     }
 
     let text_chunks = Layout::default()
@@ -249,7 +228,7 @@ fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, art
 
     let title_para = ratatui::widgets::Paragraph::new(artist_name.to_string()).style(
         Style::default()
-            .fg(state.ui.active_theme.primary)
+            .fg(state.ui.active_theme.primary.rat())
             .add_modifier(Modifier::BOLD),
     );
     frame.render_widget(title_para, text_chunks[1]);

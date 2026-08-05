@@ -427,7 +427,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         if let Some(theme_name) = args.next() {
                             if let Some(theme_config) = state.ui.themes.get(theme_name) {
                                 state.ui.active_theme =
-                                    crate::app::ResolvedTheme::from_theme(theme_config);
+                                    crate::theme::ResolvedTheme::from_theme(theme_config);
                                 state.ui.library_config.active_theme = Some(theme_name.to_string());
                                 state.ui.needs_terminal_clear = true;
                                 state.save_library_config();
