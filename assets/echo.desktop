@@ -6,4 +6,4 @@ Icon=echo
 Terminal=false
 Type=Application
 Categories=Audio;Music;Player;
-StartupWMClass=echo
+StartupWMClass=echo-desktop

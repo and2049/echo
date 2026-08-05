@@ -35,8 +35,16 @@ echo 是一款用 Rust 编写的终端音乐播放器和 Spotify 客户端。ech
 
 ### 安装
 
-下载并运行安装程序：
-https://github.com/and2049/echo/releases
+从[发布页面](https://github.com/and2049/echo/releases)下载对应平台的安装程序。**Echo** 安装包同时包含桌面应用和 `spotify` 终端命令：
+
+- **Windows**（`echo-desktop_*.msi`）：安装桌面应用，并将安装目录加入 `PATH`（卸载时自动移除），安装后在新终端中即可直接运行 `spotify`。
+- **macOS**（`Echo_*.dmg`）：将 `Echo.app` 拖入 Applications。TUI 已内置于应用包中，执行一次以下命令即可加入 `PATH`：
+
+  ```bash
+  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  ```
+
+- **Linux**（`.deb`）：安装桌面应用及 `/usr/bin/spotify`。只想要 TUI？请改用发布页面中的 TUI AppImage（`spotify_*.AppImage`；不要与 deb 同时安装，两者都提供 `spotify`）。
 
 或者
 
