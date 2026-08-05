@@ -8,13 +8,13 @@ pub fn handle(state: &mut AppState) {
     state.ui.status_message_expiry = None;
 }
 
-pub async fn handle_reauthorization_required(
+pub fn handle_reauthorization_required(
     state: &mut AppState,
-    app_tx: &mpsc::Sender<AppEvent>,
+    app_tx: &mpsc::UnboundedSender<AppEvent>,
 ) {
     if state.ui.mode != app::AppMode::Authenticating {
         state.ui.mode = app::AppMode::Authenticating;
-        let _ = app_tx.send(AppEvent::StartAuth).await;
+        let _ = app_tx.send(AppEvent::StartAuth);
     }
 }
 
@@ -54,13 +54,13 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn reauthorization_starts_once_while_authenticating() {
+    #[test]
+    fn reauthorization_starts_once_while_authenticating() {
         let mut state = AppState::new();
-        let (tx, mut rx) = mpsc::channel(2);
+        let (tx, mut rx) = mpsc::unbounded_channel();
 
-        handle_reauthorization_required(&mut state, &tx).await;
-        handle_reauthorization_required(&mut state, &tx).await;
+        handle_reauthorization_required(&mut state, &tx);
+        handle_reauthorization_required(&mut state, &tx);
 
         assert!(matches!(rx.try_recv(), Ok(AppEvent::StartAuth)));
         assert!(rx.try_recv().is_err());

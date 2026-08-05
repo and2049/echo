@@ -14,22 +14,22 @@ mod misc;
 mod playback;
 
 
-pub async fn apply_worker_event(
+pub fn apply_worker_event(
     worker_event: WorkerEvent,
     state: &mut AppState,
-    app_tx: &mpsc::Sender<AppEvent>,
+    app_tx: &mpsc::UnboundedSender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
 ) {
     match worker_event {
         WorkerEvent::AuthenticationComplete => auth::handle(state),
         WorkerEvent::SpotifyReauthorizationRequired => {
-            auth::handle_reauthorization_required(state, app_tx).await
+            auth::handle_reauthorization_required(state, app_tx)
         }
         WorkerEvent::SpotifyAuthenticationFailed { message } => {
             auth::handle_failure(state, message)
         }
         WorkerEvent::UserIdentityLoaded(user_id) => auth::handle_user_identity(state, user_id),
-        WorkerEvent::ForceContextRefresh => misc::handle_force_context_refresh(state, app_tx).await,
+        WorkerEvent::ForceContextRefresh => misc::handle_force_context_refresh(state, app_tx),
         WorkerEvent::ApiRequestFailed { label, message } => {
             misc::handle_api_request_failed(state, label, message)
         }
@@ -49,10 +49,10 @@ pub async fn apply_worker_event(
         WorkerEvent::LikedStatusUpdate(results) => library::handle_liked_status_update(state, results),
         WorkerEvent::Tick => playback::handle_tick(state, app_tx),
         WorkerEvent::PlaybackStarted { item } => {
-            playback::handle_playback_started(state, app_tx, worker_tx, item).await
+            playback::handle_playback_started(state, app_tx, worker_tx, item)
         }
         WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item } => {
-            playback::handle_sync_playback_state(state, app_tx, worker_tx, is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item).await
+            playback::handle_sync_playback_state(state, app_tx, worker_tx, is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item)
         }
         WorkerEvent::PlaybackControlState { is_playing } => {
             playback::handle_playback_control_state(state, is_playing)
@@ -108,9 +108,9 @@ mod tests {
     use crate::models::TrackListContext;
     use tokio::sync::mpsc;
 
-    #[tokio::test]
-    async fn force_context_refresh_reuses_stored_context() {
-        let (app_tx, mut app_rx) = mpsc::channel(1);
+    #[test]
+    fn force_context_refresh_reuses_stored_context() {
+        let (app_tx, mut app_rx) = mpsc::unbounded_channel();
         let (worker_tx, _) = mpsc::channel(1);
         let mut state = AppState::new();
         let context = TrackListContext::playlist(
@@ -128,8 +128,7 @@ mod tests {
             &mut state,
             &app_tx,
             &worker_tx,
-        )
-        .await;
+        );
 
         let AppEvent::RefreshContextTracks(sent) = app_rx.try_recv().unwrap() else {
             panic!("expected RefreshContextTracks");

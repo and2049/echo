@@ -63,7 +63,7 @@ impl Drop for PlayGuard {
 }
 
 pub struct Worker {
-    rx: mpsc::Receiver<AppEvent>,
+    rx: mpsc::UnboundedReceiver<AppEvent>,
     tx: mpsc::Sender<WorkerEvent>,
     media_tx: mpsc::Sender<media::MediaUpdate>,
     first_party: Option<api::first_party::SpotifyWebApi>,
@@ -438,9 +438,9 @@ fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>)
 
 impl Worker {
     pub fn new(
-        rx: mpsc::Receiver<AppEvent>,
+        rx: mpsc::UnboundedReceiver<AppEvent>,
         tx: mpsc::Sender<WorkerEvent>,
-        app_tx: mpsc::Sender<AppEvent>,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> Self {
         let (media_tx, media_rx) = mpsc::channel(32);
         media::spawn_media_thread(media_rx, app_tx);
