@@ -8,6 +8,7 @@ pub mod local_playback;
 pub mod media;
 pub mod tracks;
 pub mod visualization;
+pub mod volume;
 
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
@@ -398,30 +399,6 @@ mod tests {
     }
 
     #[test]
-    fn volume_0_maps_to_mixer_0() {
-        assert_eq!(volume_to_mixer(0), 0);
-    }
-
-    #[test]
-    fn volume_100_maps_to_mixer_max() {
-        assert_eq!(volume_to_mixer(100), 65535);
-    }
-
-    #[test]
-    fn volume_50_maps_to_half_range() {
-        let val = volume_to_mixer(50);
-        assert!(val > 32000 && val < 33000, "expected ~32767, got {val}");
-    }
-
-    #[test]
-    fn volume_boundary_u8_max_maps_without_overflow() {
-        let vol: u8 = 100;
-        let mixer_vol = ((vol as u32 * 65535) / 100) as u16;
-        assert_eq!(mixer_vol, 65535);
-        assert_eq!(volume_to_mixer(vol.into()), 65535);
-    }
-
-    #[test]
     fn sync_interval_playing_is_30_seconds() {
         assert_eq!(
             sync_interval_duration(true),
@@ -436,10 +413,6 @@ mod tests {
             std::time::Duration::from_secs(300)
         );
     }
-}
-
-fn volume_to_mixer(vol: u32) -> u16 {
-    ((vol * 65535) / 100) as u16
 }
 
 fn sync_interval_duration(is_playing: bool) -> std::time::Duration {
@@ -798,6 +771,8 @@ impl Worker {
                                             is_playing.clone(),
                                             config.library.bitrate,
                                             config.library.normalisation,
+                                            config.library.normalisation_pregain,
+                                            config.library.volume,
                                         ).await;
 
                                         // Hydrate library lists from cache immediately, then refresh stale entries in background.
@@ -833,15 +808,11 @@ impl Worker {
                                                 }
                                             }
 
-                                            // Set server-side volume to 100% so all attenuation is client-side via the mixer
-                                            let _ = sp.set_volume(100).await;
-
-                                            // Initialize mixer to saved client-side volume
-                                            let saved_volume = AppConfig::load().library.volume;
-                                            if let Some(mixer) = self.spotify_mixer.lock().as_ref() {
-                                                let mixer_vol = ((saved_volume as u32 * 65535) / 100) as u16;
-                                                mixer.set_volume(mixer_vol);
-                                            }
+                                            // Volume is deliberately not touched here. The stream arrives at full
+                                            // scale and all attenuation is client-side, so the mixer is seeded from
+                                            // the saved volume via ConnectConfig::initial_volume when the daemon
+                                            // spawns. Setting the server-side volume would come back as a remote
+                                            // volume update and overwrite that.
 
                                             // Fetch queue initially only if we have an active session
                                             if found_playback
@@ -1164,8 +1135,7 @@ impl Worker {
                                     emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
                                 } else {
                                     let mixer_used = self.spotify_mixer.lock().as_ref().map_or(false, |mixer| {
-                                        let mixer_vol = ((vol as u32 * 65535) / 100) as u16;
-                                        mixer.set_volume(mixer_vol);
+                                        mixer.set_volume(volume::volume_to_mixer(u32::from(vol)));
                                         true
                                     });
                                     if !mixer_used {

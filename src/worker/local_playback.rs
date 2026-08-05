@@ -10,6 +10,7 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
 
 use crate::models::{PlaybackItem, Track, TrackSource};
+use crate::worker::volume::cubic_gain;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RepeatMode {
@@ -185,7 +186,7 @@ impl LocalPlaybackEngine {
     pub fn set_volume(&mut self, volume: u32) -> LocalPlaybackSnapshot {
         self.volume = volume.min(100);
         if let Some(sink) = self.sink.as_ref() {
-            sink.set_volume(self.volume as f32 / 100.0);
+            sink.set_volume(cubic_gain(self.volume));
         }
         self.snapshot()
     }
@@ -347,7 +348,7 @@ impl LocalPlaybackEngine {
             .as_ref()
             .context("audio output stream unavailable")?;
         let sink = Sink::connect_new(stream.mixer());
-        sink.set_volume(self.volume as f32 / 100.0);
+        sink.set_volume(cubic_gain(self.volume));
         sink.append(source);
         if resume_position_ms > 0 {
             if let Err(error) = sink.try_seek(Duration::from_millis(u64::from(resume_position_ms)))

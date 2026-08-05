@@ -5,8 +5,9 @@ use librespot_core::config::SessionConfig;
 use librespot_core::session::Session;
 
 use crate::events::WorkerEvent;
+use crate::worker::volume::{VOLUME_DB_RANGE, volume_to_mixer};
 use librespot_playback::audio_backend::{Sink, SinkError, SinkResult};
-use librespot_playback::config::{Bitrate, PlayerConfig};
+use librespot_playback::config::{Bitrate, PlayerConfig, VolumeCtrl};
 use librespot_playback::convert::Converter;
 use librespot_playback::decoder::AudioPacket;
 use librespot_playback::mixer::Mixer;
@@ -221,6 +222,8 @@ pub async fn spawn_librespot_daemon(
     playback_is_playing: Arc<AtomicBool>,
     bitrate: u32,
     normalisation: bool,
+    normalisation_pregain: f64,
+    volume: u32,
 ) {
     tokio::spawn(async move {
         loop {
@@ -285,11 +288,23 @@ pub async fn spawn_librespot_daemon(
                         _ => Bitrate::Bitrate320,
                     },
                     normalisation,
+                    // Normalisation attenuates by the track's ReplayGain and adds nothing back, so
+                    // without a pregain playback sits several dB below the official client. The
+                    // default `Dynamic` method's limiter absorbs the added gain instead of clipping.
+                    normalisation_pregain_db: normalisation_pregain,
                     ..Default::default()
                 };
 
                 let mixer_fn = librespot_playback::mixer::find(None).unwrap();
-                let mixer = mixer_fn(librespot_playback::mixer::MixerConfig::default()).unwrap();
+                // Cubic matches the taper local playback uses, so the same percentage sounds the
+                // same on both sources. The default logarithmic curve is far more aggressive.
+                let mixer_config = librespot_playback::mixer::MixerConfig {
+                    volume_ctrl: VolumeCtrl::Cubic(VOLUME_DB_RANGE),
+                    ..Default::default()
+                };
+                let mixer = mixer_fn(mixer_config).unwrap();
+                // SoftMixer opens at a hardcoded 0.5 attenuation, so seed it before any audio flows.
+                mixer.set_volume(volume_to_mixer(volume));
                 *mixer_holder.lock() = Some(mixer.clone());
 
                 let player = Player::new(
@@ -322,8 +337,14 @@ pub async fn spawn_librespot_daemon(
                     },
                 );
 
+                // Spirc pushes `initial_volume` into the mixer as it starts, so it has to be the
+                // real volume: librespot's default of half range would leave playback attenuated
+                // until the user happened to touch the volume keys. `disable_volume` tells Spotify
+                // clients not to offer a slider for this device, since volume is ours to handle.
                 let connect_config = ConnectConfig {
                     name: device_name.clone(),
+                    initial_volume: volume_to_mixer(volume),
+                    disable_volume: true,
                     ..Default::default()
                 };
 
