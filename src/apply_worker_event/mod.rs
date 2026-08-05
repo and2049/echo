@@ -60,16 +60,16 @@ pub async fn apply_worker_event(
         WorkerEvent::TrackMetadataLoaded { track_id, title, artist, image_url } => {
             playback::handle_track_metadata_loaded(state, worker_tx, track_id, title, artist, image_url)
         }
-        WorkerEvent::TrackImageProcessed { track_id, protocol } => {
-            playback::handle_track_image_processed(state, track_id, protocol)
+        WorkerEvent::TrackImageProcessed { track_id, artwork } => {
+            playback::handle_track_image_processed(state, track_id, artwork)
         }
         WorkerEvent::LyricsLoaded(lyrics) => playback::handle_lyrics_loaded(state, lyrics),
         WorkerEvent::AudioVisualizationReady(bands, flag) => {
             playback::handle_audio_visualization_ready(state, bands, flag)
         }
-        WorkerEvent::HeaderImageProcessed(protocol) => images::handle(state, protocol),
-        WorkerEvent::ThumbnailProcessed { url, protocol } => {
-            images::handle_thumbnail(state, url, protocol)
+        WorkerEvent::HeaderImageProcessed(artwork) => images::handle(state, artwork),
+        WorkerEvent::ThumbnailProcessed { url, artwork } => {
+            images::handle_thumbnail(state, url, artwork)
         }
         WorkerEvent::TracksLoaded(tracks, context) => {
             data::handle_tracks_loaded(state, worker_tx, tracks, context)

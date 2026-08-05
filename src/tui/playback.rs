@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
 use ratatui::{
     Frame,
@@ -149,55 +150,22 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         vis_area = vis_chunks[1];
     }
 
-    let protocol = state
+    // Cover art. Sampling is cheap and stateless, so this runs every frame — the off-screen
+    // Buffer cache existed only because re-rendering a StatefulProtocol re-emitted escapes.
+    let artwork = state
         .playback
         .playing_track_image
-        .as_mut()
-        .or(state.playback.previous_track_image.as_mut());
+        .as_ref()
+        .or(state.playback.previous_track_image.as_ref())
+        .cloned();
 
-    if let Some(protocol) = protocol {
+    if let Some(artwork) = artwork {
         let mut image_area = track_info_chunks[1];
         if image_area.height >= 7 {
             image_area.y += 1;
             image_area.height = 5;
         }
-        if image_area.width == 0 || image_area.height == 0 {
-            // Skip rendering if area is too small
-        } else {
-            let cache_area = ratatui::layout::Rect::new(0, 0, image_area.width, image_area.height);
-            let render_needed = state.playback.playing_track_image_cache.as_ref().map_or(true, |cached| {
-                cached.area != cache_area
-            });
-            if render_needed {
-                let mut cached = ratatui::buffer::Buffer::empty(cache_area);
-                ratatui::widgets::StatefulWidget::render(
-                    ratatui_image::StatefulImage::default(),
-                    cache_area,
-                    &mut cached,
-                    protocol,
-                );
-                state.playback.playing_track_image_cache = Some(cached);
-            }
-            if let Some(ref cached) = state.playback.playing_track_image_cache {
-                let buf = frame.buffer_mut();
-                for y in 0..cached.area.height.min(image_area.height) {
-                    for x in 0..cached.area.width.min(image_area.width) {
-                        let src = &cached[(x, y)];
-                        let dst_x = image_area.x + x;
-                        let dst_y = image_area.y + y;
-                        if dst_x < buf.area.width && dst_y < buf.area.height {
-                            buf[(dst_x, dst_y)] = src.clone();
-                        }
-                    }
-                }
-            } else {
-                frame.render_stateful_widget(
-                    ratatui_image::StatefulImage::default(),
-                    image_area,
-                    protocol,
-                );
-            }
-        }
+        crate::tui::image::draw(frame.buffer_mut(), image_area, &artwork);
     }
 
     // Create Title & Artist Text
@@ -316,8 +284,8 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         && let Some(bands) = shared_bands.try_lock()
     {
         use ratatui::widgets::{Bar, BarChart, BarGroup};
-        let c_primary = state.ui.active_theme.primary;
-        let c_secondary = state.ui.active_theme.secondary;
+        let c_primary = state.ui.active_theme.primary.rat();
+        let c_secondary = state.ui.active_theme.secondary.rat();
         let c_mid_low = interpolate_color(c_secondary, c_primary, 0.33);
         let c_mid_high = interpolate_color(c_secondary, c_primary, 0.66);
 

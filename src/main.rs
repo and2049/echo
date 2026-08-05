@@ -1,5 +1,6 @@
 mod app;
 mod apply_worker_event;
+mod artwork;
 mod config;
 mod events;
 mod handlers;
@@ -7,6 +8,7 @@ mod i18n;
 mod image_tasks;
 mod models;
 mod platform;
+mod theme;
 mod thumbnails;
 mod tui;
 mod worker;
@@ -20,6 +22,7 @@ use tokio::sync::mpsc;
 use app::AppState;
 use events::{AppEvent, WorkerEvent};
 use tui::Tui;
+use tui::theme::ToRatatui;
 use worker::Worker;
 
 #[tokio::main]
@@ -73,11 +76,6 @@ async fn main() -> Result<()> {
     }
     state.ui.library_config = config.library.clone();
 
-    // Initialize image graphics picker (Guesses Sixel, Kitty, or Halfblocks based on terminal)
-    if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
-        state.ui.image_picker = Some(picker);
-    }
-
     if config.spotify_credentials.is_some() {
         state.ui.mode = app::AppMode::Authenticating;
         let _ = app_tx.send(AppEvent::StartAuth).await;
@@ -119,41 +117,31 @@ async fn main() -> Result<()> {
             && key.kind == KeyEventKind::Press
         {
             needs_draw = true;
-            let event = AppEvent::Key(key);
-            let mut outgoing_event = None;
-            if let Some(cmd) = handlers::handle_event(&mut state, &event) {
-                outgoing_event = Some(cmd);
-            }
+            let outgoing_event = handlers::handle_event(&mut state, &key);
 
             if !state.ui.is_running {
                 let _ = app_tx.send(AppEvent::Quit).await;
-            } else {
-                let _ = app_tx.send(event).await;
-
-                if let Some(ev) = outgoing_event {
-                    if let AppEvent::LoadContextTracks(ref context) = ev {
-                        if let Some(url) = context.image_url.as_ref() {
-                            state.data.tracklist_image_url = Some(url.clone());
-                            image_tasks::spawn_header_for_url(
-                                url,
-                                state.ui.image_picker.as_ref(),
-                                worker_tx_clone.clone(),
-                                state.ui.library_config.cover_img_pixels,
-                            );
-                        }
-                        let _ = app_tx.send(ev).await;
-                    } else if let AppEvent::ReloadHeaderImage = ev {
-                        if let Some(url) = &state.data.tracklist_image_url {
-                            image_tasks::spawn_header_for_url(
-                                url,
-                                state.ui.image_picker.as_ref(),
-                                worker_tx_clone.clone(),
-                                state.ui.library_config.cover_img_pixels,
-                            );
-                        }
-                    } else {
-                        let _ = app_tx.send(ev).await;
+            } else if let Some(ev) = outgoing_event {
+                if let AppEvent::LoadContextTracks(ref context) = ev {
+                    if let Some(url) = context.image_url.as_ref() {
+                        state.data.tracklist_image_url = Some(url.clone());
+                        image_tasks::spawn_header_for_url(
+                            url,
+                            worker_tx_clone.clone(),
+                            state.ui.library_config.cover_img_pixels,
+                        );
                     }
+                    let _ = app_tx.send(ev).await;
+                } else if let AppEvent::ReloadHeaderImage = ev {
+                    if let Some(url) = &state.data.tracklist_image_url {
+                        image_tasks::spawn_header_for_url(
+                            url,
+                            worker_tx_clone.clone(),
+                            state.ui.library_config.cover_img_pixels,
+                        );
+                    }
+                } else {
+                    let _ = app_tx.send(ev).await;
                 }
             }
         }
@@ -171,7 +159,7 @@ async fn main() -> Result<()> {
 
         if needs_draw {
             let force_clear = state.ui.needs_terminal_clear;
-            tui.apply_background(state.ui.active_theme.background, force_clear)?;
+            tui.apply_background(state.ui.active_theme.background.rat(), force_clear)?;
             state.ui.needs_terminal_clear = false;
             tui.terminal.draw(|f| {
                 tui::render::render_app(f, &mut state);

@@ -35,7 +35,6 @@ pub fn handle_tracks_loaded(
     if let Some(url) = context.image_url.as_ref() {
         image_tasks::spawn_header_for_url(
             url,
-            state.ui.image_picker.as_ref(),
             worker_tx.clone(),
             state.ui.library_config.cover_img_pixels,
         );

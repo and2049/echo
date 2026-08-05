@@ -1,4 +1,5 @@
 use crate::app::{ActiveView, AppMode, AppState};
+use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     DURATION_COLUMN_WIDTH, format_duration_text, format_time, padded_library_list,
     repair_wide_grapheme_trailing_styles, row_text_width, stabilize_terminal_emoji_width,
@@ -11,7 +12,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, StatefulWidget, Table,
+        Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, Table,
         TableState,
     },
 };
@@ -113,7 +114,6 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
     };
 
     if state.ui.library_config.library_thumbnails
-        && state.ui.image_picker.is_some()
         && state.ui.active_library_tab != crate::app::LibraryTab::Browse
     {
         render_library_thumbnails(frame, state, library_list_area, is_focused, visual_range);
@@ -135,7 +135,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                 state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.ui.active_theme.primary)
+                    .bg(state.ui.active_theme.primary.rat())
             } else if i == state.ui.selected_playlist_index {
                 state.ui.active_theme.selected_style()
             } else {
@@ -174,7 +174,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
 
                     // Mark as ghosted if it is in the cut register
                     let list_style = if state.ui.operation_register.contains(&playlist.id) {
-                        style.fg(state.ui.active_theme.text_muted)
+                        style.fg(state.ui.active_theme.text_muted.rat())
                     } else {
                         style
                     };
@@ -200,7 +200,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                         state.ui
                             .active_theme
                             .selected_style()
-                            .bg(state.ui.active_theme.primary)
+                            .bg(state.ui.active_theme.primary.rat())
                 } else if is_focused && i == state.ui.selected_playlist_index {
                     state.ui.active_theme.selected_style()
                 } else {
@@ -240,7 +240,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
                     state.ui
                         .active_theme
                         .selected_style()
-                        .bg(state.ui.active_theme.primary)
+                        .bg(state.ui.active_theme.primary.rat())
                     } else if is_focused && i == state.ui.selected_playlist_index {
                         state.ui.active_theme.selected_style()
                     } else {
@@ -392,24 +392,13 @@ fn render_library_thumbnails(
         last += 1;
     }
 
-    // Materialize pass: request missing thumbnails and render freshly decoded
-    // protocols into their cached cell buffers (needs &mut access to the cache
-    // while the draw pass below only reads it).
+    // Request pass: queue loads for any visible thumbnail not yet decoded.
     for row in &rows[first..last] {
         let Some(url) = row.thumb_url.as_deref() else {
             continue;
         };
         if !state.ui.thumbnails.entries.contains_key(url) {
             state.ui.thumbnails.request(url);
-        } else if let Some(ThumbState::Ready { protocol, buffer }) =
-            state.ui.thumbnails.entries.get_mut(url)
-            && buffer.is_none()
-        {
-            let cache_area = Rect::new(0, 0, THUMB_W, THUMB_H);
-            let mut cached = Buffer::empty(cache_area);
-            let image = ratatui_image::StatefulImage::default();
-            StatefulWidget::render(image, cache_area, &mut cached, protocol.as_mut());
-            *buffer = Some(cached);
         }
     }
 
@@ -419,13 +408,13 @@ fn render_library_thumbnails(
         .ui
         .active_theme
         .selected_style()
-        .bg(state.ui.active_theme.primary);
+        .bg(state.ui.active_theme.primary.rat());
     let folder_style = state
         .ui
         .active_theme
         .primary_style()
         .add_modifier(Modifier::BOLD);
-    let muted = state.ui.active_theme.text_muted;
+    let muted = state.ui.active_theme.text_muted.rat();
     let show_selection =
         state.ui.active_library_tab == crate::app::LibraryTab::Playlists || is_focused;
 
@@ -471,25 +460,14 @@ fn render_library_thumbnails(
                 width: THUMB_W,
                 height: THUMB_H.min(row_bottom.saturating_sub(y)),
             };
-            let cached_buffer = row.thumb_url.as_deref().and_then(|url| {
+            let artwork = row.thumb_url.as_deref().and_then(|url| {
                 match state.ui.thumbnails.get(url) {
-                    Some(ThumbState::Ready {
-                        buffer: Some(cached),
-                        ..
-                    }) => Some(cached),
+                    Some(ThumbState::Ready { artwork }) => Some(artwork.clone()),
                     _ => None,
                 }
             });
-            if let Some(cached) = cached_buffer {
-                for yy in 0..cached.area.height.min(img_area.height) {
-                    for xx in 0..cached.area.width.min(img_area.width) {
-                        let src = &cached[(xx, yy)];
-                        let dst = &mut buf[(img_area.x + xx, img_area.y + yy)];
-                        dst.set_style(src.style());
-                        dst.set_symbol(src.symbol());
-                        dst.set_skip(src.skip);
-                    }
-                }
+            if let Some(artwork) = artwork {
+                crate::tui::image::draw(buf, img_area, &artwork);
             } else {
                 draw_thumb_placeholder(buf, img_area, style.fg(muted), "♪");
             }
@@ -661,14 +639,14 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 state.ui
                     .active_theme
                     .selected_style()
-                    .bg(state.ui.active_theme.primary)
+                    .bg(state.ui.active_theme.primary.rat())
             } else if i == state.ui.selected_track_index {
                 state.ui.active_theme.selected_style()
             } else if is_match {
                 state.ui
                     .active_theme
                     .base_style()
-                    .fg(state.ui.active_theme.secondary)
+                    .fg(state.ui.active_theme.secondary.rat())
             } else {
                 state.ui.active_theme.base_style()
             };
@@ -705,7 +683,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             let liked_cell = if is_selected {
                 Cell::from(liked_str)
             } else {
-                Cell::from(liked_str).style(Style::default().fg(state.ui.active_theme.secondary))
+                Cell::from(liked_str).style(Style::default().fg(state.ui.active_theme.secondary.rat()))
             };
 
             let title_cell = Cell::from(format!(
@@ -844,8 +822,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
     if let Some(h_area) = header_area
         && let Some((title, author)) = header_info
     {
-        let has_image =
-            state.ui.active_library_header_image.is_some() || state.ui.header_image_cache.is_some();
+        let has_image = state.ui.active_library_header_image.is_some();
         let image_width = if has_image { 14 } else { 2 };
 
         let chunks = ratatui::layout::Layout::default()
@@ -863,28 +840,8 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
             height: if has_image { 5 } else { 0 },
         };
 
-        if state.ui.header_image_dirty {
-            if let Some(ref mut protocol) = state.ui.active_library_header_image {
-                let cache_area = Rect::new(0, 0, img_area.width, img_area.height);
-                let mut cached = Buffer::empty(cache_area);
-                let image = ratatui_image::StatefulImage::default();
-                StatefulWidget::render(image, cache_area, &mut cached, protocol);
-                state.ui.header_image_cache = Some(cached);
-            }
-            state.ui.header_image_dirty = false;
-        }
-
-        if let Some(ref cached) = state.ui.header_image_cache {
-            let buf = frame.buffer_mut();
-            for y in 0..cached.area.height.min(img_area.height) {
-                for x in 0..cached.area.width.min(img_area.width) {
-                    let src = &cached[(x, y)];
-                    let dst = &mut buf[(img_area.x + x, img_area.y + y)];
-                    dst.set_style(src.style());
-                    dst.set_symbol(src.symbol());
-                    dst.set_skip(src.skip);
-                }
-            }
+        if let Some(artwork) = state.ui.active_library_header_image.clone() {
+            crate::tui::image::draw(frame.buffer_mut(), img_area, &artwork);
         }
 
         let text_chunks = ratatui::layout::Layout::default()
@@ -900,11 +857,11 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
 
         let title_para = ratatui::widgets::Paragraph::new(title).style(
             Style::default()
-                .fg(state.ui.active_theme.primary)
+                .fg(state.ui.active_theme.primary.rat())
                 .add_modifier(Modifier::BOLD),
         );
         let author_para = ratatui::widgets::Paragraph::new(author)
-            .style(Style::default().fg(state.ui.active_theme.secondary));
+            .style(Style::default().fg(state.ui.active_theme.secondary.rat()));
         let count_para = ratatui::widgets::Paragraph::new(format!(
             "{} {}",
             state.data.tracks.len(),
@@ -941,13 +898,13 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                     for (i, c) in line.chars().enumerate() {
                         let t = i as f32 / logo_width as f32;
                         let base_color =
-                            lerp_color(state.ui.active_theme.secondary, state.ui.active_theme.primary, t);
+                            lerp_color(state.ui.active_theme.secondary.rat(), state.ui.active_theme.primary.rat(), t);
 
                         let style = if c == '█' {
                             Style::default().fg(base_color)
                         } else if c != ' ' {
                             let (r, g, b) = color_to_rgb(base_color);
-                            let (bg_r, bg_g, bg_b) = color_to_rgb(state.ui.active_theme.background);
+                            let (bg_r, bg_g, bg_b) = color_to_rgb(state.ui.active_theme.background.rat());
                             let alpha = 0.4;
                             let shadow_color = Color::Rgb(
                                 (r * alpha + bg_r * (1.0 - alpha)) as u8,

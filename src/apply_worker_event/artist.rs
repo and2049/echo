@@ -42,7 +42,6 @@ pub fn handle_page_opened(
     if let Some(url) = artist_image_url.as_ref() {
         image_tasks::spawn_header_for_url(
             url,
-            state.ui.image_picker.as_ref(),
             worker_tx.clone(),
             state.ui.library_config.cover_img_pixels,
         );
@@ -119,7 +118,6 @@ pub fn handle_image_resolved(
         data.image_url = Some(image_url.clone());
         image_tasks::spawn_header_for_url(
             &image_url,
-            state.ui.image_picker.as_ref(),
             worker_tx.clone(),
             state.ui.library_config.cover_img_pixels,
         );
