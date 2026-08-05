@@ -116,6 +116,69 @@ fn play_event_with_target(track: &Track, target: PlaybackTarget) -> Option<AppEv
     })
 }
 
+// Playback transport. Each applies the optimistic state flip the next SyncPlaybackState will
+// confirm or correct, and returns the event for the worker.
+
+pub fn toggle_playback(state: &mut AppState) -> AppEvent {
+    state.playback.is_playing = !state.playback.is_playing;
+    state.playback.playback_last_updated_at = Some(std::time::Instant::now());
+    AppEvent::TogglePlayback(state.playback.is_playing)
+}
+
+pub fn next_track(state: &AppState) -> AppEvent {
+    AppEvent::NextTrack {
+        current_track_id: state.playback.playing_track_id.clone(),
+    }
+}
+
+pub fn previous_track(state: &AppState) -> AppEvent {
+    AppEvent::PreviousTrack {
+        current_track_id: state.playback.playing_track_id.clone(),
+    }
+}
+
+pub fn toggle_shuffle(state: &mut AppState) -> AppEvent {
+    state.playback.is_shuffled = !state.playback.is_shuffled;
+    AppEvent::ToggleShuffle(state.playback.is_shuffled)
+}
+
+/// Off → Track → Context → Off, Spotify's own cycle order.
+pub fn cycle_repeat(state: &mut AppState) -> AppEvent {
+    let mode = match state.playback.repeat_mode.as_str() {
+        "Off" => "Track",
+        "Track" => "Context",
+        _ => "Off",
+    };
+    state.playback.repeat_mode = mode.to_string();
+    AppEvent::SetRepeatMode(mode.to_string())
+}
+
+/// Seeks to an absolute position; `None` when nothing seekable is playing.
+pub fn seek_to(state: &mut AppState, target_ms: u32) -> Option<AppEvent> {
+    if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
+        return None;
+    }
+    state.playback.set_optimistic_progress(target_ms);
+    Some(AppEvent::SeekTo(target_ms))
+}
+
+pub fn seek_by(state: &mut AppState, seconds: i64) -> Option<AppEvent> {
+    seek_to(state, state.playback.seek_target(seconds))
+}
+
+pub fn set_volume(state: &mut AppState, volume: u8) -> AppEvent {
+    state.playback.volume = volume as u32;
+    state.save_volume();
+    AppEvent::SetVolume(volume)
+}
+
+pub fn toggle_mute(state: &mut AppState) -> AppEvent {
+    let volume = state.playback.toggle_mute_target();
+    state.playback.volume = volume;
+    state.save_volume();
+    AppEvent::SetVolume(volume as u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -104,39 +104,15 @@ pub fn execute(state: &mut AppState, action: KeymapAction) -> Option<AppEvent> {
         return navigation::execute(state, command);
     }
     match action {
-        KeymapAction::PlayPause => {
-            state.playback.is_playing = !state.playback.is_playing;
-            state.playback.playback_last_updated_at = Some(std::time::Instant::now());
-            Some(AppEvent::TogglePlayback(state.playback.is_playing))
-        }
-        KeymapAction::Next => Some(AppEvent::NextTrack {
-            current_track_id: state.playback.playing_track_id.clone(),
-        }),
-        KeymapAction::Previous => Some(AppEvent::PreviousTrack {
-            current_track_id: state.playback.playing_track_id.clone(),
-        }),
-        KeymapAction::Shuffle => {
-            state.playback.is_shuffled = !state.playback.is_shuffled;
-            Some(AppEvent::ToggleShuffle(state.playback.is_shuffled))
-        }
-        KeymapAction::Repeat => {
-            let mode = match state.playback.repeat_mode.as_str() {
-                "Off" => "Track",
-                "Track" => "Context",
-                _ => "Off",
-            };
-            state.playback.repeat_mode = mode.to_string();
-            Some(AppEvent::SetRepeatMode(mode.to_string()))
-        }
-        KeymapAction::SeekBackward => seek_by(state, -5),
-        KeymapAction::SeekForward => seek_by(state, 5),
-        KeymapAction::SeekStart => seek_to(state, 0),
-        KeymapAction::Mute => {
-            let volume = state.playback.toggle_mute_target();
-            state.playback.volume = volume;
-            state.save_volume();
-            Some(AppEvent::SetVolume(volume as u8))
-        }
+        KeymapAction::PlayPause => Some(echo_core::intent::toggle_playback(state)),
+        KeymapAction::Next => Some(echo_core::intent::next_track(state)),
+        KeymapAction::Previous => Some(echo_core::intent::previous_track(state)),
+        KeymapAction::Shuffle => Some(echo_core::intent::toggle_shuffle(state)),
+        KeymapAction::Repeat => Some(echo_core::intent::cycle_repeat(state)),
+        KeymapAction::SeekBackward => echo_core::intent::seek_by(state, -5),
+        KeymapAction::SeekForward => echo_core::intent::seek_by(state, 5),
+        KeymapAction::SeekStart => echo_core::intent::seek_to(state, 0),
+        KeymapAction::Mute => Some(echo_core::intent::toggle_mute(state)),
         KeymapAction::SortOriginal => sort(state, TrackSort::Original),
         KeymapAction::SortTitle => sort(state, TrackSort::Title),
         KeymapAction::SortArtist => sort(state, TrackSort::Artist),
@@ -171,18 +147,6 @@ fn sort(state: &mut AppState, mode: TrackSort) -> Option<AppEvent> {
         state.sort_tracks(mode);
     }
     None
-}
-
-fn seek_by(state: &mut AppState, seconds: i64) -> Option<AppEvent> {
-    seek_to(state, state.playback.seek_target(seconds))
-}
-
-fn seek_to(state: &mut AppState, target: u32) -> Option<AppEvent> {
-    if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
-        return None;
-    }
-    state.playback.set_optimistic_progress(target);
-    Some(AppEvent::SeekTo(target))
 }
 
 fn key_token(key: &KeyEvent) -> String {
