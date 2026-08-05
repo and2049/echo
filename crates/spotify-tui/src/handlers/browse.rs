@@ -1,7 +1,7 @@
 use echo_core::{
     app::{ActiveView, AppState},
     events::AppEvent,
-    models::{BrowseNode, TrackListContext},
+    models::BrowseNode,
 };
 
 pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
@@ -10,24 +10,8 @@ pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
 
 pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
     match state.ui.active_browse_node {
-        BrowseNode::TopTracks => {
-            if state.data.top_tracks.is_empty() {
-                return Some(AppEvent::FetchTopTracks);
-            }
-            state.show_generated_tracks(
-                state.data.top_tracks.clone(),
-                TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
-            );
-        }
-        BrowseNode::RecentlyPlayed => {
-            if state.data.recently_played.is_empty() {
-                return Some(AppEvent::FetchRecentlyPlayed);
-            }
-            state.show_generated_tracks(
-                state.data.recently_played.clone(),
-                TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
-            );
-        }
+        BrowseNode::TopTracks => return echo_core::intent::open_top_tracks(state),
+        BrowseNode::RecentlyPlayed => return echo_core::intent::open_recently_played(state),
         BrowseNode::FollowedArtists => {
             if state.data.followed_artists.is_empty() {
                 return Some(AppEvent::FetchFollowedArtists);

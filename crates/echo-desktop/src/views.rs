@@ -92,6 +92,44 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                         .child("Artists")
                 }),
         )
+        .child({
+            // The TUI's Browse nodes, as quick links.
+            let browse_link = |id: &'static str,
+                               label: &'static str,
+                               open: fn(&mut echo_core::app::AppState)
+                                   -> Option<echo_core::events::AppEvent>| {
+                div()
+                    .id(id)
+                    .px_3()
+                    .py_1()
+                    .text_sm()
+                    .text_color(muted)
+                    .hover(|style| style.bg(muted.opacity(0.1)))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        if let Some(event) = open(&mut this.state) {
+                            this.dispatch(event);
+                        }
+                        cx.notify();
+                    }))
+                    .child(label)
+            };
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .pb_1()
+                .child(browse_link(
+                    "top-tracks",
+                    "⭐ Top Tracks",
+                    echo_core::intent::open_top_tracks,
+                ))
+                .child(browse_link(
+                    "recently-played",
+                    "🕒 Recently Played",
+                    echo_core::intent::open_recently_played,
+                ))
+        })
         .child(
             uniform_list(
                 "library-rows",
@@ -1225,6 +1263,134 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
             .into_any_element()
         })
         .into_any_element()
+}
+
+/// The lyrics overlay: the current line (by playback position) highlighted and kept centered.
+pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+
+    let body = if app.state.playback.is_fetching_lyrics {
+        div()
+            .py_8()
+            .flex()
+            .justify_center()
+            .text_color(muted)
+            .child("Loading lyrics…")
+            .into_any_element()
+    } else if let Some(lyrics) = app.state.playback.current_lyrics.clone() {
+        let progress_ms = app.state.playback.display_progress_ms();
+        let current = lyrics
+            .lines
+            .iter()
+            .take_while(|line| line.start_ms <= progress_ms)
+            .count()
+            .saturating_sub(1);
+        let count = lyrics.lines.len();
+        app.lyrics_scroll
+            .scroll_to_item(current, gpui::ScrollStrategy::Center);
+
+        uniform_list(
+            "lyric-lines",
+            count,
+            cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, _cx| {
+                let theme = &this.state.ui.active_theme;
+                let fg = theme.text.gpui(WINDOW_FG());
+                let muted = theme.text_muted.gpui(WINDOW_FG());
+                let accent = theme.primary.gpui(WINDOW_FG());
+                let progress_ms = this.state.playback.display_progress_ms();
+                let lines = this
+                    .state
+                    .playback
+                    .current_lyrics
+                    .as_ref()
+                    .map(|lyrics| lyrics.lines.clone())
+                    .unwrap_or_default();
+                let current = lines
+                    .iter()
+                    .take_while(|line| line.start_ms <= progress_ms)
+                    .count()
+                    .saturating_sub(1);
+
+                range
+                    .map(|ix| {
+                        let text = lines.get(ix).map(|line| line.text.clone()).unwrap_or_default();
+                        let color = if ix == current {
+                            accent
+                        } else if ix > current {
+                            muted
+                        } else {
+                            fg
+                        };
+                        div()
+                            .id(ix)
+                            .w_full()
+                            .h(px(26.0))
+                            .px_4()
+                            .flex()
+                            .items_center()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .text_sm()
+                            .text_color(color)
+                            .child(SharedString::from(text))
+                    })
+                    .collect()
+            }),
+        )
+        .track_scroll(&app.lyrics_scroll)
+        .flex_grow(1.0)
+        .into_any_element()
+    } else {
+        div()
+            .py_8()
+            .flex()
+            .justify_center()
+            .text_color(muted)
+            .child("No lyrics for this track")
+            .into_any_element()
+    };
+
+    div()
+        .id("lyrics-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.state.ui.lyrics_modal_open = false;
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("lyrics-panel")
+                .w(px(520.0))
+                .h(px(480.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(crate::theme::WINDOW_BG())
+                .p_3()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(
+                    div()
+                        .pb_2()
+                        .text_sm()
+                        .text_color(fg)
+                        .child(SharedString::from(format!(
+                            "Lyrics — {}",
+                            app.state.playback.playing_track_title.clone()
+                        ))),
+                )
+                .child(body),
+        )
 }
 
 /// The Spotify Connect device picker, painted over everything else.

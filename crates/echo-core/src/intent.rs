@@ -398,6 +398,32 @@ pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     AppEvent::CancelArtistPageLoad
 }
 
+// Browse nodes: generated lists that fetch on first use.
+
+/// Opens the user's top tracks; fetches them first when none are cached yet.
+pub fn open_top_tracks(state: &mut AppState) -> Option<AppEvent> {
+    if state.data.top_tracks.is_empty() {
+        return Some(AppEvent::FetchTopTracks);
+    }
+    state.show_generated_tracks(
+        state.data.top_tracks.clone(),
+        TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
+    );
+    None
+}
+
+/// Opens the recently-played list; fetches it first when none is cached yet.
+pub fn open_recently_played(state: &mut AppState) -> Option<AppEvent> {
+    if state.data.recently_played.is_empty() {
+        return Some(AppEvent::FetchRecentlyPlayed);
+    }
+    state.show_generated_tracks(
+        state.data.recently_played.clone(),
+        TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
+    );
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
