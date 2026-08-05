@@ -59,12 +59,9 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
                 }
             }
             KeyCode::Enter => {
-                if let Some(device) = state.data.devices.get(state.ui.selected_device_index) {
-                    state.ui.device_modal_open = false;
-                    let id = device.id.clone();
-                    if !id.is_empty() {
-                        return (true, Some(AppEvent::TransferPlayback(id)));
-                    }
+                let index = state.ui.selected_device_index;
+                if let Some(event) = echo_core::intent::transfer_to_device(state, index) {
+                    return (true, Some(event));
                 }
             }
             _ => {}
