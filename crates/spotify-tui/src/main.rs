@@ -1,3 +1,14 @@
+// This crate's tests exercise handlers that load and save the user config through echo-core,
+// which is compiled without cfg(test) here — redirect its config root to a temp directory
+// before any test runs so the real ~/.config/echo is never touched.
+#[cfg(test)]
+#[ctor::ctor]
+fn redirect_config_for_tests() {
+    let dir = std::env::temp_dir().join(format!("echo-tui-test-config-{}", std::process::id()));
+    // SAFETY: ctor runs before main, while the process is still single-threaded.
+    unsafe { std::env::set_var("ECHO_CONFIG_DIR", &dir) };
+}
+
 mod handlers;
 mod tui;
 

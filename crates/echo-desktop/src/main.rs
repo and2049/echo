@@ -86,6 +86,26 @@ const LIST_KEYS: Option<&str> = Some("list && !search");
 /// Keyboard page distance; the TUI uses a similar fixed stride.
 const PAGE_ROWS: isize = 10;
 
+/// A right-click menu anchored where the click landed, over sidebar row `index` (of the
+/// active library tab's list).
+#[derive(Clone)]
+pub(crate) struct ContextMenuState {
+    pub index: usize,
+    pub position: gpui::Point<Pixels>,
+}
+
+/// What a context-menu item does; resolved against the row the menu was opened on.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum MenuAction {
+    Open,
+    TogglePin,
+    Rename,
+    RemoveFromFolder,
+    DeletePlaylist,
+    DeleteFolder,
+    RemoveAlbum,
+}
+
 pub(crate) struct EchoApp {
     pub(crate) state: echo_core::app::AppState,
     pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
@@ -106,6 +126,8 @@ pub(crate) struct EchoApp {
     pub(crate) lyrics_scroll: UniformListScrollHandle,
     /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
     pub(crate) theme_modal_open: bool,
+    /// Right-click menu over a sidebar row; the TUI reaches these through keys instead.
+    pub(crate) context_menu: Option<ContextMenuState>,
     /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
     /// position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -199,6 +221,7 @@ impl EchoApp {
             artist_albums_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
             theme_modal_open: false,
+            context_menu: None,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             focus_handle,
@@ -367,7 +390,11 @@ impl EchoApp {
     /// Escape / `h` / backspace: close whatever is topmost, else go back — the same ordering
     /// as the TUI's back handling, with the desktop-only modals checked first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
-        if self.state.ui.device_modal_open {
+        if echo_core::intent::prompt_active(&self.state) {
+            echo_core::intent::cancel_prompt(&mut self.state);
+        } else if self.context_menu.is_some() {
+            self.context_menu = None;
+        } else if self.state.ui.device_modal_open {
             self.state.ui.device_modal_open = false;
         } else if self.theme_modal_open {
             self.theme_modal_open = false;
@@ -417,6 +444,84 @@ impl EchoApp {
         !self.state.data.search_results.tracks.is_empty()
             || !self.state.data.search_results.albums.is_empty()
             || !self.state.data.search_results.artists.is_empty()
+    }
+
+    /// Runs a context-menu item against sidebar row `index`, then closes the menu. Destructive
+    /// items only stage a `*_prompt` — the confirm modal fires the actual event.
+    pub(crate) fn run_menu_action(
+        &mut self,
+        action: MenuAction,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.context_menu = None;
+        if self.state.ui.active_library_tab == LibraryTab::Albums {
+            match action {
+                MenuAction::Open => {
+                    if let Some(event) = echo_core::intent::open_album(&mut self.state, index) {
+                        self.dispatch(event);
+                    }
+                }
+                MenuAction::RemoveAlbum => {
+                    if let Some(album) = self.state.data.saved_albums.get(index) {
+                        self.state.ui.album_mass_delete_prompt = Some(vec![album.id.clone()]);
+                    }
+                }
+                _ => {}
+            }
+            cx.notify();
+            return;
+        }
+
+        let Some(node) = self.state.data.library_view.get(index).cloned() else {
+            cx.notify();
+            return;
+        };
+        match action {
+            MenuAction::Open => {
+                self.state.ui.selected_playlist_index = index;
+                if let Some(event) =
+                    echo_core::intent::open_library_entry(&mut self.state, index)
+                {
+                    self.dispatch(event);
+                }
+            }
+            MenuAction::TogglePin => {
+                self.state.ui.selected_playlist_index = index;
+                echo_core::intent::toggle_pin_selected(&mut self.state);
+            }
+            MenuAction::Rename => {
+                let name = match &node {
+                    echo_core::models::LibraryNode::Playlist { playlist, .. } => {
+                        playlist.name.clone()
+                    }
+                    echo_core::models::LibraryNode::Folder(folder) => folder.name.clone(),
+                };
+                self.state.ui.selected_playlist_index = index;
+                self.open_command(&format!("rename {name}"), window, cx);
+            }
+            MenuAction::RemoveFromFolder => {
+                if let echo_core::models::LibraryNode::Playlist { playlist, .. } = &node {
+                    echo_core::intent::remove_playlist_from_folders(
+                        &mut self.state,
+                        &playlist.id,
+                    );
+                }
+            }
+            MenuAction::DeletePlaylist => {
+                if let echo_core::models::LibraryNode::Playlist { playlist, .. } = &node {
+                    self.state.ui.playlist_delete_prompt = Some(vec![playlist.id.clone()]);
+                }
+            }
+            MenuAction::DeleteFolder => {
+                if let echo_core::models::LibraryNode::Folder(folder) = &node {
+                    self.state.ui.folder_delete_prompt = Some(folder.name.clone());
+                }
+            }
+            MenuAction::RemoveAlbum => {}
+        }
+        cx.notify();
     }
 
     // Vim-style command mode (`:`) and track filter (`/`) — a bar above the playback bar that
@@ -1277,6 +1382,12 @@ impl Render for EchoApp {
             .ui
             .device_modal_open
             .then(|| views::device_modal(self, cx).into_any_element());
+        let context_menu = self
+            .context_menu
+            .is_some()
+            .then(|| views::context_menu(self, cx).into_any_element());
+        let prompt_modal = echo_core::intent::prompt_active(&self.state)
+            .then(|| views::prompt_modal(self, cx).into_any_element());
 
         div()
             .key_context(LIST_CONTEXT)
@@ -1375,6 +1486,8 @@ impl Render for EchoApp {
             .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
+            .when_some(context_menu, |el, menu| el.child(menu))
+            .when_some(prompt_modal, |el, modal| el.child(modal))
     }
 }
 

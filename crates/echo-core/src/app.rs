@@ -621,7 +621,21 @@ impl AppState {
         match self.ui.library_config.sort_mode {
             SortMode::Alphabetical => loose.sort_by_key(|a| a.name.to_lowercase()),
             SortMode::Creator => loose.sort_by_key(|a| a.owner.to_lowercase()),
-            SortMode::Default => {}
+            SortMode::Default => {
+                // Drag reordering writes an explicit order; unknown playlists keep their API
+                // order after the listed ones (the sort is stable).
+                let order = &self.ui.library_config.playlist_order;
+                if !order.is_empty() {
+                    let position: std::collections::HashMap<&str, usize> = order
+                        .iter()
+                        .enumerate()
+                        .map(|(index, id)| (id.as_str(), index))
+                        .collect();
+                    loose.sort_by_key(|p| {
+                        position.get(p.id.as_str()).copied().unwrap_or(usize::MAX)
+                    });
+                }
+            }
         }
 
         for p in loose {

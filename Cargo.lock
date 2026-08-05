@@ -1480,6 +1480,16 @@ dependencies = [
 
 [[package]]
 name = "ctor"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec09e802f5081de6157da9a75701d6c713d8dc3ba52571fd4bd25f412644e8a6"
+dependencies = [
+ "ctor-proc-macro",
+ "dtor",
+]
+
+[[package]]
+name = "ctor"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d83cb7e7a873830708d6b02a78cd36a592c6fa14bf267b68725103b85c0d77f"
@@ -1487,6 +1497,12 @@ dependencies = [
  "link-section",
  "linktime-proc-macro",
 ]
+
+[[package]]
+name = "ctor-proc-macro"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
 
 [[package]]
 name = "ctr"
@@ -1773,6 +1789,21 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "dtor"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97cbdf2ad6846025e8e25df05171abfb30e3ababa12ee0a0e44b9bbe570633a8"
+dependencies = [
+ "dtor-proc-macro",
+]
+
+[[package]]
+name = "dtor-proc-macro"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7454e41ff9012c00d53cf7f475c5e3afa3b91b7c90568495495e8d9bf47a1055"
 
 [[package]]
 name = "dunce"
@@ -2582,7 +2613,7 @@ dependencies = [
  "core-graphics 0.24.0",
  "core-text",
  "core-video",
- "ctor",
+ "ctor 1.0.12",
  "derive_more",
  "embed-resource",
  "etagere",
@@ -2695,7 +2726,7 @@ dependencies = [
  "core-graphics 0.24.0",
  "core-text",
  "core-video",
- "ctor",
+ "ctor 1.0.12",
  "derive_more",
  "dispatch2",
  "etagere",
@@ -4267,7 +4298,7 @@ dependencies = [
  "bindgen",
  "core-foundation 0.10.1",
  "core-video",
- "ctor",
+ "ctor 1.0.12",
  "foreign-types 0.5.0",
  "metal",
  "objc",
@@ -7301,6 +7332,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "ctor 0.4.3",
  "echo-core",
  "image",
  "ratatui",
@@ -9132,7 +9164,7 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "once_cell",
- "ordered-float 4.6.0",
+ "ordered-float 5.3.0",
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",

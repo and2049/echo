@@ -328,6 +328,11 @@ pub struct LibraryConfig {
     pub folders: Vec<Folder>,
     #[serde(default)]
     pub sort_mode: SortMode,
+    /// Explicit ordering of the loose (unpinned, unfoldered) playlists, written by drag
+    /// reordering in the desktop app. Applies under `SortMode::Default`; playlists not listed
+    /// keep their API order after the listed ones.
+    #[serde(default)]
+    pub playlist_order: Vec<String>,
     #[serde(default)]
     pub active_theme: Option<String>,
     #[serde(default = "default_track_index_base")]
@@ -390,6 +395,7 @@ impl Default for LibraryConfig {
             pinned: vec![],
             folders: vec![],
             sort_mode: SortMode::default(),
+            playlist_order: vec![],
             active_theme: None,
             track_index_base: 1,
             language: "en".to_string(),
@@ -424,6 +430,27 @@ pub enum SortMode {
     Creator,
 }
 
+/// Root directory for echo's config, caches and local-library data.
+///
+/// Honors `ECHO_CONFIG_DIR` when set. Under `cfg(test)` — echo-core's own unit tests — it
+/// falls back to a per-process temp directory: tests exercise intents and commands that
+/// save, and must never touch the real `~/.config/echo`.
+pub fn echo_config_root() -> PathBuf {
+    if let Ok(dir) = env::var("ECHO_CONFIG_DIR") {
+        return PathBuf::from(dir);
+    }
+    #[cfg(test)]
+    {
+        std::env::temp_dir().join(format!("echo-test-config-{}", std::process::id()))
+    }
+    #[cfg(not(test))]
+    {
+        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        path.push("echo");
+        path
+    }
+}
+
 impl AppConfig {
     pub fn clear_auth_tokens() -> Result<()> {
         let mut config = Self::load();
@@ -432,10 +459,7 @@ impl AppConfig {
     }
 
     pub fn config_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("echo");
-        path.push("config.toml");
-        path
+        echo_config_root().join("config.toml")
     }
 
     pub fn load() -> Self {
@@ -458,10 +482,7 @@ impl AppConfig {
     }
 
     pub fn cache_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("echo");
-        path.push("cache.json");
-        path
+        echo_config_root().join("cache.json")
     }
 
     pub fn load_cache() -> CacheData {
@@ -484,10 +505,7 @@ impl AppConfig {
     }
 
     pub fn local_library_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("echo");
-        path.push("local_library.json");
-        path
+        echo_config_root().join("local_library.json")
     }
 
     pub fn load_local_library() -> LocalLibrary {
@@ -510,10 +528,7 @@ impl AppConfig {
     }
 
     pub fn local_playlists_path() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("echo");
-        path.push("local_playlists.json");
-        path
+        echo_config_root().join("local_playlists.json")
     }
 
     pub fn load_local_playlists() -> LocalPlaylists {
@@ -536,10 +551,7 @@ impl AppConfig {
     }
 
     pub fn local_artwork_dir() -> PathBuf {
-        let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-        path.push("echo");
-        path.push("local_artwork");
-        path
+        echo_config_root().join("local_artwork")
     }
 }
 
@@ -571,10 +583,7 @@ impl Default for Theme {
 }
 
 pub fn user_theme_dir() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("echo");
-    path.push("themes");
-    path
+    echo_config_root().join("themes")
 }
 
 pub fn workspace_theme_dir() -> PathBuf {

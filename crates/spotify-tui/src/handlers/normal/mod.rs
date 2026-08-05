@@ -706,8 +706,6 @@ fn search_has_results(state: &AppState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use echo_core::models::{PlaybackTarget, TrackSource};
-    use std::path::PathBuf;
 
     #[test]
     fn seek_keys_emit_absolute_targets() {

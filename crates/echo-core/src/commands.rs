@@ -639,9 +639,10 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 }
             }
             "rename" => {
+                // Renames the selected sidebar node regardless of the active view — the
+                // desktop's context menu reaches here while a track list is showing.
                 let name = args.collect::<Vec<&str>>().join(" ");
                 if !name.is_empty()
-                    && state.ui.active_view == crate::app::ActiveView::Library
                     && let Some(node) = state
                         .data
                         .library_view

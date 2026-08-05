@@ -73,10 +73,7 @@ impl ThumbnailCache {
 }
 
 pub fn thumbs_dir() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("echo");
-    path.push("thumbs");
-    path
+    crate::config::echo_config_root().join("thumbs")
 }
 
 /// Stable on-disk location for a thumbnail. Spotify image URLs end in a
