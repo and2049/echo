@@ -188,7 +188,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
-                    let panel_bg = theme.background.gpui(WINDOW_BG());
+                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
 
@@ -1598,6 +1598,7 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
 
     let body = if app.state.playback.is_fetching_lyrics {
         div()
@@ -1701,7 +1702,7 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .rounded_lg()
                 .border_1()
                 .border_color(muted.opacity(0.4))
-                .bg(crate::theme::WINDOW_BG())
+                .bg(surface)
                 .p_3()
                 .flex()
                 .flex_col()
@@ -1726,6 +1727,7 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
 
     let mut names: Vec<String> = app.state.ui.themes.keys().cloned().collect();
@@ -1752,7 +1754,7 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .rounded_lg()
                 .border_1()
                 .border_color(muted.opacity(0.4))
-                .bg(crate::theme::WINDOW_BG())
+                .bg(surface)
                 .p_3()
                 .flex()
                 .flex_col()
@@ -1780,6 +1782,10 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                 .px_2()
                                 .py_1()
                                 .rounded_md()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
                                 .text_sm()
                                 .text_color(color)
                                 .hover(|style| style.bg(muted.opacity(0.1)))
@@ -1792,7 +1798,9 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                     },
                                 ))
                                 .child(SharedString::from(name))
-                                .when(is_active, |el| el.child(div().text_color(accent).child(" ●")))
+                                .when(is_active, |el| {
+                                    el.child(div().flex_none().text_color(accent).child("●"))
+                                })
                         }))
                         .into_any_element()
                 }),
@@ -1804,6 +1812,7 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
     let selected = app.state.ui.selected_device_index;
@@ -1830,7 +1839,7 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .rounded_lg()
                 .border_1()
                 .border_color(muted.opacity(0.4))
-                .bg(crate::theme::WINDOW_BG())
+                .bg(surface)
                 .p_3()
                 .flex()
                 .flex_col()
@@ -1983,6 +1992,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
@@ -2058,7 +2068,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .rounded_md()
                 .border_1()
                 .border_color(muted.opacity(0.4))
-                .bg(crate::theme::WINDOW_BG())
+                .bg(surface)
                 .py_1()
                 .flex()
                 .flex_col()
@@ -2087,6 +2097,7 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
     let ui = &app.state.ui;
@@ -2168,7 +2179,7 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .rounded_lg()
                 .border_1()
                 .border_color(muted.opacity(0.4))
-                .bg(crate::theme::WINDOW_BG())
+                .bg(surface)
                 .p_4()
                 .flex()
                 .flex_col()

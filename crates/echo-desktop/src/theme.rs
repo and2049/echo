@@ -90,3 +90,6 @@ impl ToGpui for ThemeColor {
 /// `Reset`.
 pub const WINDOW_BG: fn() -> Hsla = || rgb8(0x12, 0x12, 0x12);
 pub const WINDOW_FG: fn() -> Hsla = || rgb8(0xe5, 0xe5, 0xe5);
+/// Fallback for the theme `surface` slot (menus/modals) when a theme doesn't define one:
+/// a step lighter than the window background so panels still separate from the content.
+pub const PANEL_BG: fn() -> Hsla = || rgb8(0x1f, 0x1f, 0x22);

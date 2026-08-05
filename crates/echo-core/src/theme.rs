@@ -95,6 +95,8 @@ pub struct ResolvedTheme {
     pub primary: ThemeColor,
     pub secondary: ThemeColor,
     pub background: ThemeColor,
+    /// Elevated panels (menus, modals); `Reset` when the theme doesn't define one.
+    pub surface: ThemeColor,
     pub text: ThemeColor,
     pub text_muted: ThemeColor,
     pub highlight_bg: ThemeColor,
@@ -112,6 +114,7 @@ impl ResolvedTheme {
             primary: parse(&theme.primary, ThemeColor::Named(Cyan)),
             secondary: parse(&theme.secondary, ThemeColor::Named(Yellow)),
             background: parse(&theme.background, ThemeColor::Reset),
+            surface: parse(&theme.surface, ThemeColor::Reset),
             text: parse(&theme.text, ThemeColor::Named(White)),
             text_muted: parse(&theme.text_muted, ThemeColor::Named(DarkGray)),
             highlight_bg: parse(&theme.highlight_bg, ThemeColor::Named(White)),
