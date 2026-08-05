@@ -5,7 +5,6 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use std::panic;
 use std::time::Duration;
-use tokio::sync::mpsc;
 
 use echo_core::{apply_worker_event, i18n, image_tasks, thumbnails};
 
