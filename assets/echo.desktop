@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=Echo
-Comment=Terminal-based Spotify client and music player
-Exec=echo
+Comment=Spotify client and music player
+Exec=echo-desktop
 Icon=echo
 Terminal=false
 Type=Application
 Categories=Audio;Music;Player;
-StartupWMClass=echo
+StartupWMClass=echo-desktop

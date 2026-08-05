@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Echo (TUI)
+Comment=Terminal-based Spotify client and music player
+Exec=spotify
+Icon=echo
+Terminal=false
+Type=Application
+Categories=Audio;Music;Player;
+StartupWMClass=spotify

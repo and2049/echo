@@ -35,8 +35,16 @@ echo 是一款用 Rust 編寫的終端音樂播放器和 Spotify 用戶端。ech
 
 ### 安裝
 
-下載並執行安裝程式：
-https://github.com/and2049/echo/releases
+從[發佈頁面](https://github.com/and2049/echo/releases)下載對應平台的安裝程式。**Echo** 安裝包同時包含桌面應用程式和 `spotify` 終端指令：
+
+- **Windows**（`echo-desktop_*.msi`）：安裝桌面應用程式，並將安裝目錄加入 `PATH`（解除安裝時自動移除），安裝後在新終端中即可直接執行 `spotify`。
+- **macOS**（`Echo_*.dmg`）：將 `Echo.app` 拖入 Applications。TUI 已內建於應用程式套件中，執行一次以下指令即可加入 `PATH`：
+
+  ```bash
+  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  ```
+
+- **Linux**（`.deb`）：安裝桌面應用程式及 `/usr/bin/spotify`。只想要 TUI？請改用發佈頁面中的 TUI AppImage（`spotify_*.AppImage`；不要與 deb 同時安裝，兩者都提供 `spotify`）。
 
 或者
 
@@ -51,7 +59,7 @@ cargo build --release
 執行二進位檔：
 
 ```bash
-./target/release/echo
+./target/release/spotify
 ```
 
 首次執行時，echo 會提示您輸入 `Client ID` 和 `Client Secret`，然後開啟瀏覽器以透過 Spotify 進行身分驗證。

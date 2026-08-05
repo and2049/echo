@@ -35,10 +35,18 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 
 ### Installation
 
-Download and run installer:
-https://github.com/and2049/echo/releases
+Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **Echo** package installs the desktop app *and* the `spotify` terminal command:
 
-### AppImage Setup (Linux)
+- **Windows** (`echo-desktop_*.msi`): installs the desktop app and adds the install directory to `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again.
+- **macOS** (`Echo_*.dmg`): drag `Echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
+
+  ```bash
+  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  ```
+
+- **Linux** (`.deb`): installs the desktop app plus `/usr/bin/spotify`. Prefer just the TUI? Use the TUI AppImage below (`spotify_*.AppImage`) instead — don't install both, they'd both own `spotify`.
+
+### TUI AppImage Setup (Linux)
 
 On Ubuntu 22.04+ the AppImage runtime requires `libfuse2`:
 
@@ -90,8 +98,10 @@ cargo build --release
 Run the binary:
 
 ```bash
-./target/release/echo
+./target/release/spotify
 ```
+
+> The terminal command is `spotify` — the previous name collided with the shell builtin `echo`. Configuration and caches still live in `~/.config/echo/`, so existing setups keep working after the rename. On Windows, if the official Spotify client's directory happens to be on your `PATH`, make sure `%USERPROFILE%\.cargo\bin` (or wherever you installed this binary) comes first.
 
 On first run, echo will prompt you to enter your `Client ID` and `Client Secret`, then open your browser to authenticate with Spotify.
 
@@ -225,7 +235,7 @@ Embedded artwork is used when available. If a track has no embedded artwork, ech
 
 ## Troubleshooting
 - **Theme color rendering issues (Windows)**: Disable "Adjust indistinguishable text" in the Appearance settings of the Defaults profile. 
-- **Images not rendering**: Ensure your terminal supports the Kitty image protocol or Sixel graphics (e.g., Kitty, WezTerm, Alacritty with patches). echo will fall back to block rendering if neither is supported.
+- **Images not rendering**: Cover art is drawn with half-block cells and needs nothing from the terminal beyond truecolor support, which every modern terminal has.
 - **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
 - **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
 - **Audio sounds mono or muffled (Bluetooth headsets)**: Windows exposes a Bluetooth headset as two output devices — a stereo "Headphones" (A2DP) endpoint, and a mono "Hands-Free" (HFP) endpoint capped at 16 kHz. Windows switches to Hands-Free whenever an application opens the microphone. Check `echo-debug-audio-spotify.log`: if it reports `channels=1`, quit whatever is holding the mic and select the stereo endpoint as your default output device.

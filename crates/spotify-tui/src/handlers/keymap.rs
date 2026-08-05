@@ -1,0 +1,270 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use echo_core::app::{AppState, TrackSort};
+use echo_core::events::AppEvent;
+use crate::handlers::navigation::{self, NavigationCommand};
+
+const SEQUENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeymapAction {
+    First,
+    Last,
+    PageUp,
+    PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    CurrentContext,
+    PlayPause,
+    Next,
+    Previous,
+    Shuffle,
+    Repeat,
+    SeekBackward,
+    SeekForward,
+    SeekStart,
+    Mute,
+    SortOriginal,
+    SortTitle,
+    SortArtist,
+    SortAlbum,
+    SortDuration,
+    SortAdded,
+    ReverseTracks,
+    Redraw,
+    ToggleThumbnails,
+}
+
+pub struct ConfiguredKey {
+    pub consumed: bool,
+    pub action: Option<KeymapAction>,
+}
+
+pub fn configured_action(state: &mut AppState, key: &KeyEvent) -> ConfiguredKey {
+    if state.ui.library_config.keybindings.is_empty() {
+        return ConfiguredKey { consumed: false, action: None };
+    }
+    if state
+        .ui
+        .pending_key_sequence
+        .as_ref()
+        .is_some_and(|(_, started)| started.elapsed() >= SEQUENCE_TIMEOUT)
+    {
+        state.ui.pending_key_sequence = None;
+    }
+    let token = key_token(key);
+    if let Some((prefix, _)) = state.ui.pending_key_sequence.as_ref() {
+        let sequence = format!("{prefix} {token}");
+        if let Some(action) = state
+            .ui
+            .library_config
+            .keybindings
+            .get(&sequence)
+            .and_then(|name| parse_action(name))
+        {
+            state.ui.pending_key_sequence = None;
+            return ConfiguredKey { consumed: true, action: Some(action) };
+        }
+    }
+    if let Some(action) = state
+        .ui
+        .library_config
+        .keybindings
+        .get(&token)
+        .and_then(|name| parse_action(name))
+    {
+        return ConfiguredKey { consumed: true, action: Some(action) };
+    }
+    let prefix = format!("{token} ");
+    if state
+        .ui
+        .library_config
+        .keybindings
+        .keys()
+        .any(|binding| binding.starts_with(&prefix))
+    {
+        state.ui.pending_key_sequence = Some((token, std::time::Instant::now()));
+        return ConfiguredKey { consumed: true, action: None };
+    }
+    ConfiguredKey { consumed: false, action: None }
+}
+
+pub fn execute(state: &mut AppState, action: KeymapAction) -> Option<AppEvent> {
+    let navigation_command = match action {
+        KeymapAction::First => Some(NavigationCommand::First),
+        KeymapAction::Last => Some(NavigationCommand::Last),
+        KeymapAction::PageUp => Some(NavigationCommand::PageUp),
+        KeymapAction::PageDown => Some(NavigationCommand::PageDown),
+        KeymapAction::HalfPageUp => Some(NavigationCommand::HalfPageUp),
+        KeymapAction::HalfPageDown => Some(NavigationCommand::HalfPageDown),
+        KeymapAction::CurrentContext => Some(NavigationCommand::CurrentContext),
+        _ => None,
+    };
+    if let Some(command) = navigation_command {
+        return navigation::execute(state, command);
+    }
+    match action {
+        KeymapAction::PlayPause => Some(echo_core::intent::toggle_playback(state)),
+        KeymapAction::Next => Some(echo_core::intent::next_track(state)),
+        KeymapAction::Previous => Some(echo_core::intent::previous_track(state)),
+        KeymapAction::Shuffle => Some(echo_core::intent::toggle_shuffle(state)),
+        KeymapAction::Repeat => Some(echo_core::intent::cycle_repeat(state)),
+        KeymapAction::SeekBackward => echo_core::intent::seek_by(state, -5),
+        KeymapAction::SeekForward => echo_core::intent::seek_by(state, 5),
+        KeymapAction::SeekStart => echo_core::intent::seek_to(state, 0),
+        KeymapAction::Mute => Some(echo_core::intent::toggle_mute(state)),
+        KeymapAction::SortOriginal => sort(state, TrackSort::Original),
+        KeymapAction::SortTitle => sort(state, TrackSort::Title),
+        KeymapAction::SortArtist => sort(state, TrackSort::Artist),
+        KeymapAction::SortAlbum => sort(state, TrackSort::Album),
+        KeymapAction::SortDuration => sort(state, TrackSort::Duration),
+        KeymapAction::SortAdded => sort(state, TrackSort::Added),
+        KeymapAction::ReverseTracks => {
+            state.reverse_tracks();
+            None
+        }
+        KeymapAction::Redraw => {
+            state.ui.needs_terminal_clear = true;
+            None
+        }
+        KeymapAction::ToggleThumbnails => {
+            let enabled = !state.ui.library_config.library_thumbnails;
+            state.set_library_thumbnails(enabled);
+            None
+        }
+        KeymapAction::First
+        | KeymapAction::Last
+        | KeymapAction::PageUp
+        | KeymapAction::PageDown
+        | KeymapAction::HalfPageUp
+        | KeymapAction::HalfPageDown
+        | KeymapAction::CurrentContext => unreachable!(),
+    }
+}
+
+fn sort(state: &mut AppState, mode: TrackSort) -> Option<AppEvent> {
+    if state.ui.active_view == echo_core::app::ActiveView::TrackList {
+        state.sort_tracks(mode);
+    }
+    None
+}
+
+fn key_token(key: &KeyEvent) -> String {
+    let key_name = match key.code {
+        KeyCode::Char(' ') => "space".to_string(),
+        KeyCode::Char(character) => character.to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Esc => "esc".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::BackTab => "backtab".to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
+        _ => return format!("{:?}", key.code).to_lowercase(),
+    };
+    let mut modifiers = Vec::new();
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        modifiers.push("ctrl");
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        modifiers.push("alt");
+    }
+    if modifiers.is_empty() {
+        key_name
+    } else {
+        format!("{}-{key_name}", modifiers.join("-"))
+    }
+}
+
+fn parse_action(name: &str) -> Option<KeymapAction> {
+    Some(match name {
+        "first" => KeymapAction::First,
+        "last" => KeymapAction::Last,
+        "page_up" => KeymapAction::PageUp,
+        "page_down" => KeymapAction::PageDown,
+        "half_page_up" => KeymapAction::HalfPageUp,
+        "half_page_down" => KeymapAction::HalfPageDown,
+        "current_context" => KeymapAction::CurrentContext,
+        "play_pause" => KeymapAction::PlayPause,
+        "next" => KeymapAction::Next,
+        "previous" => KeymapAction::Previous,
+        "shuffle" => KeymapAction::Shuffle,
+        "repeat" => KeymapAction::Repeat,
+        "seek_backward" => KeymapAction::SeekBackward,
+        "seek_forward" => KeymapAction::SeekForward,
+        "seek_start" => KeymapAction::SeekStart,
+        "mute" => KeymapAction::Mute,
+        "sort_original" => KeymapAction::SortOriginal,
+        "sort_title" => KeymapAction::SortTitle,
+        "sort_artist" => KeymapAction::SortArtist,
+        "sort_album" => KeymapAction::SortAlbum,
+        "sort_duration" => KeymapAction::SortDuration,
+        "sort_added" => KeymapAction::SortAdded,
+        "reverse_tracks" => KeymapAction::ReverseTracks,
+        "redraw" => KeymapAction::Redraw,
+        "toggle_thumbnails" => KeymapAction::ToggleThumbnails,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_sequences_resolve_to_semantic_actions() {
+        let mut state = AppState::new();
+        state
+            .ui
+            .library_config
+            .keybindings
+            .insert("s d".to_string(), "sort_duration".to_string());
+        let first = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
+        );
+        assert!(first.consumed && first.action.is_none());
+        let second = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        );
+        assert_eq!(second.action, Some(KeymapAction::SortDuration));
+    }
+
+    #[test]
+    fn control_keys_use_stable_names() {
+        assert_eq!(
+            key_token(&KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL)),
+            "ctrl-f"
+        );
+    }
+
+    #[test]
+    fn configured_redraw_requests_terminal_clear() {
+        let mut state = AppState::new();
+        state
+            .ui
+            .library_config
+            .keybindings
+            .insert("z r".to_string(), "redraw".to_string());
+
+        let first = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+        );
+        assert!(first.consumed);
+        let second = configured_action(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+        );
+        execute(&mut state, second.action.unwrap());
+
+        assert!(state.ui.needs_terminal_clear);
+    }
+}
