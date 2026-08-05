@@ -1393,6 +1393,84 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
+/// The theme picker: every loaded theme by name, the active one accented.
+pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+
+    let mut names: Vec<String> = app.state.ui.themes.keys().cloned().collect();
+    names.sort();
+    let active = app.state.ui.library_config.active_theme.clone();
+
+    div()
+        .id("theme-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.theme_modal_open = false;
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("theme-panel")
+                .w(px(320.0))
+                .max_h(px(420.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(crate::theme::WINDOW_BG())
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .overflow_hidden()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(div().pb_2().text_sm().text_color(muted).child("Theme"))
+                .child(if names.is_empty() {
+                    div()
+                        .py_4()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("No themes found")
+                        .into_any_element()
+                } else {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .children(names.into_iter().enumerate().map(|(ix, name)| {
+                            let is_active = active.as_deref() == Some(name.as_str());
+                            let color = if is_active { accent } else { fg };
+                            let clicked = name.clone();
+                            div()
+                                .id(ix)
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .text_sm()
+                                .text_color(color)
+                                .hover(|style| style.bg(muted.opacity(0.1)))
+                                .cursor_pointer()
+                                .on_click(cx.listener(
+                                    move |this: &mut EchoApp, _event, _window, cx| {
+                                        echo_core::intent::apply_theme(&mut this.state, &clicked);
+                                        this.theme_modal_open = false;
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(SharedString::from(name))
+                                .when(is_active, |el| el.child(div().text_color(accent).child(" ●")))
+                        }))
+                        .into_any_element()
+                }),
+        )
+}
+
 /// The Spotify Connect device picker, painted over everything else.
 pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;

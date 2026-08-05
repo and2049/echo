@@ -425,12 +425,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "theme" => {
                         if let Some(theme_name) = args.next() {
-                            if let Some(theme_config) = state.ui.themes.get(theme_name) {
-                                state.ui.active_theme =
-                                    echo_core::theme::ResolvedTheme::from_theme(theme_config);
-                                state.ui.library_config.active_theme = Some(theme_name.to_string());
-                                state.ui.needs_terminal_clear = true;
-                                state.save_library_config();
+                            if echo_core::intent::apply_theme(state, theme_name) {
                                 state.ui.status_message = Some(format!("Theme: {}", theme_name));
                             } else {
                                 let mut theme_names: Vec<&String> =

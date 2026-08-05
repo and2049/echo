@@ -52,7 +52,8 @@ actions!(
         OpenDevices,
         Dismiss,
         FocusSearch,
-        ToggleLyrics
+        ToggleLyrics,
+        ToggleThemes
     ]
 );
 
@@ -79,6 +80,8 @@ pub(crate) struct EchoApp {
     pub(crate) artists_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
+    /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
+    pub(crate) theme_modal_open: bool,
     /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
     /// position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -156,6 +159,7 @@ impl EchoApp {
             artists_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
+            theme_modal_open: false,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             focus_handle,
@@ -316,11 +320,19 @@ impl EchoApp {
         cx.notify();
     }
 
+    fn toggle_themes(&mut self, cx: &mut Context<Self>) {
+        self.theme_modal_open = !self.theme_modal_open;
+        cx.notify();
+    }
+
     /// Escape: close whatever is topmost.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         match () {
             _ if self.state.ui.device_modal_open => {
                 self.state.ui.device_modal_open = false;
+            }
+            _ if self.theme_modal_open => {
+                self.theme_modal_open = false;
             }
             _ if self.state.ui.lyrics_modal_open => {
                 self.state.ui.lyrics_modal_open = false;
@@ -673,6 +685,9 @@ impl EchoApp {
             .child(icon_button("lyrics", "🎤", lyrics_color, cx, |this, cx| {
                 this.toggle_lyrics(cx)
             }))
+            .child(icon_button("themes", "🎨", muted, cx, |this, cx| {
+                this.toggle_themes(cx)
+            }))
             .child(icon_button("queue", "☰", queue_color, cx, |this, cx| {
                 this.toggle_queue(cx)
             }))
@@ -758,6 +773,9 @@ impl Render for EchoApp {
             .ui
             .lyrics_modal_open
             .then(|| views::lyrics_modal(self, cx).into_any_element());
+        let theme_modal = self
+            .theme_modal_open
+            .then(|| views::theme_modal(self, cx).into_any_element());
         let device_modal = self
             .state
             .ui
@@ -802,6 +820,7 @@ impl Render for EchoApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleLyrics, _window, cx| this.toggle_lyrics(cx)))
+            .on_action(cx.listener(|this, _: &ToggleThemes, _window, cx| this.toggle_themes(cx)))
             .relative()
             .flex()
             .flex_col()
@@ -818,6 +837,7 @@ impl Render for EchoApp {
             )
             .child(self.render_playback_bar(cx))
             .when_some(lyrics_modal, |el, modal| el.child(modal))
+            .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
     }
 }
@@ -869,6 +889,7 @@ fn main() {
             KeyBinding::new("escape", Dismiss, LIST_KEYS),
             KeyBinding::new("/", FocusSearch, LIST_KEYS),
             KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
+            KeyBinding::new("t", ToggleThemes, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
