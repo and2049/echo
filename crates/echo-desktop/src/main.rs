@@ -51,7 +51,8 @@ actions!(
         ToggleQueue,
         OpenDevices,
         Dismiss,
-        FocusSearch
+        FocusSearch,
+        ToggleLyrics
     ]
 );
 
@@ -77,6 +78,7 @@ pub(crate) struct EchoApp {
     pub(crate) search_scroll: UniformListScrollHandle,
     pub(crate) artists_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
+    pub(crate) lyrics_scroll: UniformListScrollHandle,
     /// Written by a canvas overlay each paint; read by click handlers to turn a click's window
     /// position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -114,20 +116,25 @@ impl EchoApp {
         .detach();
 
         // Progress tick: elapsed time is interpolated at render time, so while playing the bar
-        // needs a repaint even when no worker event arrives.
+        // needs a repaint even when no worker event arrives. The visualizer needs a much faster
+        // cadence, so the interval tightens while it is live.
         cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(500))
-                    .await;
-                let alive = this.update(cx, |app: &mut EchoApp, cx| {
+                let interval = this.update(cx, |app: &mut EchoApp, cx| {
                     if app.state.playback.is_playing {
                         cx.notify();
                     }
+                    let visualizing = app.state.playback.is_playing
+                        && app.state.ui.library_config.enable_visualizer
+                        && app.state.playback.audio_visualization.is_some();
+                    if visualizing { 66 } else { 500 }
                 });
-                if alive.is_err() {
-                    break;
-                }
+                let Ok(interval) = interval else {
+                    break; // entity dropped — app is shutting down
+                };
+                cx.background_executor()
+                    .timer(Duration::from_millis(interval))
+                    .await;
             }
         })
         .detach();
@@ -148,6 +155,7 @@ impl EchoApp {
             search_scroll: UniformListScrollHandle::new(),
             artists_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
+            lyrics_scroll: UniformListScrollHandle::new(),
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             focus_handle,
@@ -303,11 +311,19 @@ impl EchoApp {
         cx.notify();
     }
 
+    fn toggle_lyrics(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.lyrics_modal_open = !self.state.ui.lyrics_modal_open;
+        cx.notify();
+    }
+
     /// Escape: close whatever is topmost.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         match () {
             _ if self.state.ui.device_modal_open => {
                 self.state.ui.device_modal_open = false;
+            }
+            _ if self.state.ui.lyrics_modal_open => {
+                self.state.ui.lyrics_modal_open = false;
             }
             _ if self.state.ui.active_view == ActiveView::ArtistPage => {
                 let event = echo_core::intent::back_to_artist_list(&mut self.state);
@@ -492,6 +508,15 @@ impl EchoApp {
         } else {
             muted
         };
+        let lyrics_color = if self.state.ui.lyrics_modal_open {
+            accent
+        } else {
+            muted
+        };
+        let visualizer_bands = (self.state.ui.library_config.enable_visualizer
+            && self.state.playback.is_playing)
+            .then(|| self.state.playback.audio_visualization.clone())
+            .flatten();
 
         // The pixelate transfer trick from the TUI: keep showing the previous cover while the
         // current one refetches.
@@ -618,6 +643,36 @@ impl EchoApp {
                     .text_xs()
                     .child(time_label),
             )
+            .when_some(visualizer_bands, |el, bands| {
+                // 32 bands, 0–100, painted as bottom-anchored bars. Repaints ride the fast tick.
+                el.child(div().flex_none().w(px(120.0)).h(px(40.0)).child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, _| {
+                            let bands = bands.lock();
+                            let count = bands.len();
+                            let band_width = bounds.size.width / count as f32;
+                            for (index, value) in bands.iter().enumerate() {
+                                let ratio = (value / 100.0).clamp(0.0, 1.0);
+                                let bar_height = bounds.size.height * ratio;
+                                let origin = gpui::point(
+                                    bounds.origin.x + band_width * index as f32,
+                                    bounds.origin.y + bounds.size.height - bar_height,
+                                );
+                                let bar = Bounds {
+                                    origin,
+                                    size: size(band_width * 0.8, bar_height),
+                                };
+                                window.paint_quad(gpui::fill(bar, accent));
+                            }
+                        },
+                    )
+                    .size_full(),
+                ))
+            })
+            .child(icon_button("lyrics", "🎤", lyrics_color, cx, |this, cx| {
+                this.toggle_lyrics(cx)
+            }))
             .child(icon_button("queue", "☰", queue_color, cx, |this, cx| {
                 this.toggle_queue(cx)
             }))
@@ -697,7 +752,12 @@ impl Render for EchoApp {
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
 
-        // Built ahead of the chain because it borrows self mutably, like the other views.
+        // Built ahead of the chain because they borrow self mutably, like the other views.
+        let lyrics_modal = self
+            .state
+            .ui
+            .lyrics_modal_open
+            .then(|| views::lyrics_modal(self, cx).into_any_element());
         let device_modal = self
             .state
             .ui
@@ -741,6 +801,7 @@ impl Render for EchoApp {
                 window.focus(&this.search_focus, cx);
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &ToggleLyrics, _window, cx| this.toggle_lyrics(cx)))
             .relative()
             .flex()
             .flex_col()
@@ -756,6 +817,7 @@ impl Render for EchoApp {
                     .child(views::main_area(self, window, cx)),
             )
             .child(self.render_playback_bar(cx))
+            .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
     }
 }
@@ -806,6 +868,7 @@ fn main() {
             KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
             KeyBinding::new("escape", Dismiss, LIST_KEYS),
             KeyBinding::new("/", FocusSearch, LIST_KEYS),
+            KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
