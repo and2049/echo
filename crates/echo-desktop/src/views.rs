@@ -174,6 +174,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
 
                             div()
                                 .id(ix)
+                                .w_full()
                                 .h(px(SIDEBAR_ROW_HEIGHT))
                                 .px_3()
                                 .pl(px(12.0 + indent_px))
@@ -345,6 +346,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
 
                             div()
                                 .id(ix)
+                                .w_full()
                                 .h(px(ROW_HEIGHT))
                                 .px_4()
                                 .flex()
@@ -473,6 +475,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             // click just moves the selection.
                             div()
                                 .id(ix)
+                                .w_full()
                                 .h(px(ROW_HEIGHT))
                                 .px_4()
                                 .flex()
