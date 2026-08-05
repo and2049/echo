@@ -574,6 +574,211 @@ pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
     None
 }
 
+// Library drag-and-drop: moving playlists between folders, the pinned section and the loose
+// list, plus reordering within each. Positions are visible `library_view` row indices.
+
+/// True for the fixed rows drag-and-drop must leave alone: Liked Songs, the local-library
+/// entry and local playlists (whose order comes from the local store, not the config).
+fn is_fixed_library_row(id: &str) -> bool {
+    id == "LIKED_SONGS" || id == "local-library" || id.starts_with("local-playlist:")
+}
+
+/// Drops the playlist `src_id` onto visible row `dest_index`:
+/// - onto a folder header → append to that folder;
+/// - onto a playlist inside a folder → insert into that folder before it;
+/// - onto a pinned playlist → pin, inserted before it;
+/// - onto a loose playlist → unpin/unfolder and reorder before it (persisted as
+///   `playlist_order`, which forces `SortMode::Default`).
+pub fn move_library_playlist(state: &mut AppState, src_id: &str, dest_index: usize) -> bool {
+    if is_fixed_library_row(src_id) {
+        return false;
+    }
+    let Some(dest_node) = state.data.library_view.get(dest_index).cloned() else {
+        return false;
+    };
+
+    enum Target {
+        FolderEnd(String),
+        FolderBefore(String, String),
+        PinnedBefore(String),
+        LooseBefore(String),
+    }
+    let target = match &dest_node {
+        LibraryNode::Folder(folder) => Target::FolderEnd(folder.name.clone()),
+        LibraryNode::Playlist { playlist, indent } => {
+            if playlist.id == src_id || is_fixed_library_row(&playlist.id) {
+                return false;
+            }
+            if *indent >= 1 {
+                let Some(folder) = state
+                    .ui
+                    .library_config
+                    .folders
+                    .iter()
+                    .find(|folder| folder.playlists.contains(&playlist.id))
+                else {
+                    return false;
+                };
+                Target::FolderBefore(folder.name.clone(), playlist.id.clone())
+            } else if state.ui.library_config.pinned.contains(&playlist.id) {
+                Target::PinnedBefore(playlist.id.clone())
+            } else {
+                Target::LooseBefore(playlist.id.clone())
+            }
+        }
+    };
+
+    // Pull the playlist out of every container first; the target decides where it lands.
+    state.ui.library_config.pinned.retain(|id| id != src_id);
+    for folder in &mut state.ui.library_config.folders {
+        folder.playlists.retain(|id| id != src_id);
+    }
+
+    match target {
+        Target::FolderEnd(name) => {
+            let Some(folder) = state
+                .ui
+                .library_config
+                .folders
+                .iter_mut()
+                .find(|folder| folder.name == name)
+            else {
+                return false;
+            };
+            folder.playlists.push(src_id.to_string());
+        }
+        Target::FolderBefore(name, before_id) => {
+            let Some(folder) = state
+                .ui
+                .library_config
+                .folders
+                .iter_mut()
+                .find(|folder| folder.name == name)
+            else {
+                return false;
+            };
+            let position = folder
+                .playlists
+                .iter()
+                .position(|id| id == &before_id)
+                .unwrap_or(folder.playlists.len());
+            folder.playlists.insert(position, src_id.to_string());
+        }
+        Target::PinnedBefore(before_id) => {
+            let pinned = &mut state.ui.library_config.pinned;
+            let position = pinned
+                .iter()
+                .position(|id| id == &before_id)
+                .unwrap_or(pinned.len());
+            pinned.insert(position, src_id.to_string());
+        }
+        Target::LooseBefore(before_id) => {
+            // A manual order only makes sense without an active sort.
+            state.ui.library_config.sort_mode = crate::config::SortMode::Default;
+            state.compute_library_view();
+            let pinned: std::collections::HashSet<&String> =
+                state.ui.library_config.pinned.iter().collect();
+            let mut order: Vec<String> = state
+                .data
+                .library_view
+                .iter()
+                .filter_map(|node| match node {
+                    LibraryNode::Playlist { playlist, indent: 0 }
+                        if !is_fixed_library_row(&playlist.id)
+                            && !pinned.contains(&playlist.id) =>
+                    {
+                        Some(playlist.id.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            order.retain(|id| id != src_id);
+            let position = order
+                .iter()
+                .position(|id| id == &before_id)
+                .unwrap_or(order.len());
+            order.insert(position, src_id.to_string());
+            state.ui.library_config.playlist_order = order;
+        }
+    }
+
+    state.save_library_config();
+    state.compute_library_view();
+    true
+}
+
+/// Context-menu "Remove from folder": the playlist returns to the loose list.
+pub fn remove_playlist_from_folders(state: &mut AppState, id: &str) -> bool {
+    let mut removed = false;
+    for folder in &mut state.ui.library_config.folders {
+        let before = folder.playlists.len();
+        folder.playlists.retain(|pid| pid != id);
+        removed |= folder.playlists.len() != before;
+    }
+    if removed {
+        state.save_library_config();
+        state.compute_library_view();
+    }
+    removed
+}
+
+// Destructive-action prompts. A frontend sets one of the `*_prompt` fields, shows its own
+// confirm UI, and resolves it through these — the TUI with y/other keys, the desktop with
+// modal buttons.
+
+/// Whether any delete/remove confirmation is pending.
+pub fn prompt_active(state: &AppState) -> bool {
+    state.ui.folder_delete_prompt.is_some()
+        || state.ui.playlist_delete_prompt.is_some()
+        || state.ui.album_mass_delete_prompt.is_some()
+        || state.ui.track_delete_prompt.is_some()
+        || state.ui.liked_track_remove_prompt.is_some()
+}
+
+/// Confirms the pending prompt, performing the action or returning the worker event for it.
+pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
+    if let Some(folder_name) = state.ui.folder_delete_prompt.take() {
+        state.ui.playlist_delete_prompt = None;
+        state
+            .ui
+            .library_config
+            .folders
+            .retain(|folder| folder.name != folder_name);
+        state.save_library_config();
+        state.compute_library_view();
+        if state.ui.selected_playlist_index >= state.data.library_view.len() {
+            state.ui.selected_playlist_index = state.data.library_view.len().saturating_sub(1);
+        }
+        return None;
+    }
+    if let Some(playlist_ids) = state.ui.playlist_delete_prompt.take() {
+        return Some(AppEvent::DeletePlaylists(playlist_ids));
+    }
+    if let Some(album_ids) = state.ui.album_mass_delete_prompt.take() {
+        return Some(AppEvent::RemoveAlbums(album_ids));
+    }
+    if let Some((playlist_id, track_ids)) = state.ui.track_delete_prompt.take() {
+        return Some(AppEvent::RemoveTracksFromPlaylist(playlist_id, track_ids));
+    }
+    if let Some(track_id) = state.ui.liked_track_remove_prompt.take() {
+        state.data.liked_tracks.remove(&track_id);
+        let mut cache = crate::config::AppConfig::load_cache();
+        cache.liked_tracks = state.data.liked_tracks.clone();
+        let _ = crate::config::AppConfig::save_cache(&cache);
+        return Some(AppEvent::ToggleTrackLike(track_id, false));
+    }
+    None
+}
+
+/// Dismisses whatever prompt is pending without acting on it.
+pub fn cancel_prompt(state: &mut AppState) {
+    state.ui.folder_delete_prompt = None;
+    state.ui.playlist_delete_prompt = None;
+    state.ui.album_mass_delete_prompt = None;
+    state.ui.track_delete_prompt = None;
+    state.ui.liked_track_remove_prompt = None;
+}
+
 // The `/` filter: an incsearch over the loaded track list, navigated with n/N.
 
 /// Recomputes `search_matches` for the current filter query and jumps to the first hit.
@@ -647,6 +852,123 @@ mod tests {
         assert!(matches!(event, AppEvent::CancelArtistPageLoad));
         assert!(state.ui.active_view == ActiveView::ArtistList);
         assert!(state.data.pending_artist_page_id.is_none());
+    }
+
+    fn library_playlist(id: &str) -> crate::models::Playlist {
+        crate::models::Playlist {
+            id: id.to_string(),
+            name: id.to_string(),
+            owner: String::new(),
+            owner_id: "owner".to_string(),
+            image_url: None,
+            thumb_url: None,
+        }
+    }
+
+    fn loose_view_ids(state: &AppState) -> Vec<String> {
+        state
+            .data
+            .library_view
+            .iter()
+            .filter_map(|node| match node {
+                LibraryNode::Playlist { playlist, .. }
+                    if !is_fixed_library_row(&playlist.id) =>
+                {
+                    Some(playlist.id.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dragging_a_loose_playlist_reorders_and_persists_a_custom_order() {
+        let mut state = AppState::new();
+        // In unit tests AppState::new() loads from the redirected (temp) config root, but an
+        // explicit default keeps the view predictable regardless of what other tests saved.
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.playlists = vec![
+            library_playlist("a"),
+            library_playlist("b"),
+            library_playlist("c"),
+        ];
+        state.compute_library_view();
+        let row_of_a = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(
+                node,
+                LibraryNode::Playlist { playlist, .. } if playlist.id == "a"
+            ))
+            .expect("row for a");
+        // Drop "c" onto "a" to move it before "a".
+        assert!(move_library_playlist(&mut state, "c", row_of_a));
+
+        assert_eq!(loose_view_ids(&state), ["c", "a", "b"]);
+        assert_eq!(state.ui.library_config.playlist_order, ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn dropping_onto_a_folder_header_moves_the_playlist_inside() {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.playlists = vec![library_playlist("a"), library_playlist("b")];
+        state.ui.library_config.folders.push(crate::config::Folder {
+            name: "Mix".to_string(),
+            is_open: true,
+            playlists: vec![],
+        });
+        state.compute_library_view();
+        let folder_row = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(node, LibraryNode::Folder(_)))
+            .expect("folder row");
+
+        assert!(move_library_playlist(&mut state, "a", folder_row));
+
+        assert_eq!(state.ui.library_config.folders[0].playlists, ["a"]);
+        assert!(state.data.library_view.iter().any(|node| matches!(
+            node,
+            LibraryNode::Playlist { playlist, indent: 1 } if playlist.id == "a"
+        )));
+    }
+
+    #[test]
+    fn fixed_rows_reject_drag_and_drop() {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.playlists = vec![library_playlist("a")];
+        state.compute_library_view();
+
+        assert!(!move_library_playlist(&mut state, "LIKED_SONGS", 1));
+        // Dropping onto Liked Songs (row 0) is rejected too.
+        assert!(!move_library_playlist(&mut state, "a", 0));
+    }
+
+    #[test]
+    fn confirming_a_playlist_delete_prompt_emits_the_event() {
+        let mut state = AppState::new();
+        state.ui.playlist_delete_prompt = Some(vec!["p".to_string()]);
+
+        assert!(prompt_active(&state));
+        let Some(AppEvent::DeletePlaylists(ids)) = confirm_prompt(&mut state) else {
+            panic!("expected DeletePlaylists");
+        };
+        assert_eq!(ids, ["p"]);
+        assert!(!prompt_active(&state));
+    }
+
+    #[test]
+    fn cancelling_a_prompt_clears_it_without_an_event() {
+        let mut state = AppState::new();
+        state.ui.album_mass_delete_prompt = Some(vec!["album".to_string()]);
+
+        cancel_prompt(&mut state);
+
+        assert!(!prompt_active(&state));
     }
 
     #[test]

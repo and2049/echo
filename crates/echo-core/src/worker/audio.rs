@@ -232,9 +232,7 @@ pub async fn spawn_librespot_daemon(
             let playback_is_playing = playback_is_playing.clone();
             let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 // Find or create cache directory
-                let mut cache_dir =
-                    dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-                cache_dir.push("echo");
+                let cache_dir = crate::config::echo_config_root();
                 std::fs::create_dir_all(&cache_dir)?;
                 let cache = Cache::new(Some(cache_dir.clone()), None, None, None)?;
 
@@ -376,9 +374,7 @@ pub async fn spawn_librespot_daemon(
 
                 // If the error was caused by invalid/expired credentials, delete the cache and retry immediately.
                 if err_msg.contains("BadCredentials") || err_msg.contains("PermissionDenied") {
-                    let mut cache_dir =
-                        dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-                    cache_dir.push("echo");
+                    let cache_dir = crate::config::echo_config_root();
                     let _ = std::fs::remove_file(cache_dir.join("credentials.json"));
                     continue; // Loop back and trigger the browser re-auth flow
                 }

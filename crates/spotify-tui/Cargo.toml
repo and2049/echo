@@ -19,6 +19,10 @@ tokio = { workspace = true }
 unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
 
+[dev-dependencies]
+# Redirects echo-core's config root before tests run (see redirect_config_for_tests).
+ctor = "0.4"
+
 [package.metadata.packager]
 product-name = "Echo TUI"
 identifier = "com.echo.tui"

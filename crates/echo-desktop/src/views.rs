@@ -13,15 +13,63 @@
 use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::models::LibraryNode;
 use echo_core::thumbnails::ThumbState;
-use gpui::{AnyElement, Context, SharedString, Window, div, img, prelude::*, px, uniform_list};
+use gpui::{
+    AnyElement, Context, MouseButton, MouseDownEvent, SharedString, Window, div, img, prelude::*,
+    px, relative, uniform_list,
+};
 
-use crate::theme::{ToGpui, WINDOW_FG};
-use crate::{EchoApp, format_time};
+use crate::theme::{ToGpui, WINDOW_BG, WINDOW_FG};
+use crate::{EchoApp, MenuAction, format_time};
 
 const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_ROW_HEIGHT: f32 = 34.0;
 const ROW_HEIGHT: f32 = 30.0;
 const THUMB_EDGE: f32 = 26.0;
+
+/// The TUI's start-screen wordmark, shown in the main area while nothing is selected.
+const ECHO_LOGO: [&str; 6] = [
+    "███████╗ ██████╗██╗  ██╗ ██████╗               ██████╗ ███████╗",
+    "██╔════╝██╔════╝██║  ██║██╔═══██╗              ██╔══██╗██╔════╝",
+    "█████╗  ██║     ███████║██║   ██║    █████╗    ██████╔╝███████╗",
+    "██╔══╝  ██║     ██╔══██║██║   ██║    ╚════╝    ██╔══██╗╚════██║",
+    "███████╗╚██████╗██║  ██║╚██████╔╝              ██║  ██║███████║",
+    "╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝               ╚═╝  ╚═╝╚══════╝",
+];
+
+/// Drag payload for a sidebar playlist row.
+pub(crate) struct DraggedPlaylist {
+    pub id: String,
+    pub name: SharedString,
+}
+
+/// The chip that follows the cursor while a playlist is dragged.
+pub(crate) struct DragPreview {
+    name: SharedString,
+    fg: gpui::Hsla,
+    bg: gpui::Hsla,
+    border: gpui::Hsla,
+}
+
+impl gpui::Render for DragPreview {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_1()
+            .rounded_md()
+            .bg(self.bg)
+            .border_1()
+            .border_color(self.border)
+            .text_sm()
+            .text_color(self.fg)
+            .child(self.name.clone())
+    }
+}
+
+/// True for the sidebar rows drag-and-drop must not move (their position is fixed or comes
+/// from the local store, mirroring `echo_core::intent`'s own check).
+fn is_fixed_library_row(id: &str) -> bool {
+    id == "LIKED_SONGS" || id == "local-library" || id.starts_with("local-playlist:")
+}
 
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
@@ -140,6 +188,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let panel_bg = theme.background.gpui(WINDOW_BG());
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
 
@@ -234,6 +283,26 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 }
                             });
 
+                            // Regular Spotify playlists can be dragged between folders, the
+                            // pinned block and the loose list; every playlist-tab row is a
+                            // drop target (the intent rejects invalid ones).
+                            let drag_source: Option<(String, SharedString)> =
+                                if tab != LibraryTab::Albums {
+                                    match &this.state.data.library_view[ix] {
+                                        LibraryNode::Playlist { playlist, .. }
+                                            if !is_fixed_library_row(&playlist.id) =>
+                                        {
+                                            Some((
+                                                playlist.id.clone(),
+                                                playlist.name.clone().into(),
+                                            ))
+                                        }
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                };
+
                             div()
                                 .id(ix)
                                 .w_full()
@@ -249,6 +318,48 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .hover(|style| style.bg(muted.opacity(0.1)))
                                 .cursor_pointer()
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                        this.state.ui.selected_playlist_index = ix;
+                                        this.context_menu = Some(crate::ContextMenuState {
+                                            index: ix,
+                                            position: event.position,
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
+                                .when_some(drag_source, |el, (id, name)| {
+                                    let border = muted.opacity(0.4);
+                                    el.on_drag(
+                                        DraggedPlaylist { id, name },
+                                        move |drag, _offset, _window, cx| {
+                                            let name = drag.name.clone();
+                                            cx.new(|_| DragPreview {
+                                                name,
+                                                fg,
+                                                bg: panel_bg,
+                                                border,
+                                            })
+                                        },
+                                    )
+                                })
+                                .when(tab != LibraryTab::Albums, |el| {
+                                    el.drag_over::<DraggedPlaylist>(move |style, _, _, _| {
+                                        style.bg(accent.opacity(0.2))
+                                    })
+                                    .on_drop(cx.listener(
+                                        move |this: &mut EchoApp, drag: &DraggedPlaylist, _window, cx| {
+                                            if echo_core::intent::move_library_playlist(
+                                                &mut this.state,
+                                                &drag.id,
+                                                ix,
+                                            ) {
+                                                cx.notify();
+                                            }
+                                        },
+                                    ))
+                                })
                                 .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                                     this.state.ui.selected_playlist_index = ix;
                                     let event = match this.state.ui.active_library_tab {
@@ -292,8 +403,6 @@ pub fn main_area(
     window: &mut Window,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
-    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
-
     let search = search_bar(app, window, cx).into_any_element();
     let body = if app.state.ui.mode == AppMode::Setup {
         setup_view(app, window, cx).into_any_element()
@@ -304,14 +413,7 @@ pub fn main_area(
         ActiveView::SearchResults => search_results(app, cx).into_any_element(),
         ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
         ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
-            _ => div()
-                .flex_grow(1.0)
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(muted)
-                .child(status_line(app))
-                .into_any_element(),
+            _ => library_placeholder(app),
         }
     };
 
@@ -1736,20 +1838,296 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
-fn status_line(app: &EchoApp) -> SharedString {
-    match app.state.ui.mode {
-        // Setup mode never reaches here — main_area renders the setup card instead.
-        AppMode::Setup => "Waiting for Spotify credentials…".into(),
-        AppMode::Authenticating => {
-            "Authenticating with Spotify… complete the login in your browser".into()
+/// The main-area empty state: the TUI's ECHO wordmark with a vertical secondary→primary
+/// gradient, or plain status text while authenticating.
+fn library_placeholder(app: &EchoApp) -> AnyElement {
+    let theme = &app.state.ui.active_theme;
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+
+    if matches!(app.state.ui.mode, AppMode::Setup | AppMode::Authenticating) {
+        let message: SharedString = match app.state.ui.mode {
+            AppMode::Setup => "Waiting for Spotify credentials…".into(),
+            _ => "Authenticating with Spotify… complete the login in your browser".into(),
+        };
+        return div()
+            .flex_grow(1.0)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(muted)
+            .child(message)
+            .into_any_element();
+    }
+
+    let secondary = theme.secondary.gpui(WINDOW_FG());
+    let primary = theme.primary.gpui(WINDOW_FG());
+    let playlists = app.state.data.playlists.len();
+    let albums = app.state.data.saved_albums.len();
+    let counts: SharedString = format!("{playlists} playlists · {albums} albums").into();
+
+    div()
+        .flex_grow(1.0)
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .font_family("Consolas")
+                .text_sm()
+                .line_height(relative(1.0))
+                .children(ECHO_LOGO.iter().enumerate().map(|(index, line)| {
+                    let t = index as f32 / (ECHO_LOGO.len() - 1) as f32;
+                    div()
+                        .whitespace_nowrap()
+                        .text_color(lerp_hsla(secondary, primary, t))
+                        .child(*line)
+                })),
+        )
+        .child(div().text_xs().text_color(muted).child(counts))
+        .into_any_element()
+}
+
+fn lerp_hsla(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
+    let a: gpui::Rgba = a.into();
+    let b: gpui::Rgba = b.into();
+    gpui::Rgba {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: 1.0,
+    }
+    .into()
+}
+
+/// The sidebar right-click menu: items depend on what the row is, actions run through
+/// [`EchoApp::run_menu_action`]. Destructive items stage a prompt for [`prompt_modal`].
+pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let menu = app
+        .context_menu
+        .clone()
+        .expect("context_menu rendered without state");
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
+
+    let mut items: Vec<(SharedString, MenuAction, bool)> = Vec::new();
+    if app.state.ui.active_library_tab == LibraryTab::Albums {
+        if app.state.data.saved_albums.get(menu.index).is_some() {
+            items.push(("Open".into(), MenuAction::Open, false));
+            items.push((
+                "Remove from library…".into(),
+                MenuAction::RemoveAlbum,
+                true,
+            ));
         }
-        _ => {
-            let playlists = app.state.data.playlists.len();
-            let albums = app.state.data.saved_albums.len();
-            format!(
-                "Library loaded: {playlists} playlists, {albums} albums — pick one on the left"
-            )
-            .into()
+    } else if let Some(node) = app.state.data.library_view.get(menu.index) {
+        match node {
+            LibraryNode::Folder(_) => {
+                items.push(("Rename…".into(), MenuAction::Rename, false));
+                items.push(("Delete folder…".into(), MenuAction::DeleteFolder, true));
+            }
+            LibraryNode::Playlist { playlist, indent } => {
+                items.push(("Open".into(), MenuAction::Open, false));
+                let special = playlist.id == "LIKED_SONGS" || playlist.id == "local-library";
+                let local = playlist.id.starts_with("local-playlist:");
+                if !special && !local {
+                    let pinned = app.state.ui.library_config.pinned.contains(&playlist.id);
+                    items.push((
+                        if pinned { "Unpin" } else { "Pin" }.into(),
+                        MenuAction::TogglePin,
+                        false,
+                    ));
+                }
+                if !special {
+                    items.push(("Rename…".into(), MenuAction::Rename, false));
+                }
+                if *indent >= 1 {
+                    items.push((
+                        "Remove from folder".into(),
+                        MenuAction::RemoveFromFolder,
+                        false,
+                    ));
+                }
+                let own = app.state.data.user_id.as_ref() == Some(&playlist.owner_id);
+                if local || (!special && own) {
+                    items.push(("Delete playlist…".into(), MenuAction::DeletePlaylist, true));
+                }
+            }
         }
     }
+
+    let index = menu.index;
+    div()
+        .id("context-menu-backdrop")
+        .absolute()
+        .inset_0()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.context_menu = None;
+            cx.notify();
+        }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this: &mut EchoApp, _event: &MouseDownEvent, _window, cx| {
+                this.context_menu = None;
+                cx.notify();
+            }),
+        )
+        .child(
+            div()
+                .id("context-menu")
+                .absolute()
+                .left(menu.position.x)
+                .top(menu.position.y)
+                .w(px(210.0))
+                .rounded_md()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(crate::theme::WINDOW_BG())
+                .py_1()
+                .flex()
+                .flex_col()
+                // Clicks on the menu itself must not reach the backdrop's close handler.
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .children(items.into_iter().map(|(label, action, danger)| {
+                    div()
+                        .id(label.clone())
+                        .px_3()
+                        .py_1()
+                        .text_sm()
+                        .text_color(if danger { danger_color } else { fg })
+                        .hover(move |style| style.bg(accent.opacity(0.12)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, window, cx| {
+                            this.run_menu_action(action, index, window, cx);
+                        }))
+                        .child(label)
+                })),
+        )
+}
+
+/// Confirm dialog for whichever destructive prompt is staged, resolved through the same
+/// `intent::confirm_prompt`/`cancel_prompt` the TUI's y/n keys use.
+pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
+
+    let ui = &app.state.ui;
+    let (message, confirm_label): (String, &'static str) =
+        if let Some(name) = &ui.folder_delete_prompt {
+            (
+                format!("Delete folder “{name}”? Its playlists return to the library."),
+                "Delete",
+            )
+        } else if let Some(ids) = &ui.playlist_delete_prompt {
+            let name = ids
+                .first()
+                .and_then(|id| {
+                    app.state.data.library_view.iter().find_map(|node| match node {
+                        LibraryNode::Playlist { playlist, .. } if &playlist.id == id => {
+                            Some(playlist.name.clone())
+                        }
+                        _ => None,
+                    })
+                })
+                .unwrap_or_else(|| "this playlist".to_string());
+            (
+                format!("Delete “{name}”? This removes it from your library."),
+                "Delete",
+            )
+        } else if let Some(ids) = &ui.album_mass_delete_prompt {
+            let name = ids
+                .first()
+                .and_then(|id| {
+                    app.state
+                        .data
+                        .saved_albums
+                        .iter()
+                        .find(|album| &album.id == id)
+                        .map(|album| album.name.clone())
+                })
+                .unwrap_or_else(|| "this album".to_string());
+            (format!("Remove “{name}” from your saved albums?"), "Remove")
+        } else if ui.track_delete_prompt.is_some() {
+            (
+                "Remove the selected tracks from this playlist?".to_string(),
+                "Remove",
+            )
+        } else {
+            ("Remove this track from Liked Songs?".to_string(), "Remove")
+        };
+
+    let button = |id: &'static str, label: &'static str, color: gpui::Hsla| {
+        div()
+            .id(id)
+            .px_3()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(color.opacity(0.5))
+            .text_sm()
+            .text_color(color)
+            .cursor_pointer()
+            .hover(move |style| style.bg(color.opacity(0.12)))
+            .child(label)
+    };
+
+    div()
+        .id("prompt-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            echo_core::intent::cancel_prompt(&mut this.state);
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("prompt-panel")
+                .w(px(380.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(crate::theme::WINDOW_BG())
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(div().text_sm().text_color(fg).child(SharedString::from(message)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .justify_end()
+                        .gap_2()
+                        .child(button("prompt-cancel", "Cancel", muted).on_click(cx.listener(
+                            |this: &mut EchoApp, _event, _window, cx| {
+                                echo_core::intent::cancel_prompt(&mut this.state);
+                                cx.notify();
+                            },
+                        )))
+                        .child(button("prompt-confirm", confirm_label, danger_color).on_click(
+                            cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                                if let Some(event) =
+                                    echo_core::intent::confirm_prompt(&mut this.state)
+                                {
+                                    this.dispatch(event);
+                                }
+                                cx.notify();
+                            }),
+                        )),
+                ),
+        )
 }
