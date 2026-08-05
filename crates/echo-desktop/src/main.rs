@@ -73,6 +73,8 @@ pub(crate) struct EchoApp {
     pub(crate) images: images::ImageCache,
     pub(crate) search_input: String,
     pub(crate) search_focus: FocusHandle,
+    pub(crate) setup_id_focus: FocusHandle,
+    pub(crate) setup_secret_focus: FocusHandle,
     pub(crate) library_scroll: UniformListScrollHandle,
     pub(crate) tracks_scroll: UniformListScrollHandle,
     pub(crate) queue_scroll: UniformListScrollHandle,
@@ -152,6 +154,8 @@ impl EchoApp {
             images: images::ImageCache::default(),
             search_input: String::new(),
             search_focus: cx.focus_handle(),
+            setup_id_focus: cx.focus_handle(),
+            setup_secret_focus: cx.focus_handle(),
             library_scroll: UniformListScrollHandle::new(),
             tracks_scroll: UniformListScrollHandle::new(),
             queue_scroll: UniformListScrollHandle::new(),
@@ -354,6 +358,53 @@ impl EchoApp {
                 self.state.ui.active_view = ActiveView::Library;
             }
             _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Typing for the two setup fields. Credentials are pasted more often than typed, so
+    /// ctrl-v pulls from the clipboard (with whitespace stripped).
+    fn handle_setup_key(
+        &mut self,
+        secret: bool,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let field = if secret {
+            &mut self.state.ui.setup_client_secret
+        } else {
+            &mut self.state.ui.setup_client_id
+        };
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                if let Some(event) = echo_core::intent::submit_setup_credentials(&mut self.state)
+                {
+                    self.dispatch(event);
+                }
+            }
+            "tab" => {
+                let target = if secret {
+                    self.setup_id_focus.clone()
+                } else {
+                    self.setup_secret_focus.clone()
+                };
+                window.focus(&target, cx);
+            }
+            "escape" => window.focus(&self.focus_handle.clone(), cx),
+            "backspace" => {
+                field.pop();
+            }
+            "v" if event.keystroke.modifiers.control => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    field.extend(text.chars().filter(|c| !c.is_whitespace()));
+                }
+            }
+            _ => {
+                if let Some(text) = event.keystroke.key_char.as_deref() {
+                    field.push_str(text);
+                }
+            }
         }
         cx.notify();
     }

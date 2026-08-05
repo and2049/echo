@@ -398,6 +398,23 @@ pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     AppEvent::CancelArtistPageLoad
 }
 
+/// Saves the pasted Spotify developer credentials and starts authentication. `None` while
+/// either field is still empty.
+pub fn submit_setup_credentials(state: &mut AppState) -> Option<AppEvent> {
+    if state.ui.setup_client_id.is_empty() || state.ui.setup_client_secret.is_empty() {
+        return None;
+    }
+    let mut config = crate::config::AppConfig::load();
+    config.spotify_credentials = Some(crate::config::SpotifyCredentials {
+        client_id: state.ui.setup_client_id.clone(),
+        client_secret: state.ui.setup_client_secret.clone(),
+    });
+    let _ = config.save();
+
+    state.ui.mode = crate::app::AppMode::Authenticating;
+    Some(AppEvent::StartAuth)
+}
+
 /// Applies a loaded theme by name and persists the choice. False if the name is unknown.
 pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
     let Some(theme) = state.ui.themes.get(name) else {
