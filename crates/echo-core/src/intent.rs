@@ -398,6 +398,18 @@ pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     AppEvent::CancelArtistPageLoad
 }
 
+/// Applies a loaded theme by name and persists the choice. False if the name is unknown.
+pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
+    let Some(theme) = state.ui.themes.get(name) else {
+        return false;
+    };
+    state.ui.active_theme = crate::theme::ResolvedTheme::from_theme(theme);
+    state.ui.library_config.active_theme = Some(name.to_string());
+    state.ui.needs_terminal_clear = true;
+    state.save_library_config();
+    true
+}
+
 // Browse nodes: generated lists that fetch on first use.
 
 /// Opens the user's top tracks; fetches them first when none are cached yet.
