@@ -1,0 +1,22 @@
+[package]
+name = "echo-desktop"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "echo"
+path = "src/main.rs"
+
+[dependencies]
+echo-core = { workspace = true }
+
+anyhow = { workspace = true }
+tokio = { workspace = true }
+
+# Pinned to the same rev because gpui_platform is not yet published to crates.io and
+# gpui's API moves quickly. Bumping this rev is a deliberate task, not routine.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
+
+[build-dependencies]
+embed-resource = "3"
