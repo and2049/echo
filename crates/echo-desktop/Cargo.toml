@@ -14,6 +14,7 @@ anyhow = { workspace = true }
 # Same 0.25 line as gpui's internal image dep, so `image::Frame`s can cross into RenderImage.
 image = { workspace = true }
 tokio = { workspace = true }
+webbrowser = { workspace = true }
 
 # Pinned to the same rev because gpui_platform is not yet published to crates.io and
 # gpui's API moves quickly. Bumping this rev is a deliberate task, not routine.
