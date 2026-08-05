@@ -1,4 +1,3 @@
-pub mod artist_page;
 pub mod browse;
 pub mod command;
 pub mod normal;

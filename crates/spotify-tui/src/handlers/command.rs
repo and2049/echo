@@ -528,17 +528,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                     "search" => {
                         let query = args.collect::<Vec<&str>>().join(" ");
-                        if !query.is_empty() {
-                            state.ui.search_context_query = query.clone();
-                            state.ui.status_message = Some(format!("Searching for '{}'...", query));
-                            state.ui.status_message_expiry =
-                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                            return Some(echo_core::events::AppEvent::GlobalSearch(query));
-                        } else {
-                            state.ui.status_message = Some("Usage: search <query>".to_string());
-                            state.ui.status_message_expiry =
-                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        if let Some(event) = echo_core::intent::global_search(state, &query) {
+                            return Some(event);
                         }
+                        state.ui.status_message = Some("Usage: search <query>".to_string());
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     }
                     "album" => {
                         use echo_core::app::ActiveView;

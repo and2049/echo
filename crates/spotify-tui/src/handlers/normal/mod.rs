@@ -1,7 +1,6 @@
 use echo_core::app::{ActiveView, AppState};
 use echo_core::events::AppEvent;
-use crate::handlers::{artist_page, browse, tracklist};
-use echo_core::models::{SearchTrack, Track, TrackListContext};
+use crate::handlers::{browse, tracklist};
 use crossterm::event::{KeyCode, KeyEvent};
 
 mod modals;
@@ -256,83 +255,20 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             } else if state.ui.active_view == ActiveView::TrackList {
                 return tracklist::play_selected(state);
             } else if state.ui.active_view == ActiveView::SearchResults {
-                let i = state.ui.selected_search_index;
-                match state.ui.active_search_tab {
-                    echo_core::app::SearchTab::Tracks => {
-                        if let Some(t) = state.data.search_results.tracks.get(i) {
-                            return search_track_play_event(state, t);
-                        }
-                    }
-                    echo_core::app::SearchTab::Albums => {
-                        if let Some(album) = state.data.search_results.albums.get(i) {
-                            if album.id.starts_with("local-album:") {
-                                let album_name = album.name.clone();
-                                let tracks: Vec<_> = state
-                                    .data
-                                    .local_library
-                                    .to_tracks()
-                                    .into_iter()
-                                    .filter(|track| {
-                                        state
-                                            .data
-                                            .local_library
-                                            .tracks
-                                            .iter()
-                                            .find(|local| local.id == track.id)
-                                            .is_some_and(|local| local.album == album_name)
-                                    })
-                                    .collect();
-                                if !tracks.is_empty() {
-                                    state.show_generated_tracks(
-                                        tracks,
-                                        TrackListContext::generated(
-                                            album.id.clone(),
-                                            album.name.clone(),
-                                        ),
-                                    );
-                                }
-                                return None;
-                            }
-                            let context = TrackListContext::album(
-                                album.id.clone(),
-                                album.name.clone(),
-                                album.artist.clone(),
-                                album.image_url.clone(),
-                            );
-                            state.begin_tracklist_load(context.clone());
-                            return Some(AppEvent::LoadContextTracks(context));
-                        }
-                    }
-                    echo_core::app::SearchTab::Artists => {
-                        if let Some(artist) = state.data.search_results.artists.get(i)
-                            && artist.id.starts_with("local-artist:")
-                        {
-                            let artist_name = artist.name.clone();
-                            let tracks: Vec<_> = state
-                                .data
-                                .local_library
-                                .to_tracks()
-                                .into_iter()
-                                .filter(|track| track.artist == artist_name)
-                                .collect();
-                            if !tracks.is_empty() {
-                                state.show_generated_tracks(
-                                    tracks,
-                                    TrackListContext::generated(
-                                        artist.id.clone(),
-                                        artist.name.clone(),
-                                    ),
-                                );
-                            }
-                            return None;
-                        }
-                        return artist_page::enter_search_artist(state);
-                    }
-                }
+                return echo_core::intent::activate_search_result(
+                    state,
+                    state.ui.selected_search_index,
+                );
             } else if state.ui.active_view == ActiveView::ArtistList {
-                return artist_page::enter_followed_artist(state);
+                return echo_core::intent::open_followed_artist(
+                    state,
+                    state.ui.selected_artist_index,
+                );
             } else if state.ui.active_view == ActiveView::ArtistPage {
-                return artist_page::enter_artist_page_selection(state);
+                return echo_core::intent::open_artist_album(
+                    state,
+                    state.ui.artist_page_album_index,
+                );
             }
         }
         KeyCode::Char(':') => {
@@ -625,7 +561,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.clear_pending_artist_page();
                     return Some(AppEvent::CancelArtistPageLoad);
                 }
-                return Some(artist_page::back_to_artist_list(state));
+                return Some(echo_core::intent::back_to_artist_list(state));
             } else if state.ui.active_view == ActiveView::SearchResults {
                 state.ui.active_view = ActiveView::Library;
                 state.data.search_results = echo_core::models::SearchResults::default();
@@ -845,66 +781,6 @@ fn seek_to(state: &mut AppState, progress_ms: u32) -> Option<AppEvent> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppEvent> {
-    let playback_track = Track {
-        id: track.id.clone(),
-        source: track.source,
-        local_path: track.local_path.clone(),
-        name: track.name.clone(),
-        artist: track.artist.clone(),
-        album: track.album.clone(),
-        added_at: None,
-        duration_ms: track.duration_ms,
-        image_url: track.image_url.clone(),
-        album_id: track.album_id.clone(),
-        artist_id: track.artist_id.clone(),
-    };
-    let target = if track.source == echo_core::models::TrackSource::Local {
-        let tracks: Vec<_> = state
-            .data
-            .search_results
-            .tracks
-            .iter()
-            .filter(|result| result.source == echo_core::models::TrackSource::Local)
-            .map(|t| Track {
-                id: t.id.clone(),
-                source: t.source,
-                local_path: t.local_path.clone(),
-                name: t.name.clone(),
-                artist: t.artist.clone(),
-                album: t.album.clone(),
-                added_at: None,
-                duration_ms: t.duration_ms,
-                image_url: t.image_url.clone(),
-                album_id: t.album_id.clone(),
-                artist_id: t.artist_id.clone(),
-            })
-            .collect();
-        let selected_index = tracks
-            .iter()
-            .position(|candidate| candidate.id == track.id)
-            .unwrap_or(0);
-        echo_core::models::PlaybackTarget::LocalContext {
-            tracks,
-            selected_index,
-        }
-    } else {
-        echo_core::models::PlaybackTarget::SpotifyTrack {
-            track_id: track.id.clone(),
-        }
-    };
-
-    Some(AppEvent::PlayTrack {
-        target,
-        track_id: playback_track.id,
-        title: playback_track.name,
-        artist: playback_track.artist,
-        duration_ms: playback_track.duration_ms,
-        image_url: playback_track.image_url,
-        album_id: playback_track.album_id,
-    })
-}
-
 fn search_results_len(state: &AppState) -> usize {
     match state.ui.active_search_tab {
         echo_core::app::SearchTab::Tracks => state.data.search_results.tracks.len(),
@@ -924,67 +800,6 @@ mod tests {
     use super::*;
     use echo_core::models::{PlaybackTarget, TrackSource};
     use std::path::PathBuf;
-
-    #[test]
-    fn local_search_track_playback_uses_local_context() {
-        let mut state = AppState::new();
-        state.data.search_results.tracks = vec![
-            SearchTrack {
-                id: "spotify".to_string(),
-                source: TrackSource::Spotify,
-                local_path: None,
-                name: "Spotify".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                duration_ms: 1,
-                image_url: None,
-                album_id: None,
-                artist_id: None,
-            },
-            SearchTrack {
-                id: "local:a".to_string(),
-                source: TrackSource::Local,
-                local_path: Some(PathBuf::from("/music/a.wav")),
-                name: "Local A".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                duration_ms: 1,
-                image_url: None,
-                album_id: None,
-                artist_id: None,
-            },
-            SearchTrack {
-                id: "local:b".to_string(),
-                source: TrackSource::Local,
-                local_path: Some(PathBuf::from("/music/b.wav")),
-                name: "Local B".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                duration_ms: 1,
-                image_url: None,
-                album_id: None,
-                artist_id: None,
-            },
-        ];
-
-        let Some(AppEvent::PlayTrack {
-            target, track_id, ..
-        }) = search_track_play_event(&state, &state.data.search_results.tracks[2])
-        else {
-            panic!("expected play event");
-        };
-
-        assert_eq!(track_id, "local:b");
-        let PlaybackTarget::LocalContext {
-            tracks,
-            selected_index,
-        } = target
-        else {
-            panic!("expected local context");
-        };
-        assert_eq!(tracks.len(), 2);
-        assert_eq!(selected_index, 1);
-    }
 
     #[test]
     fn seek_keys_emit_absolute_targets() {
