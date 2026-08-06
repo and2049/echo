@@ -317,7 +317,7 @@ fn append_api_log(message: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("echo-debug-artist.log")
+        .open(crate::config::debug_log_path("echo-debug-artist.log"))
     {
         let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
     }

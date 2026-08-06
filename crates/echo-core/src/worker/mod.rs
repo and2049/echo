@@ -514,7 +514,7 @@ impl Worker {
                                 "  → Sending SyncPlaybackState (track_id={:?})\n",
                                 item_id
                             ));
-                            let _ = std::fs::write("echo-debug-sync.log", &log);
+                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-sync.log"), &log);
                             sync_inflight.store(false, Ordering::SeqCst);
                             let _ = tx
                                 .send(WorkerEvent::SyncPlaybackState {
@@ -544,7 +544,7 @@ impl Worker {
             }
 
             log.push_str("All 3 attempts exhausted without a valid duration_ms. Giving up.\n");
-            let _ = std::fs::write("echo-debug-sync.log", &log);
+            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-sync.log"), &log);
             sync_inflight.store(false, Ordering::SeqCst);
         });
     }
@@ -1043,7 +1043,7 @@ impl Worker {
                                             }).await;
                                         }
                                         Err(e) => {
-                                            let _ = std::fs::write("echo-debug-worker.log", format!("Worker PlayTrack failed: {:?}", e));
+                                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayTrack failed: {:?}", e));
                                         }
                                     }
                                 }
@@ -1251,7 +1251,7 @@ impl Worker {
                                             )).await;
                                         }
                                         Err(e) => {
-                                            let _ = std::fs::write("echo-debug-search.log", format!("Search error: {:?}", e));
+                                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-search.log"), format!("Search error: {:?}", e));
                                             let _ = self.tx.send(WorkerEvent::SearchResultsLoaded(local_results)).await;
                                         }
                                     }
@@ -1331,7 +1331,7 @@ impl Worker {
                                         if !items.is_empty() {
                                             let res = sp.client.playlist_add_items(pid.clone(), items, None).await;
                                             if let Err(e) = res {
-                                                let _ = std::fs::write("echo-debug-add.log", format!("Add error: {:?}", e));
+                                                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-add.log"), format!("Add error: {:?}", e));
                                             } else {
                                                 invalidate_playlist_context_cache(&playlist_id);
                                                 // Trigger a refresh of the playlists to show the new tracks count
@@ -1369,12 +1369,12 @@ impl Worker {
                                                 items.push(PlayableId::Track(id));
                                             }
                                         }
-                                        let _ = std::fs::write("echo-debug-remove.log", format!("Attempting remove on {} with {} items (raw ids: {:?})", playlist_id, items.len(), track_ids));
+                                        let _ = std::fs::write(crate::config::debug_log_path("echo-debug-remove.log"), format!("Attempting remove on {} with {} items (raw ids: {:?})", playlist_id, items.len(), track_ids));
                                         if !items.is_empty() {
                                             let res = sp.client.playlist_remove_all_occurrences_of_items(pid.clone(), items, None).await;
 
                                             if let Ok(_) = res {
-                                                let _ = std::fs::write("echo-debug-remove-success.log", "Remove succeeded API call");
+                                                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-remove-success.log"), "Remove succeeded API call");
                                                 invalidate_playlist_context_cache(&playlist_id);
                                                 if let Ok(playlists) = sp.fetch_playlists().await {
                                                     save_playlists_cache(playlists.clone());
@@ -1382,10 +1382,10 @@ impl Worker {
                                                 }
                                                 let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
                                             } else if let Err(e) = res {
-                                                let _ = std::fs::write("echo-debug-remove-err.log", format!("Remove error API: {:?}", e));
+                                                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-remove-err.log"), format!("Remove error API: {:?}", e));
                                             }
                                         } else {
-                                            let _ = std::fs::write("echo-debug-remove.log", format!("No items parsed! track_ids: {:?}", track_ids));
+                                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-remove.log"), format!("No items parsed! track_ids: {:?}", track_ids));
                                         }
                                     }
                                 }
@@ -1557,7 +1557,7 @@ impl Worker {
                                             let _ = self.tx.send(WorkerEvent::QueueLoaded(tracks)).await;
                                         }
                                         Err(e) => {
-                                            let _ = std::fs::write("echo-debug-queue.log", format!("Queue error: {:?}", e));
+                                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-queue.log"), format!("Queue error: {:?}", e));
                                         }
                                     }
                                 }

@@ -8,6 +8,8 @@
 //! The tokio runtime lives on the main function's stack and stays entered for the lifetime of
 //! the UI, so worker tasks keep running on its threads while GPUI blocks in `run()`.
 
+#![windows_subsystem = "windows"]
+
 mod assets;
 mod images;
 mod theme;

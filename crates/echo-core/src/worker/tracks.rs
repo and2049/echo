@@ -90,7 +90,7 @@ async fn load_album_tracks(
         }
         Err(e) => {
             let _ = std::fs::write(
-                "echo-debug-tracks.log",
+                crate::config::debug_log_path("echo-debug-tracks.log"),
                 format!("load album tracks err id={id}: {e:?}\n"),
             );
             let _ = tx
@@ -134,7 +134,7 @@ async fn load_playlist_tracks(
         }
         Err(e) => {
             let _ = std::fs::write(
-                "echo-debug-tracks.log",
+                crate::config::debug_log_path("echo-debug-tracks.log"),
                 format!("load playlist tracks err id={id}: {e:?}\n"),
             );
             let _ = tx

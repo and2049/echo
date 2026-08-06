@@ -10,7 +10,7 @@ impl SpotifyWorker {
             Ok(p) => p,
             Err(e) => {
                 let _ = std::fs::write(
-                    "echo-debug-user-playlists.log",
+                    crate::config::debug_log_path("echo-debug-user-playlists.log"),
                     format!("User playlists fetch error: {:?}", e),
                 );
                 return Err(e.into());
@@ -63,7 +63,7 @@ impl SpotifyWorker {
                 }
                 Err(e) => {
                     let _ = std::fs::write(
-                        "echo-debug-albums.log",
+                        crate::config::debug_log_path("echo-debug-albums.log"),
                         format!("Albums fetch error: {:?}", e),
                     );
                     return Err(e.into());
@@ -135,7 +135,7 @@ impl SpotifyWorker {
                 let status = res.status();
                 if let Ok(body) = res.text().await {
                     let _ = std::fs::write(
-                        "echo-debug-playlist.log",
+                        crate::config::debug_log_path("echo-debug-playlist.log"),
                         format!("RAW REQUEST RESPONSE ({}): {}", status, body),
                     );
                 }

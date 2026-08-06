@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::models::{
@@ -449,6 +449,17 @@ pub fn echo_config_root() -> PathBuf {
         path.push("echo");
         path
     }
+}
+
+/// Path for a debug log file, inside `logs/` under [`echo_config_root`].
+///
+/// Creates the directory so callers can write directly. Log writes must not use relative
+/// paths: a GUI launch has no useful working directory (a Start Menu shortcut lands in the
+/// install dir, which is typically unwritable), so those writes would silently vanish.
+pub fn debug_log_path(name: impl AsRef<Path>) -> PathBuf {
+    let dir = echo_config_root().join("logs");
+    let _ = fs::create_dir_all(&dir);
+    dir.join(name)
 }
 
 impl AppConfig {
