@@ -25,6 +25,10 @@ const SIDEBAR_WIDTH: f32 = 260.0;
 const SIDEBAR_ROW_HEIGHT: f32 = 34.0;
 const ROW_HEIGHT: f32 = 30.0;
 const THUMB_EDGE: f32 = 26.0;
+// Native caption metrics: Windows titlebars are a fixed 32px, macOS gets a touch more.
+const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") { 32.0 } else { 34.0 };
+// Zed's measured inset for the macOS traffic lights (71px, +1px window border).
+const TRAFFIC_LIGHT_PADDING: f32 = 71.0;
 
 /// The TUI's start-screen wordmark, shown in the main area while nothing is selected.
 const ECHO_LOGO: [&str; 6] = [
@@ -69,6 +73,145 @@ impl gpui::Render for DragPreview {
 /// from the local store, mirroring `echo_core::intent`'s own check).
 fn is_fixed_library_row(id: &str) -> bool {
     id == "LIKED_SONGS" || id == "local-library" || id.starts_with("local-playlist:")
+}
+
+/// The custom titlebar: themed like the rest of the window, draggable, with caption buttons
+/// on Windows. macOS keeps its native traffic lights (the bar just insets past them) and
+/// only needs the drag/double-click plumbing done in Rust; Windows gets drag, double-click
+/// and snap layouts for free from the `HTCAPTION`/`HTMAXBUTTON` hit-tests. On Linux the
+/// window manager draws server-side decorations, so this view isn't rendered at all.
+pub fn titlebar(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let fullscreen = window.is_fullscreen();
+    let maximized = window.is_maximized();
+
+    div()
+        .id("titlebar")
+        .window_control_area(gpui::WindowControlArea::Drag)
+        .flex_none()
+        .w_full()
+        .h(px(TITLEBAR_HEIGHT))
+        .flex()
+        .flex_row()
+        .items_center()
+        .justify_between()
+        .bg(surface)
+        .map(|el| {
+            if fullscreen {
+                el.pl_3()
+            } else if cfg!(target_os = "macos") {
+                el.pl(px(TRAFFIC_LIGHT_PADDING))
+            } else {
+                el.pl_3()
+            }
+        })
+        // AppKit neither drags nor double-click-zooms a transparent titlebar for us
+        // (`app_owns_titlebar_drag`), so do both by hand — the Zed latch pattern: arm on
+        // mouse-down, and the first real move starts the native window drag.
+        .when(cfg!(target_os = "macos"), |el| {
+            el.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, _cx| this.titlebar_should_move = true),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, _cx| this.titlebar_should_move = false),
+            )
+            .on_mouse_move(cx.listener(|this, _, window, _cx| {
+                if this.titlebar_should_move {
+                    this.titlebar_should_move = false;
+                    window.start_window_move();
+                }
+            }))
+            .on_click(|event, window, _cx| {
+                if event.click_count() == 2 {
+                    window.titlebar_double_click();
+                }
+            })
+        })
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(svg().path("icons/music-note.svg").size(px(14.0)).text_color(accent))
+                .child(div().text_xs().text_color(muted).child("echo")),
+        )
+        .when(cfg!(target_os = "windows") && !fullscreen, |el| {
+            el.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .h_full()
+                    .child(caption_button(
+                        "caption-min",
+                        "icons/win-minimize.svg",
+                        gpui::WindowControlArea::Min,
+                        fg,
+                    ))
+                    .child(caption_button(
+                        "caption-max",
+                        if maximized {
+                            "icons/win-restore.svg"
+                        } else {
+                            "icons/win-maximize.svg"
+                        },
+                        gpui::WindowControlArea::Max,
+                        fg,
+                    ))
+                    .child(caption_button(
+                        "caption-close",
+                        "icons/win-close.svg",
+                        gpui::WindowControlArea::Close,
+                        fg,
+                    )),
+            )
+        })
+}
+
+/// A Windows caption button. No click handler: the `window_control_area` tag routes the
+/// click through `WM_NCHITTEST`, and gpui + `DefWindowProc` do the minimize/maximize/close.
+/// `occlude` is load-bearing — without it the surrounding Drag hitbox wins the hit-test and
+/// the button is dead.
+fn caption_button(
+    id: &'static str,
+    icon: &'static str,
+    area: gpui::WindowControlArea,
+    fg: gpui::Hsla,
+) -> impl IntoElement {
+    let close = matches!(area, gpui::WindowControlArea::Close);
+    // The close button hovers Windows-red with a white glyph; the rest get a faint wash.
+    let hover_bg: gpui::Hsla =
+        if close { gpui::rgb(0xE81123).into() } else { fg.opacity(0.08) };
+    let active_bg = if close { hover_bg.opacity(0.8) } else { fg.opacity(0.12) };
+    div()
+        .id(id)
+        .group(id)
+        .occlude()
+        .window_control_area(area)
+        .w(px(46.0))
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .hover(|style| style.bg(hover_bg))
+        .active(|style| style.bg(active_bg))
+        .child(
+            svg()
+                .path(icon)
+                .size(px(10.0))
+                .text_color(fg)
+                .when(close, |el| el.group_hover(id, |style| style.text_color(gpui::white()))),
+        )
 }
 
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
