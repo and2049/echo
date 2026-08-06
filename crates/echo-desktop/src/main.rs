@@ -23,7 +23,7 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollStrategy,
+    App, Bounds, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollHandle, ScrollStrategy,
     SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
     div, img, prelude::*, px, size, svg,
 };
@@ -160,6 +160,12 @@ pub(crate) struct EchoApp {
     pub(crate) artists_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
+    /// The modal pickers' lists. Plain scroll handles rather than uniform-list ones: their rows
+    /// are laid out by content, not at a fixed height. Without these the lists overflow their
+    /// panel's `max_h` with no way to reach the rest.
+    pub(crate) playlist_modal_scroll: ScrollHandle,
+    pub(crate) device_modal_scroll: ScrollHandle,
+    pub(crate) theme_modal_scroll: ScrollHandle,
     /// Width of the library sidebar; a drag on its right edge changes it.
     pub(crate) sidebar_width: f32,
     /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
@@ -271,6 +277,9 @@ impl EchoApp {
             artists_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
+            playlist_modal_scroll: ScrollHandle::new(),
+            device_modal_scroll: ScrollHandle::new(),
+            theme_modal_scroll: ScrollHandle::new(),
             sidebar_width: views::SIDEBAR_WIDTH,
             theme_modal_open: false,
             context_menu: None,
@@ -320,8 +329,10 @@ impl EchoApp {
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.state.ui.playlist_add_modal_open {
             self.state.ui.selected_playlist_modal_index = index;
+            self.playlist_modal_scroll.scroll_to_item(index);
         } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index = index;
+            self.device_modal_scroll.scroll_to_item(index);
         } else {
             match self.state.ui.active_view {
                 ActiveView::TrackList => {
