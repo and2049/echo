@@ -1960,6 +1960,7 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
         .flex()
         .items_center()
         .justify_center()
+        .occlude()
         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
             this.theme_modal_open = false;
             cx.notify();
@@ -1989,8 +1990,12 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .into_any_element()
                 } else {
                     div()
+                        .id("theme-list")
                         .flex()
                         .flex_col()
+                        .max_h(px(340.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&app.theme_modal_scroll)
                         .children(names.into_iter().enumerate().map(|(ix, name)| {
                             let is_active = active.as_deref() == Some(name.as_str());
                             let color = if is_active { accent } else { fg };
@@ -2045,6 +2050,7 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         .flex()
         .items_center()
         .justify_center()
+        .occlude()
         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
             this.state.ui.device_modal_open = false;
             cx.notify();
@@ -2081,8 +2087,12 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .into_any_element()
                 } else {
                     div()
+                        .id("device-list")
                         .flex()
                         .flex_col()
+                        .max_h(px(340.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&app.device_modal_scroll)
                         .children(devices.into_iter().enumerate().map(|(ix, device)| {
                             let name_color = if device.is_active { accent } else { fg };
                             div()
@@ -2164,6 +2174,9 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
         .flex()
         .items_center()
         .justify_center()
+        // Modal: the backdrop swallows pointer events, so a scroll wheel over it can't reach the
+        // track list behind the overlay.
+        .occlude()
         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
             echo_core::action_menu::cancel_playlist_add(&mut this.state);
             cx.notify();
@@ -2200,8 +2213,12 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .into_any_element()
                 } else {
                     div()
+                        .id("playlist-add-list")
                         .flex()
                         .flex_col()
+                        .max_h(px(340.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&app.playlist_modal_scroll)
                         .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
                             div()
                                 .id(ix)
@@ -2407,13 +2424,18 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .py_1()
                 .flex()
                 .flex_col()
+                .overflow_hidden()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(items.into_iter().map(|(label, action, danger)| {
+                    // Inset and rounded like the list rows: a full-bleed highlight would square
+                    // off the panel's rounded corners on the first and last item.
                     div()
                         .id(label.clone())
-                        .px_3()
+                        .mx_1()
+                        .px_2()
                         .py_1()
+                        .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
                         .hover(move |style| style.bg(accent.opacity(0.12)))
@@ -2500,13 +2522,16 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 .py_1()
                 .flex()
                 .flex_col()
+                .overflow_hidden()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(items.into_iter().map(|(label, item, danger)| {
                     div()
                         .id(label.clone())
-                        .px_3()
+                        .mx_1()
+                        .px_2()
                         .py_1()
+                        .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
                         .hover(move |style| style.bg(accent.opacity(0.12)))
