@@ -65,7 +65,7 @@ async fn send_api_error(
     err: anyhow::Error,
 ) {
     let message = api_request_error_message(&err);
-    let _ = std::fs::write("echo-debug-api.log", format!("{log_name} err: {err:?}\n"));
+    let _ = std::fs::write(crate::config::debug_log_path("echo-debug-api.log"), format!("{log_name} err: {err:?}\n"));
     let _ = tx
         .send(WorkerEvent::ApiRequestFailed {
             label: label.to_string(),

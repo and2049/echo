@@ -582,7 +582,7 @@ fn log_api(message: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("echo-debug-api.log")
+        .open(crate::config::debug_log_path("echo-debug-api.log"))
     {
         let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
     }

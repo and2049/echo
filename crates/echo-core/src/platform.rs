@@ -6,6 +6,18 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
+/// Keep console-based child processes (`clip`, `powershell`) from flashing a
+/// console window when spawned from the GUI-subsystem desktop app.
+#[cfg(target_os = "windows")]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_console(_command: &mut Command) {}
+
 pub fn copy_to_clipboard(text: &str) -> Result<()> {
     #[cfg(target_os = "windows")]
     let candidates: &[(&str, &[&str])] = &[("clip", &[])];
@@ -19,13 +31,14 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
     ];
 
     for (program, args) in candidates {
-        let Ok(mut child) = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(*args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        else {
+            .stderr(Stdio::null());
+        hide_console(&mut command);
+        let Ok(mut child) = command.spawn() else {
             continue;
         };
         if let Some(stdin) = child.stdin.as_mut() {
@@ -54,7 +67,10 @@ pub fn read_clipboard() -> Result<String> {
     ];
 
     for (program, args) in candidates {
-        let Ok(output) = Command::new(program).args(*args).output() else {
+        let mut command = Command::new(program);
+        command.args(*args);
+        hide_console(&mut command);
+        let Ok(output) = command.output() else {
             continue;
         };
         if output.status.success() {

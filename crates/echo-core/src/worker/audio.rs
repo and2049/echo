@@ -52,7 +52,7 @@ pub(crate) fn preferred_output_config(
 pub(crate) fn log_output_config(kind: &str, device: &str, stream: &rodio::OutputStream) {
     let config = stream.config();
     let _ = std::fs::write(
-        format!("echo-debug-audio-{kind}.log"),
+        crate::config::debug_log_path(format!("echo-debug-audio-{kind}.log")),
         format!(
             "device={device} channels={} sample_rate={} format={:?}",
             config.channel_count(),
@@ -353,13 +353,13 @@ pub async fn spawn_librespot_daemon(
                     Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;
 
                 let _ = std::fs::write(
-                    "echo-debug-fallback.log",
+                    crate::config::debug_log_path("echo-debug-fallback.log"),
                     format!(
                         "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
                     ),
                 );
                 spirc_task.await;
-                let _ = std::fs::write("echo-debug-fallback.log", "Spirc Daemon task exited!");
+                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-fallback.log"), "Spirc Daemon task exited!");
 
                 Ok(())
             }

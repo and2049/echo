@@ -422,7 +422,7 @@ impl SpotifyWorker {
             .await;
 
         if let Err(e) = &res {
-            let _ = std::fs::write("echo-debug.log", format!("Playback error: {:?}\n", e));
+            let _ = std::fs::write(crate::config::debug_log_path("echo-debug.log"), format!("Playback error: {:?}\n", e));
         }
 
         res?;
@@ -468,14 +468,14 @@ impl SpotifyWorker {
             Ok(q) => q,
             Err(e) => {
                 let _ = std::fs::write(
-                    "echo-debug-queue.log",
+                    crate::config::debug_log_path("echo-debug-queue.log"),
                     format!("fetch_queue error: {:?}", e),
                 );
                 return Err(e.into());
             }
         };
         let _ = std::fs::write(
-            "echo-debug-queue.log",
+            crate::config::debug_log_path("echo-debug-queue.log"),
             format!(
                 "currently_playing: {:?}\nqueue length: {}\nfirst item type: {:?}",
                 queue.currently_playing.as_ref().map(|i| match i {
