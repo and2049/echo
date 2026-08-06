@@ -14,21 +14,90 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::models::LibraryNode;
 use echo_core::thumbnails::ThumbState;
 use gpui::{
-    AnyElement, Context, MouseButton, MouseDownEvent, SharedString, Window, div, img, prelude::*,
-    px, relative, svg, uniform_list,
+    AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent, SharedString, Stateful, Window,
+    div, img, prelude::*, px, relative, svg, uniform_list,
 };
 
 use crate::theme::{ToGpui, WINDOW_FG};
 use crate::{EchoApp, MenuAction, TrackMenuItem, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
-const SIDEBAR_ROW_HEIGHT: f32 = 34.0;
-const ROW_HEIGHT: f32 = 30.0;
 const THUMB_EDGE: f32 = 26.0;
 // Native caption metrics: Windows titlebars are a fixed 32px, macOS gets a touch more.
 const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") { 32.0 } else { 34.0 };
 // Zed's measured inset for the macOS traffic lights (71px, +1px window border).
 const TRAFFIC_LIGHT_PADDING: f32 = 71.0;
+
+/// The shape of a selectable list row: the fixed height `uniform_list` measures, the shorter pill
+/// drawn inside it, and how strongly hover tints an unselected row. See [`pill_row`].
+#[derive(Clone, Copy)]
+pub(crate) struct PillMetrics {
+    row_height: f32,
+    pill_height: f32,
+    hover_opacity: f32,
+}
+
+/// Sidebar rows, which hover a touch stronger than the main area.
+const SIDEBAR_PILL: PillMetrics = PillMetrics {
+    row_height: 34.0,
+    pill_height: 30.0,
+    hover_opacity: 0.1,
+};
+/// Main-area lists carrying a thumbnail column.
+const LIST_PILL: PillMetrics = PillMetrics {
+    row_height: 34.0,
+    pill_height: 30.0,
+    hover_opacity: 0.08,
+};
+/// The denser text-only lists — tracks and the queue.
+const COMPACT_PILL: PillMetrics = PillMetrics {
+    row_height: 30.0,
+    pill_height: 26.0,
+    hover_opacity: 0.08,
+};
+
+/// A selectable list row, drawn as an inset rounded pill.
+///
+/// Every list in the app shares this shell. `uniform_list` measures a fixed row height, so the
+/// pill takes its vertical inset from being shorter than the row rather than from a margin, which
+/// would drift the list's item accounting; the horizontal inset is padding on the inert outer div,
+/// leaving the pill's own padding free for per-list indents.
+///
+/// `build` decorates the pill — children, gaps, click handlers, drag sources. Hover is skipped on
+/// the selected row: the hover tint is fainter than the selection colour, so it would otherwise
+/// wash the selection out as the cursor passes over it.
+fn pill_row(
+    ix: usize,
+    metrics: PillMetrics,
+    selected: bool,
+    selected_bg: Hsla,
+    muted: Hsla,
+    build: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
+) -> Div {
+    let pill = div()
+        .id(ix)
+        .w_full()
+        .h(px(metrics.pill_height))
+        .px_2()
+        .rounded_md()
+        .flex()
+        .flex_row()
+        .items_center()
+        .text_sm()
+        .when(selected, |el| el.bg(selected_bg))
+        .when(!selected, |el| {
+            el.hover(move |style| style.bg(muted.opacity(metrics.hover_opacity)))
+        })
+        .cursor_pointer();
+
+    div()
+        .w_full()
+        .h(px(metrics.row_height))
+        .px_2()
+        .flex()
+        .items_center()
+        .child(build(pill))
+}
 
 /// The TUI's start-screen wordmark, shown in the main area while nothing is selected.
 const ECHO_LOGO: [&str; 6] = [
@@ -278,8 +347,10 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                    -> Option<echo_core::events::AppEvent>| {
                 div()
                     .id(id)
-                    .px_3()
+                    .mx_2()
+                    .px_2()
                     .py_1()
+                    .rounded_md()
                     .flex()
                     .flex_row()
                     .items_center()
@@ -472,21 +543,10 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     None
                                 };
 
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(SIDEBAR_ROW_HEIGHT))
-                                .px_3()
-                                .pl(px(12.0 + indent_px))
-                                .flex()
-                                .flex_row()
-                                .items_center()
+                            pill_row(ix, SIDEBAR_PILL, ix == selected, selected_bg, muted, |row| {
+                                row.pl(px(8.0 + indent_px))
                                 .gap_2()
-                                .text_sm()
                                 .text_color(label_color)
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.1)))
-                                .cursor_pointer()
                                 .when(tab != LibraryTab::Artists, |el| {
                                     // Artists have no row actions, so no context menu.
                                     el.on_mouse_down(
@@ -583,6 +643,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         .whitespace_nowrap()
                                         .child(label),
                                 )
+                            })
                         })
                         .collect();
 
@@ -975,19 +1036,8 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
 
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(ROW_HEIGHT))
-                                .px_4()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.08)))
-                                .cursor_pointer()
+                            pill_row(ix, COMPACT_PILL, ix == selected, selected_bg, muted, |row| {
+                                row.gap_3()
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     this.state.ui.selected_track_index = ix;
                                     if event.click_count() >= 2
@@ -1054,6 +1104,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .text_color(muted)
                                         .child(SharedString::from(format_time(track.duration_ms))),
                                 )
+                            })
                         })
                         .collect()
                 }),
@@ -1115,24 +1166,30 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                         .map(|ix| {
                             let track = &this.state.data.queue[ix];
 
-                            // Browse-only rows: the Spotify API can't jump into the queue, so a
-                            // click just moves the selection.
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(ROW_HEIGHT))
-                                .px_4()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.08)))
-                                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            pill_row(ix, COMPACT_PILL, ix == selected, selected_bg, muted, |row| {
+                                row.gap_3()
+                                .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     this.state.ui.selected_queue_index = ix;
+                                    if event.click_count() >= 2
+                                        && let Some(event) =
+                                            echo_core::intent::play_queue_track_at(&mut this.state, ix)
+                                    {
+                                        this.dispatch(event);
+                                    }
                                     cx.notify();
                                 }))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                        this.state.ui.selected_queue_index = ix;
+                                        this.context_menu = None;
+                                        this.track_menu = Some(crate::TrackMenuState {
+                                            index: ix,
+                                            position: event.position,
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
                                 .child(
                                     div()
                                         .flex_none()
@@ -1167,6 +1224,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .text_color(muted)
                                         .child(SharedString::from(format_time(track.duration_ms))),
                                 )
+                            })
                         })
                         .collect()
                 }),
@@ -1323,20 +1381,8 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
 
                     let rows: Vec<AnyElement> = range
                         .map(|ix| {
-                            let row = div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(SIDEBAR_ROW_HEIGHT))
-                                .px_4()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.08)))
-                                .cursor_pointer()
-                                .on_click(cx.listener(
+                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                                let row = row.gap_3().on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) =
                                             echo_core::intent::activate_search_result(
@@ -1350,7 +1396,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                     },
                                 ));
 
-                            match tab {
+                                match tab {
                                 SearchTab::Tracks => {
                                     let track =
                                         this.state.data.search_results.tracks[ix].clone();
@@ -1393,7 +1439,6 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                                 track.duration_ms,
                                             ))),
                                     )
-                                    .into_any_element()
                                 }
                                 SearchTab::Albums => {
                                     let album =
@@ -1426,7 +1471,6 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                                 .text_color(muted)
                                                 .child(SharedString::from(album.artist)),
                                         )
-                                        .into_any_element()
                                 }
                                 SearchTab::Artists => {
                                     let artist =
@@ -1459,9 +1503,10 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                                     artist.followers
                                                 ))),
                                         )
-                                        .into_any_element()
                                 }
-                            }
+                                }
+                            })
+                            .into_any_element()
                         })
                         .collect();
 
@@ -1532,19 +1577,8 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 true,
                                 muted,
                             );
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(SIDEBAR_ROW_HEIGHT))
-                                .px_4()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.08)))
-                                .cursor_pointer()
+                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                                row.gap_3()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) =
@@ -1578,7 +1612,8 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             artist.followers
                                         ))),
                                 )
-                                .into_any_element()
+                            })
+                            .into_any_element()
                         })
                         .collect();
 
@@ -1722,19 +1757,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .track_count
                                 .map(|n| format!("{n} tracks"))
                                 .unwrap_or_default();
-                            div()
-                                .id(ix)
-                                .w_full()
-                                .h(px(SIDEBAR_ROW_HEIGHT))
-                                .px_4()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap_3()
-                                .text_sm()
-                                .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.08)))
-                                .cursor_pointer()
+                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                                row.gap_3()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) = echo_core::intent::open_artist_album(
@@ -1771,7 +1795,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                         .text_color(muted)
                                         .child(SharedString::from(tracks_label)),
                                 )
-                                .into_any_element()
+                            })
+                            .into_any_element()
                         })
                         .collect();
 
@@ -2071,7 +2096,9 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                                 .gap_2()
                                 .text_sm()
                                 .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.1)))
+                                .when(ix != selected, |el| {
+                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
@@ -2187,7 +2214,9 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                                 .gap_2()
                                 .text_sm()
                                 .when(ix == selected, |el| el.bg(selected_bg))
-                                .hover(|style| style.bg(muted.opacity(0.1)))
+                                .when(ix != selected, |el| {
+                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
@@ -2414,7 +2443,7 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
     let mut items: Vec<(SharedString, TrackMenuItem, bool)> = Vec::new();
-    if let Some(track) = app.state.data.tracks.get(menu.index) {
+    if let Some(track) = echo_core::intent::row_track(&app.state, menu.index) {
         let ctx = echo_core::models::ActionMenuContext::from(track);
         for action in ctx.actions() {
             items.push((
@@ -2423,12 +2452,15 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 false,
             ));
         }
-        if app
-            .state
-            .data
-            .active_tracklist_context
-            .as_ref()
-            .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
+        // Queue rows have no playlist behind them — `active_tracklist_context` is whatever was
+        // last browsed, so removing would hit the wrong playlist.
+        if app.state.ui.active_view != ActiveView::Queue
+            && app
+                .state
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
         {
             items.push((
                 "Remove from playlist".into(),
