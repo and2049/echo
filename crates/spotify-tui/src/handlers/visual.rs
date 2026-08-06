@@ -58,7 +58,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 if state.ui.selected_playlist_modal_index + 1
-                    < crate::handlers::normal::playlist_modal_choices(state).len()
+                    < echo_core::action_menu::playlist_add_choices(state).len()
                 {
                     state.ui.selected_playlist_modal_index += 1;
                 }
@@ -67,7 +67,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.ui.selected_playlist_modal_index -= 1;
             }
             KeyCode::Enter => {
-                let playlists = crate::handlers::normal::playlist_modal_choices(state);
+                let playlists = echo_core::action_menu::playlist_add_choices(state);
                 if let Some(playlist) = playlists.get(state.ui.selected_playlist_modal_index) {
                     let tracks = if let Some((start, end)) = state.get_visual_selection_range() {
                         match state.ui.active_view {

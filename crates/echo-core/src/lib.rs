@@ -5,6 +5,7 @@
 //! spawn [`worker::Worker`] on a tokio runtime and talk to it over the two event channels in
 //! [`events`]. Nothing in here may depend on a rendering or input library.
 
+pub mod action_menu;
 pub mod app;
 pub mod apply_worker_event;
 pub mod artwork;

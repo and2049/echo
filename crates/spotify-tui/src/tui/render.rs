@@ -272,7 +272,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     if state.ui.playlist_add_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
 
-        let user_playlists = crate::handlers::normal::playlist_modal_choices(state);
+        let user_playlists = echo_core::action_menu::playlist_add_choices(state);
 
         let items: Vec<ratatui::widgets::ListItem> = user_playlists
             .iter()
@@ -413,37 +413,11 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
         None => return,
     };
 
-    let is_liked = state.data.liked_tracks.contains(&ctx.track_id);
     let lang = &state.ui.library_config.language;
-    let lbl_album = echo_core::i18n::t("actions.go_to_album", lang);
-    let lbl_artist = echo_core::i18n::t("actions.go_to_artist", lang);
-    let lbl_playlist = echo_core::i18n::t("actions.add_to_playlist", lang);
-    let lbl_queue = echo_core::i18n::t("actions.add_to_queue", lang);
-    let lbl_unlike = echo_core::i18n::t("actions.unlike_track", lang);
-    let lbl_like = echo_core::i18n::t("actions.like_track", lang);
-
-    let album_is_saved = ctx
-        .album_id
-        .as_ref()
-        .is_some_and(|id| state.data.saved_albums.iter().any(|album| &album.id == id));
     let actions = ctx.actions();
     let labels: Vec<String> = actions
         .iter()
-        .map(|action| match action {
-            echo_core::models::ActionMenuAction::GoToAlbum => lbl_album.clone(),
-            echo_core::models::ActionMenuAction::GoToArtist => lbl_artist.clone(),
-            echo_core::models::ActionMenuAction::AddToPlaylist => lbl_playlist.clone(),
-            echo_core::models::ActionMenuAction::AddToQueue => lbl_queue.clone(),
-            echo_core::models::ActionMenuAction::ToggleLike => {
-                if is_liked { lbl_unlike.clone() } else { lbl_like.clone() }
-            }
-            echo_core::models::ActionMenuAction::ToggleSavedAlbum => {
-                if album_is_saved { "Remove album from library" } else { "Save album to library" }.to_string()
-            }
-            echo_core::models::ActionMenuAction::CopyLink => "Copy Spotify link".to_string(),
-            echo_core::models::ActionMenuAction::CopyPath => "Copy file path".to_string(),
-            echo_core::models::ActionMenuAction::OpenFolder => "Show in file manager".to_string(),
-        })
+        .map(|&action| echo_core::action_menu::label(state, ctx, action))
         .collect();
 
     // Measure popup size — title + 2 border lines + 1 blank + N actions

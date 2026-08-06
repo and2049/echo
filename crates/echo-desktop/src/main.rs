@@ -76,7 +76,8 @@ actions!(
         Refresh,
         OpenFilter,
         NextMatch,
-        PrevMatch
+        PrevMatch,
+        BackOrFocusLibrary
     ]
 );
 
@@ -102,6 +103,31 @@ pub(crate) struct ContextMenuState {
 enum Scrub {
     Seek,
     Volume,
+}
+
+/// A drag-to-resize of the library sidebar: the pointer's x at mouse-down and the width it
+/// started at, so moves become a new width.
+#[derive(Clone, Copy)]
+struct SidebarResize {
+    start_x: Pixels,
+    start_width: f32,
+}
+
+/// A right-click menu anchored where the click landed, over track row `index` of the loaded
+/// track list. Kept separate from [`ContextMenuState`]: items and execution share nothing
+/// with the sidebar menu.
+#[derive(Clone)]
+pub(crate) struct TrackMenuState {
+    pub index: usize,
+    pub position: gpui::Point<Pixels>,
+}
+
+/// What a track-menu item does. Most entries are the shared action-menu actions; remove is
+/// desktop-menu-only (the TUI reaches it through `dd`).
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum TrackMenuItem {
+    Action(echo_core::models::ActionMenuAction),
+    RemoveFromPlaylist,
 }
 
 /// What a context-menu item does; resolved against the row the menu was opened on.
@@ -134,10 +160,16 @@ pub(crate) struct EchoApp {
     pub(crate) artists_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
+    /// Width of the library sidebar; a drag on its right edge changes it.
+    pub(crate) sidebar_width: f32,
     /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
     pub(crate) theme_modal_open: bool,
     /// Right-click menu over a sidebar row; the TUI reaches these through keys instead.
     pub(crate) context_menu: Option<ContextMenuState>,
+    /// Right-click menu over a track row; mutually exclusive with `context_menu`.
+    pub(crate) track_menu: Option<TrackMenuState>,
+    /// Vim-style count prefix for j/k, accumulated from bare digit keys.
+    pending_count: Option<usize>,
     /// Written by a canvas overlay each paint; read by the scrub handlers to turn a pointer's
     /// window position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
@@ -145,6 +177,9 @@ pub(crate) struct EchoApp {
     /// A drag-to-scrub in progress on the seek or volume bar; pointer moves update the state
     /// optimistically and the worker event fires on release.
     scrubbing: Option<Scrub>,
+    /// A drag-to-resize of the library sidebar in progress; like scrubbing, the width updates
+    /// optimistically from window-level pointer moves and settles on release.
+    sidebar_resizing: Option<SidebarResize>,
     /// macOS titlebar drag latch (Zed's pattern): armed on mouse-down, the first move
     /// starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
     titlebar_should_move: bool,
@@ -236,11 +271,15 @@ impl EchoApp {
             artists_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
+            sidebar_width: views::SIDEBAR_WIDTH,
             theme_modal_open: false,
             context_menu: None,
+            track_menu: None,
+            pending_count: None,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             scrubbing: None,
+            sidebar_resizing: None,
             titlebar_should_move: false,
             focus_handle,
         }
@@ -249,6 +288,9 @@ impl EchoApp {
     /// Rows in whatever currently has keyboard focus: the device modal when open, else the
     /// `active_view` list — the same routing the TUI's navigation handler does.
     fn list_len(&self) -> usize {
+        if self.state.ui.playlist_add_modal_open {
+            return echo_core::action_menu::playlist_add_choices(&self.state).len();
+        }
         if self.state.ui.device_modal_open {
             return self.state.data.devices.len();
         }
@@ -276,7 +318,9 @@ impl EchoApp {
     }
 
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
-        if self.state.ui.device_modal_open {
+        if self.state.ui.playlist_add_modal_open {
+            self.state.ui.selected_playlist_modal_index = index;
+        } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index = index;
         } else {
             match self.state.ui.active_view {
@@ -315,7 +359,9 @@ impl EchoApp {
         if len == 0 {
             return;
         }
-        let current = if self.state.ui.device_modal_open {
+        let current = if self.state.ui.playlist_add_modal_open {
+            self.state.ui.selected_playlist_modal_index
+        } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index
         } else {
             match self.state.ui.active_view {
@@ -339,7 +385,11 @@ impl EchoApp {
 
     /// Enter on the focused list — the same intents the row click handlers use.
     fn activate_selection(&mut self, cx: &mut Context<Self>) {
-        let event = if self.state.ui.device_modal_open {
+        self.pending_count = None;
+        let event = if self.state.ui.playlist_add_modal_open {
+            let index = self.state.ui.selected_playlist_modal_index;
+            echo_core::action_menu::commit_playlist_add(&mut self.state, index)
+        } else if self.state.ui.device_modal_open {
             let index = self.state.ui.selected_device_index;
             echo_core::intent::transfer_to_device(&mut self.state, index)
         } else {
@@ -412,10 +462,15 @@ impl EchoApp {
     /// Escape / `h` / backspace: close whatever is topmost, else go back — the same ordering
     /// as the TUI's back handling, with the desktop-only modals checked first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
         if echo_core::intent::prompt_active(&self.state) {
             echo_core::intent::cancel_prompt(&mut self.state);
         } else if self.context_menu.is_some() {
             self.context_menu = None;
+        } else if self.track_menu.is_some() {
+            self.track_menu = None;
+        } else if self.state.ui.playlist_add_modal_open {
+            echo_core::action_menu::cancel_playlist_add(&mut self.state);
         } else if self.state.ui.device_modal_open {
             self.state.ui.device_modal_open = false;
         } else if self.theme_modal_open {
@@ -543,6 +598,68 @@ impl EchoApp {
             MenuAction::RemoveAlbum => {}
         }
         cx.notify();
+    }
+
+    /// Runs a track-menu item against track row `index`, then closes the menu. Remove only
+    /// stages `track_delete_prompt` — the confirm modal fires the actual event.
+    pub(crate) fn run_track_menu_action(
+        &mut self,
+        item: TrackMenuItem,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.track_menu = None;
+        let Some(track) = self.state.data.tracks.get(index) else {
+            cx.notify();
+            return;
+        };
+        let ctx = echo_core::models::ActionMenuContext::from(track);
+        match item {
+            TrackMenuItem::Action(action) => {
+                if let Some(event) = echo_core::action_menu::run(&mut self.state, ctx, action) {
+                    self.dispatch(event);
+                }
+            }
+            TrackMenuItem::RemoveFromPlaylist => {
+                if let Some(context) = self
+                    .state
+                    .data
+                    .active_tracklist_context
+                    .clone()
+                    .filter(|c| c.can_modify_playlist(self.state.data.user_id.as_ref()))
+                {
+                    self.state.ui.track_delete_prompt = Some((context.id, vec![ctx.track_id]));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Consume the pending vim count, defaulting to a single step.
+    fn take_count(&mut self) -> isize {
+        self.pending_count.take().unwrap_or(1).max(1) as isize
+    }
+
+    fn overlay_open(&self) -> bool {
+        echo_core::intent::prompt_active(&self.state)
+            || self.context_menu.is_some()
+            || self.track_menu.is_some()
+            || self.state.ui.playlist_add_modal_open
+            || self.state.ui.device_modal_open
+            || self.theme_modal_open
+            || self.state.ui.lyrics_modal_open
+    }
+
+    /// Backspace: close the topmost overlay if one is open, else hand keyboard focus back to
+    /// the library sidebar while keeping the current page visible — the TUI's quick two-pane
+    /// hop, without walking the view history the way `h`/escape do.
+    fn back_or_focus_library(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
+        if self.overlay_open() {
+            self.dismiss(cx);
+        } else {
+            self.focus_library(cx);
+        }
     }
 
     // Vim-style command mode (`:`) and track filter (`/`) — a bar above the playback bar that
@@ -1053,10 +1170,33 @@ impl EchoApp {
         }
     }
 
-    /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
+    // Drag-to-resize of the library sidebar: mouse-down on its right edge starts it, window-level
+    // mouse moves update the width optimistically, and release just settles it (width persists).
+
+    fn begin_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        self.sidebar_resizing = Some(SidebarResize {
+            start_x: x,
+            start_width: self.sidebar_width,
+        });
+        cx.notify();
+    }
+
+    fn update_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(resize) = self.sidebar_resizing else { return };
+        let delta = x - resize.start_x;
+        self.sidebar_width = (resize.start_width + f32::from(delta)).clamp(180.0, 480.0);
+        cx.notify();
+    }
+
+    fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_resizing.take().is_some() {
+            cx.notify();
+        }
+    }
+
+        /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
     /// TUI's full-page artist list, so there is no ArtistList view to return to.
-    pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {
-        self.state.ui.active_view = ActiveView::Library;
+    pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {        self.state.ui.active_view = ActiveView::Library;
         self.state.clear_pending_artist_page();
         self.dispatch(AppEvent::CancelArtistPageLoad);
         cx.notify();
@@ -1113,6 +1253,7 @@ impl EchoApp {
             _ => ("icons/repeat.svg", muted),
         };
         let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
+        let volume_label: SharedString = format!("{}%", playback.volume).into();
         let mute_icon = if playback.volume == 0 {
             "icons/volume-off.svg"
         } else {
@@ -1188,7 +1329,7 @@ impl EchoApp {
             .flex_row()
             .items_center()
             .gap_3()
-            .h(px(88.0))
+            .h(px(108.0))
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
@@ -1281,7 +1422,7 @@ impl EchoApp {
                                     .items_center()
                                     .justify_center()
                                     .rounded_full()
-                                    .hover(|style| style.bg(accent.opacity(0.15)))
+                                    .hover(move |style| style.bg(fg.opacity(0.15)))
                                     .on_click(cx.listener(|this, _event, _window, cx| {
                                         this.toggle_playback(cx)
                                     }))
@@ -1290,7 +1431,7 @@ impl EchoApp {
                                             .path(play_icon)
                                             .w(px(20.0))
                                             .h(px(20.0))
-                                            .text_color(accent),
+                                            .text_color(fg),
                                     ),
                             )
                             .child(icon_button("next", "icons/next.svg", fg, cx, |this, cx| {
@@ -1309,7 +1450,10 @@ impl EchoApp {
                                 repeat_color,
                                 cx,
                                 |this, cx| this.cycle_repeat(cx),
-                            )),
+                            ))
+                            .child(icon_button("lyrics", "icons/mic.svg", lyrics_color, cx, |this, cx| {
+                                this.toggle_lyrics(cx)
+                            })),
                     ),
             )
             .child(
@@ -1435,55 +1579,78 @@ impl EchoApp {
                     .size_full(),
                 ))
             })
-            .child(icon_button("lyrics", "icons/mic.svg", lyrics_color, cx, |this, cx| {
-                this.toggle_lyrics(cx)
-            }))
-            .child(icon_button("themes", "icons/paint-board.svg", muted, cx, |this, cx| {
-                this.toggle_themes(cx)
-            }))
-            .child(icon_button("queue", "icons/playlist.svg", queue_color, cx, |this, cx| {
-                this.toggle_queue(cx)
-            }))
-            .child(icon_button("devices", "icons/computer.svg", muted, cx, |this, cx| {
-                this.open_devices(cx)
-            }))
-            .child(icon_button("mute", mute_icon, muted, cx, |this, cx| {
-                this.toggle_mute(cx)
-            }))
             .child(
+                // Right cluster mirrors the left one (fixed 240px so the seek bar stays
+                // centered) with a 36px card row over a 36px transport row.
                 div()
-                    .id("volume-bar")
                     .flex_none()
-                    .w(px(90.0))
-                    .py_2()
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
-                            this.begin_scrub(Scrub::Volume, event.position.x, cx);
-                        }),
-                    )
+                    .w(px(240.0))
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .gap_1()
+                    .child(div().h(px(36.0)))
                     .child(
                         div()
-                            .relative()
-                            .w_full()
-                            .h(px(6.0))
-                            .rounded_full()
-                            .bg(muted.opacity(0.25))
+                            .h(px(36.0))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_end()
+                            .gap_1()
+                            .child(icon_button("queue", "icons/playlist.svg", queue_color, cx, |this, cx| {
+                                this.toggle_queue(cx)
+                            }))
+                            .child(icon_button("devices", "icons/computer.svg", muted, cx, |this, cx| {
+                                this.open_devices(cx)
+                            }))
+                            .child(icon_button("mute", mute_icon, muted, cx, |this, cx| {
+                                this.toggle_mute(cx)
+                            }))
                             .child(
-                                canvas(
-                                    move |bounds, _window, _cx| volume_bounds.set(bounds),
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .size_full(),
+                                div()
+                                    .id("volume-bar")
+                                    .flex_none()
+                                    .w(px(90.0))
+                                    .py_2()
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                                            this.begin_scrub(Scrub::Volume, event.position.x, cx);
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .relative()
+                                            .w_full()
+                                            .h(px(6.0))
+                                            .rounded_full()
+                                            .bg(muted.opacity(0.25))
+                                            .child(
+                                                canvas(
+                                                    move |bounds, _window, _cx| volume_bounds.set(bounds),
+                                                    |_, _, _, _| {},
+                                                )
+                                                .absolute()
+                                                .size_full(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .h_full()
+                                                    .rounded_full()
+                                                    .bg(fg)
+                                                    .w(gpui::relative(volume_fraction)),
+                                            ),
+                                    ),
                             )
                             .child(
                                 div()
-                                    .h_full()
-                                    .rounded_full()
-                                    .bg(fg)
-                                    .w(gpui::relative(volume_fraction)),
+                                    .flex_none()
+                                    .w(px(34.0))
+                                    .text_xs()
+                                    .text_color(fg)
+                                    .child(volume_label),
                             ),
                     ),
             )
@@ -1492,7 +1659,7 @@ impl EchoApp {
 
 /// A small round icon button for the playback bar. `icon` is an embedded SVG path (see
 /// [`assets`]), tinted with `color` like any themed text.
-fn icon_button(
+pub(crate) fn icon_button(
     id: &'static str,
     icon: &'static str,
     color: Hsla,
@@ -1552,6 +1719,15 @@ impl Render for EchoApp {
             .context_menu
             .is_some()
             .then(|| views::context_menu(self, cx).into_any_element());
+        let track_menu = self
+            .track_menu
+            .is_some()
+            .then(|| views::track_context_menu(self, cx).into_any_element());
+        let playlist_add_modal = self
+            .state
+            .ui
+            .playlist_add_modal_open
+            .then(|| views::playlist_add_modal(self, cx).into_any_element());
         let prompt_modal = echo_core::intent::prompt_active(&self.state)
             .then(|| views::prompt_modal(self, cx).into_any_element());
         // Linux keeps the window manager's decorations; everywhere else the app draws its own.
@@ -1564,6 +1740,13 @@ impl Render for EchoApp {
             // Scrubs track the pointer at the window level so dragging keeps working when the
             // pointer leaves the bar; release (or a move without the button) ends them.
             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                if this.sidebar_resizing.is_some() {
+                    if event.pressed_button == Some(gpui::MouseButton::Left) {
+                        this.update_sidebar_resize(event.position.x, cx);
+                    } else {
+                        this.finish_sidebar_resize(cx);
+                    }
+                }
                 if this.scrubbing.is_some() {
                     if event.pressed_button == Some(gpui::MouseButton::Left) {
                         this.update_scrub(event.position.x, cx);
@@ -1575,14 +1758,21 @@ impl Render for EchoApp {
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseUpEvent, _window, cx| {
+                    this.finish_sidebar_resize(cx);
                     this.finish_scrub(event.position.x, cx);
                 }),
             )
             .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
                 this.toggle_playback(cx)
             }))
-            .on_action(cx.listener(|this, _: &MoveUp, _window, cx| this.move_selection(-1, cx)))
-            .on_action(cx.listener(|this, _: &MoveDown, _window, cx| this.move_selection(1, cx)))
+            .on_action(cx.listener(|this, _: &MoveUp, _window, cx| {
+                let count = this.take_count();
+                this.move_selection(-count, cx)
+            }))
+            .on_action(cx.listener(|this, _: &MoveDown, _window, cx| {
+                let count = this.take_count();
+                this.move_selection(count, cx)
+            }))
             .on_action(
                 cx.listener(|this, _: &PageUp, _window, cx| this.move_selection(-PAGE_ROWS, cx)),
             )
@@ -1620,7 +1810,15 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &HalfPageDown, _window, cx| {
                 this.move_selection(PAGE_ROWS / 2, cx)
             }))
-            .on_action(cx.listener(|this, _: &SeekStart, _window, cx| this.seek_start(cx)))
+            // `0` extends a pending count (`10j`); bare `0` keeps its seek-to-start role.
+            .on_action(cx.listener(|this, _: &SeekStart, _window, cx| {
+                if let Some(count) = this.pending_count {
+                    this.pending_count = Some(count.saturating_mul(10).min(9999));
+                    cx.notify();
+                } else {
+                    this.seek_start(cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &VolumeUp, _window, cx| this.adjust_volume(1, cx)))
             .on_action(cx.listener(|this, _: &VolumeDown, _window, cx| this.adjust_volume(-1, cx)))
             .on_action(cx.listener(|this, _: &VolumeUpBig, _window, cx| this.adjust_volume(5, cx)))
@@ -1652,6 +1850,40 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &ToggleInlineLyrics, _window, cx| {
                 this.toggle_inline_lyrics(cx)
             }))
+            .on_action(cx.listener(|this, _: &BackOrFocusLibrary, _window, cx| {
+                this.back_or_focus_library(cx)
+            }))
+            // Digits are unbound, so they fall through the key bindings to this listener and
+            // accumulate a vim-style count for j/k. Only while the list itself has focus —
+            // digits typed into the search/command inputs must not count.
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if !this.focus_handle.is_focused(window) {
+                    return;
+                }
+                let keystroke = &event.keystroke;
+                if keystroke.modifiers.control
+                    || keystroke.modifiers.alt
+                    || keystroke.modifiers.platform
+                    || keystroke.modifiers.shift
+                {
+                    return;
+                }
+                match keystroke.key.as_str() {
+                    digit @ ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") => {
+                        let digit = (digit.as_bytes()[0] - b'0') as usize;
+                        let current = this.pending_count.unwrap_or(0);
+                        this.pending_count =
+                            Some(current.saturating_mul(10).saturating_add(digit).min(9999));
+                        cx.notify();
+                    }
+                    // Any other unbound key cancels the pending count.
+                    _ => {
+                        if this.pending_count.take().is_some() {
+                            cx.notify();
+                        }
+                    }
+                }
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -1673,7 +1905,9 @@ impl Render for EchoApp {
             .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
+            .when_some(playlist_add_modal, |el, modal| el.child(modal))
             .when_some(context_menu, |el, menu| el.child(menu))
+            .when_some(track_menu, |el, menu| el.child(menu))
             .when_some(prompt_modal, |el, modal| el.child(modal))
     }
 }
@@ -1723,7 +1957,9 @@ fn main() {
             KeyBinding::new("ctrl-f", PageDown, LIST_KEYS),
             // `h` is "back" in the TUI, not "focus sidebar" — the left arrow keeps that role.
             KeyBinding::new("h", Dismiss, LIST_KEYS),
-            KeyBinding::new("backspace", Dismiss, LIST_KEYS),
+            // Backspace hops focus back to the sidebar (TUI habit); `h`/escape keep going
+            // back through the view history.
+            KeyBinding::new("backspace", BackOrFocusLibrary, LIST_KEYS),
             KeyBinding::new("escape", Dismiss, LIST_KEYS),
             KeyBinding::new("tab", CycleTab, LIST_KEYS),
             // Transport, the TUI's default keymap.
