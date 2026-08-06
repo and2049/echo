@@ -143,6 +143,9 @@ pub(crate) struct EchoApp {
     /// A drag-to-scrub in progress on the seek or volume bar; pointer moves update the state
     /// optimistically and the worker event fires on release.
     scrubbing: Option<Scrub>,
+    /// macOS titlebar drag latch (Zed's pattern): armed on mouse-down, the first move
+    /// starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
+    titlebar_should_move: bool,
     focus_handle: FocusHandle,
 }
 
@@ -236,6 +239,7 @@ impl EchoApp {
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             scrubbing: None,
+            titlebar_should_move: false,
             focus_handle,
         }
     }
@@ -1548,6 +1552,9 @@ impl Render for EchoApp {
             .then(|| views::context_menu(self, cx).into_any_element());
         let prompt_modal = echo_core::intent::prompt_active(&self.state)
             .then(|| views::prompt_modal(self, cx).into_any_element());
+        // Linux keeps the window manager's decorations; everywhere else the app draws its own.
+        let titlebar = (!cfg!(target_os = "linux"))
+            .then(|| views::titlebar(self, window, cx).into_any_element());
 
         div()
             .key_context(LIST_CONTEXT)
@@ -1648,6 +1655,7 @@ impl Render for EchoApp {
             .flex_col()
             .size_full()
             .bg(bg)
+            .when_some(titlebar, |el, bar| el.child(bar))
             .child(
                 div()
                     .flex_grow(1.0)
@@ -1764,10 +1772,18 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // The app draws its own themed titlebar (views::titlebar); the native one
+                // is hidden on Windows/macOS. Linux keeps server decorations, so there the
+                // custom bar is simply not rendered.
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some("echo".into()),
-                    ..Default::default()
+                    appears_transparent: true,
+                    traffic_light_position: Some(gpui::point(px(9.0), px(9.0))),
                 }),
+                // macOS: the app moves the window itself via start_window_move, which also
+                // avoids AppKit's titlebar-click delay. No-op elsewhere.
+                app_owns_titlebar_drag: true,
+                window_min_size: Some(size(px(480.0), px(360.0))),
                 ..Default::default()
             },
             |window, cx| cx.new(|cx| EchoApp::new(boot, window, cx)),

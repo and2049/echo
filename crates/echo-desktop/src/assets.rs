@@ -43,6 +43,12 @@ icons!(
     "star",
     "volume-high",
     "volume-off",
+    // Titlebar caption buttons (hand-drawn in the same stroke style, not Hugeicons —
+    // SVGs rather than Segoe glyph codepoints so they render identically on Win10/11).
+    "win-close",
+    "win-maximize",
+    "win-minimize",
+    "win-restore",
 );
 
 pub struct Assets;
