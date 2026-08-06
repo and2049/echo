@@ -100,6 +100,40 @@ pub fn play_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
     play_event_with_target(track, target)
 }
 
+/// Plays row `index` of the live queue, selecting it first.
+///
+/// Spotify's API has no "jump to queue position", so the track is played standalone rather than
+/// as an offset into a context: the device then rebuilds its up-next list around it. That is the
+/// closest thing to "go to this song" the API allows, and it is why this can't reuse
+/// [`play_track_at`] — the queue is not a tracklist with a context behind it.
+pub fn play_queue_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    if index >= state.data.queue.len() {
+        return None;
+    }
+    state.ui.selected_queue_index = index;
+    let track = state.data.queue.get(index)?;
+    let target = match track.source {
+        TrackSource::Local => PlaybackTarget::LocalTrack {
+            track_id: track.id.clone(),
+            path: track.local_path.clone()?,
+        },
+        TrackSource::Spotify => PlaybackTarget::SpotifyTrack {
+            track_id: track.id.clone(),
+        },
+    };
+    play_event_with_target(track, target)
+}
+
+/// The track a row index addresses in the active view: the loaded tracklist, or the live queue
+/// when that's what's on screen. Row menus resolve their subject through this so they don't have
+/// to know which list they were opened over.
+pub fn row_track(state: &AppState, index: usize) -> Option<&Track> {
+    match state.ui.active_view {
+        ActiveView::Queue => state.data.queue.get(index),
+        _ => state.data.tracks.get(index),
+    }
+}
+
 /// The play event for `track` inside `context`, with no selection side effects.
 pub fn play_event(track: &Track, context: &TrackListContext) -> Option<AppEvent> {
     let target = context.playback_target_for_track(track)?;

@@ -398,8 +398,10 @@ impl EchoApp {
                     let index = self.state.ui.selected_track_index;
                     echo_core::intent::play_track_at(&mut self.state, index)
                 }
-                // The queue is browse-only: the API can't jump to a queue position.
-                ActiveView::Queue => None,
+                ActiveView::Queue => {
+                    let index = self.state.ui.selected_queue_index;
+                    echo_core::intent::play_queue_track_at(&mut self.state, index)
+                }
                 ActiveView::SearchResults => {
                     let index = self.state.ui.selected_search_index;
                     echo_core::intent::activate_search_result(&mut self.state, index)
@@ -609,7 +611,7 @@ impl EchoApp {
         cx: &mut Context<Self>,
     ) {
         self.track_menu = None;
-        let Some(track) = self.state.data.tracks.get(index) else {
+        let Some(track) = echo_core::intent::row_track(&self.state, index) else {
             cx.notify();
             return;
         };
@@ -1326,25 +1328,26 @@ impl EchoApp {
 
         div()
             .flex()
-            .flex_row()
-            .items_center()
-            .gap_3()
+            .flex_col()
+            .justify_center()
+            .gap_1()
             .h(px(108.0))
             .px_4()
             .border_t_1()
             .border_color(muted.opacity(0.3))
             .child(
-                // Left cluster: the song card stacked over the transport row, so the seek bar
-                // gets the whole center width.
+                // Top row: song card, condensed lyric line, visualizer. Its contents come and go;
+                // its height doesn't, so nothing here can move the row below.
                 div()
-                    .flex_none()
-                    .w(px(240.0))
                     .flex()
-                    .flex_col()
-                    .justify_center()
-                    .gap_1()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .h(px(PLAYBACK_ROW_HEIGHT))
                     .child(
                         div()
+                            .flex_none()
+                            .w(px(PLAYBACK_SIDE_WIDTH))
                             .flex()
                             .flex_row()
                             .items_center()
@@ -1401,6 +1404,87 @@ impl EchoApp {
                     )
                     .child(
                         div()
+                            .flex_grow(1.0)
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .overflow_hidden()
+                            .when_some(inline_lyrics, |el, (current, next)| {
+                                el.child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(accent)
+                                        .whitespace_nowrap()
+                                        .max_w_full()
+                                        .overflow_hidden()
+                                        .child(SharedString::from(current)),
+                                )
+                                .when(!next.is_empty(), |el| {
+                                    el.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .whitespace_nowrap()
+                                            .max_w_full()
+                                            .overflow_hidden()
+                                            .child(SharedString::from(next)),
+                                    )
+                                })
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(PLAYBACK_SIDE_WIDTH))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_end()
+                            .when_some(visualizer_bands, |el, bands| {
+                                // 32 bands, 0–100, painted as bottom-anchored bars. Repaints ride
+                                // the fast tick.
+                                el.child(div().flex_none().w(px(120.0)).h(px(32.0)).child(
+                                    canvas(
+                                        |_, _, _| (),
+                                        move |bounds, _, window, _| {
+                                            let bands = bands.lock();
+                                            let count = bands.len();
+                                            let band_width = bounds.size.width / count as f32;
+                                            for (index, value) in bands.iter().enumerate() {
+                                                let ratio = (value / 100.0).clamp(0.0, 1.0);
+                                                let bar_height = bounds.size.height * ratio;
+                                                let origin = gpui::point(
+                                                    bounds.origin.x + band_width * index as f32,
+                                                    bounds.origin.y + bounds.size.height
+                                                        - bar_height,
+                                                );
+                                                let bar = Bounds {
+                                                    origin,
+                                                    size: size(band_width * 0.8, bar_height),
+                                                };
+                                                window.paint_quad(gpui::fill(bar, accent));
+                                            }
+                                        },
+                                    )
+                                    .size_full(),
+                                ))
+                            }),
+                    ),
+            )
+            .child(
+                // Bottom row: transport, seek and volume on one line, so the seek bar sits on the
+                // buttons' baseline no matter what the row above is doing.
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .h(px(PLAYBACK_ROW_HEIGHT))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(PLAYBACK_SIDE_WIDTH))
                             .flex()
                             .flex_row()
                             .items_center()
@@ -1454,145 +1538,72 @@ impl EchoApp {
                             .child(icon_button("lyrics", "icons/mic.svg", lyrics_color, cx, |this, cx| {
                                 this.toggle_lyrics(cx)
                             })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_grow(1.0)
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .overflow_hidden()
-                    .when_some(inline_lyrics, |el, (current, next)| {
-                        el.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .mb_1()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(accent)
-                                        .whitespace_nowrap()
-                                        .max_w_full()
-                                        .overflow_hidden()
-                                        .child(SharedString::from(current)),
-                                )
-                                .when(!next.is_empty(), |el| {
-                                    el.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .overflow_hidden()
-                                            .child(SharedString::from(next)),
-                                    )
-                                }),
-                        )
-                    })
-                    .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_color(muted)
-                            .text_xs()
-                            .child(elapsed_label),
-                    )
-                    .child(
-                // Progress track: the canvas overlay records the track's bounds each paint, and
-                // a click anywhere in the (taller) hit area seeks to that fraction.
-                div()
-                    .id("seek-bar")
-                    .flex_grow(1.0)
-                    .py_2()
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
-                            this.begin_scrub(Scrub::Seek, event.position.x, cx);
-                        }),
                     )
                     .child(
                         div()
-                            .relative()
-                            .w_full()
-                            .h(px(6.0))
-                            .rounded_full()
-                            .bg(muted.opacity(0.25))
+                            .flex_grow(1.0)
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
                             .child(
-                                canvas(
-                                    move |bounds, _window, _cx| seek_bounds.set(bounds),
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .size_full(),
+                                div()
+                                    .flex_none()
+                                    .text_color(muted)
+                                    .text_xs()
+                                    .child(elapsed_label),
+                            )
+                            .child(
+                                // Progress track: the canvas overlay records the track's bounds
+                                // each paint, and a click anywhere in the (taller) hit area seeks
+                                // to that fraction.
+                                div()
+                                    .id("seek-bar")
+                                    .flex_grow(1.0)
+                                    .py_2()
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                                            this.begin_scrub(Scrub::Seek, event.position.x, cx);
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .relative()
+                                            .w_full()
+                                            .h(px(6.0))
+                                            .rounded_full()
+                                            .bg(muted.opacity(0.25))
+                                            .child(
+                                                canvas(
+                                                    move |bounds, _window, _cx| seek_bounds.set(bounds),
+                                                    |_, _, _, _| {},
+                                                )
+                                                .absolute()
+                                                .size_full(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .h_full()
+                                                    .rounded_full()
+                                                    .bg(accent)
+                                                    .w(gpui::relative(fraction)),
+                                            ),
+                                    ),
                             )
                             .child(
                                 div()
-                                    .h_full()
-                                    .rounded_full()
-                                    .bg(accent)
-                                    .w(gpui::relative(fraction)),
+                                    .flex_none()
+                                    .text_color(muted)
+                                    .text_xs()
+                                    .child(duration_label),
                             ),
-                    ),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_color(muted)
-                            .text_xs()
-                            .child(duration_label),
-                    ),
-                    ),
-            )
-            .when_some(visualizer_bands, |el, bands| {
-                // 32 bands, 0–100, painted as bottom-anchored bars. Repaints ride the fast tick.
-                el.child(div().flex_none().w(px(120.0)).h(px(40.0)).child(
-                    canvas(
-                        |_, _, _| (),
-                        move |bounds, _, window, _| {
-                            let bands = bands.lock();
-                            let count = bands.len();
-                            let band_width = bounds.size.width / count as f32;
-                            for (index, value) in bands.iter().enumerate() {
-                                let ratio = (value / 100.0).clamp(0.0, 1.0);
-                                let bar_height = bounds.size.height * ratio;
-                                let origin = gpui::point(
-                                    bounds.origin.x + band_width * index as f32,
-                                    bounds.origin.y + bounds.size.height - bar_height,
-                                );
-                                let bar = Bounds {
-                                    origin,
-                                    size: size(band_width * 0.8, bar_height),
-                                };
-                                window.paint_quad(gpui::fill(bar, accent));
-                            }
-                        },
-                    )
-                    .size_full(),
-                ))
-            })
-            .child(
-                // Right cluster mirrors the left one (fixed 240px so the seek bar stays
-                // centered) with a 36px card row over a 36px transport row.
-                div()
-                    .flex_none()
-                    .w(px(240.0))
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .gap_1()
-                    .child(div().h(px(36.0)))
-                    .child(
-                        div()
-                            .h(px(36.0))
+                            .w(px(PLAYBACK_SIDE_WIDTH))
                             .flex()
                             .flex_row()
                             .items_center()
@@ -1656,6 +1667,12 @@ impl EchoApp {
             )
     }
 }
+
+/// The playback bar's two rows share this three-slot geometry — fixed side columns around a
+/// growing center — so the seek bar lines up with the transport and volume controls below it.
+const PLAYBACK_SIDE_WIDTH: f32 = 240.0;
+/// Fixed so that showing or hiding the lyric line and the visualizer can't move the seek bar.
+const PLAYBACK_ROW_HEIGHT: f32 = 40.0;
 
 /// A small round icon button for the playback bar. `icon` is an embedded SVG path (see
 /// [`assets`]), tinted with `color` like any themed text.

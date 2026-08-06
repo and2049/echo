@@ -249,6 +249,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             } else if state.ui.active_view == ActiveView::TrackList {
                 return tracklist::play_selected(state);
+            } else if state.ui.active_view == ActiveView::Queue {
+                return echo_core::intent::play_queue_track_at(
+                    state,
+                    state.ui.selected_queue_index,
+                );
             } else if state.ui.active_view == ActiveView::SearchResults {
                 return echo_core::intent::activate_search_result(
                     state,
