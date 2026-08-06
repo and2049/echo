@@ -144,11 +144,11 @@ pub fn toggle_shuffle(state: &mut AppState) -> AppEvent {
     AppEvent::ToggleShuffle(state.playback.is_shuffled)
 }
 
-/// Off → Track → Context → Off, Spotify's own cycle order.
+/// Off → Context → Track → Off, Spotify's own cycle order.
 pub fn cycle_repeat(state: &mut AppState) -> AppEvent {
     let mode = match state.playback.repeat_mode.as_str() {
-        "Off" => "Track",
-        "Track" => "Context",
+        "Off" => "Context",
+        "Context" => "Track",
         _ => "Off",
     };
     state.playback.repeat_mode = mode.to_string();

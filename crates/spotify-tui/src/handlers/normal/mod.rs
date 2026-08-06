@@ -6,8 +6,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 mod modals;
 mod prompts;
 
-pub use modals::playlist_modal_choices;
-
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     let (prompt_active, prompt_event) = prompts::handle(state, key);
     if let Some(event) = prompt_event {
@@ -369,45 +367,18 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 && state.ui.selected_track_index < state.data.tracks.len()
             {
                 let t = &state.data.tracks[state.ui.selected_track_index];
-                Some(echo_core::models::ActionMenuContext {
-                    track_id: t.id.clone(),
-                    source: t.source,
-                    track_name: t.name.clone(),
-                    local_path: t.local_path.clone(),
-                    album_id: t.album_id.clone(),
-                    album_name: t.album.clone(),
-                    artist_id: t.artist_id.clone(),
-                    artist_name: t.artist.clone(),
-                })
+                Some(echo_core::models::ActionMenuContext::from(t))
             } else if state.ui.active_view == ActiveView::Queue
                 && state.ui.selected_queue_index < state.data.queue.len()
             {
                 let t = &state.data.queue[state.ui.selected_queue_index];
-                Some(echo_core::models::ActionMenuContext {
-                    track_id: t.id.clone(),
-                    source: t.source,
-                    track_name: t.name.clone(),
-                    local_path: t.local_path.clone(),
-                    album_id: t.album_id.clone(),
-                    album_name: t.album.clone(),
-                    artist_id: t.artist_id.clone(),
-                    artist_name: t.artist.clone(),
-                })
+                Some(echo_core::models::ActionMenuContext::from(t))
             } else if state.ui.active_view == ActiveView::SearchResults
                 && state.ui.active_search_tab == echo_core::app::SearchTab::Tracks
                 && state.ui.selected_search_index < state.data.search_results.tracks.len()
             {
                 let t = &state.data.search_results.tracks[state.ui.selected_search_index];
-                Some(echo_core::models::ActionMenuContext {
-                    track_id: t.id.clone(),
-                    source: t.source,
-                    track_name: t.name.clone(),
-                    local_path: t.local_path.clone(),
-                    album_id: t.album_id.clone(),
-                    album_name: t.album.clone(),
-                    artist_id: t.artist_id.clone(),
-                    artist_name: t.artist.clone(),
-                })
+                Some(echo_core::models::ActionMenuContext::from(t))
             } else if !state.playback.playing_track_id.is_none() {
                 Some(echo_core::models::ActionMenuContext {
                     track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
@@ -623,13 +594,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return echo_core::intent::refresh_view(state);
         }
         KeyCode::Char('r') => {
-            let next_mode = match state.playback.repeat_mode.as_str() {
-                "Off" => "Track",
-                "Track" => "Context",
-                _ => "Off",
-            };
-            state.playback.repeat_mode = next_mode.to_string();
-            return Some(AppEvent::SetRepeatMode(next_mode.to_string()));
+            return Some(echo_core::intent::cycle_repeat(state));
         }
         KeyCode::Char('=') => {
             return Some(echo_core::intent::adjust_volume(state, 1));

@@ -285,6 +285,54 @@ impl ActionMenuContext {
     }
 }
 
+impl From<&Track> for ActionMenuContext {
+    fn from(track: &Track) -> Self {
+        Self {
+            track_id: track.id.clone(),
+            source: track.source,
+            track_name: track.name.clone(),
+            local_path: track.local_path.clone(),
+            album_id: track.album_id.clone(),
+            album_name: track.album.clone(),
+            artist_id: track.artist_id.clone(),
+            artist_name: track.artist.clone(),
+        }
+    }
+}
+
+impl From<&SearchTrack> for ActionMenuContext {
+    fn from(track: &SearchTrack) -> Self {
+        Self {
+            track_id: track.id.clone(),
+            source: track.source,
+            track_name: track.name.clone(),
+            local_path: track.local_path.clone(),
+            album_id: track.album_id.clone(),
+            album_name: track.album.clone(),
+            artist_id: track.artist_id.clone(),
+            artist_name: track.artist.clone(),
+        }
+    }
+}
+
+impl From<&SearchTrack> for Track {
+    fn from(track: &SearchTrack) -> Self {
+        Self {
+            id: track.id.clone(),
+            source: track.source,
+            local_path: track.local_path.clone(),
+            name: track.name.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            added_at: None,
+            duration_ms: track.duration_ms,
+            image_url: track.image_url.clone(),
+            album_id: track.album_id.clone(),
+            artist_id: track.artist_id.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchTrack {
     pub id: String,

@@ -19,9 +19,9 @@ use gpui::{
 };
 
 use crate::theme::{ToGpui, WINDOW_FG};
-use crate::{EchoApp, MenuAction, format_time};
+use crate::{EchoApp, MenuAction, TrackMenuItem, format_time};
 
-const SIDEBAR_WIDTH: f32 = 260.0;
+pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
 const SIDEBAR_ROW_HEIGHT: f32 = 34.0;
 const ROW_HEIGHT: f32 = 30.0;
 const THUMB_EDGE: f32 = 26.0;
@@ -247,8 +247,9 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
     };
 
     div()
+        .relative()
         .flex_none()
-        .w(px(SIDEBAR_WIDTH))
+        .w(px(app.sidebar_width))
         .h_full()
         .flex()
         .flex_col()
@@ -492,6 +493,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         MouseButton::Right,
                                         cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
                                             this.state.ui.selected_playlist_index = ix;
+                                            this.track_menu = None;
                                             this.context_menu = Some(crate::ContextMenuState {
                                                 index: ix,
                                                 position: event.position,
@@ -592,6 +594,23 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             )
             .track_scroll(&app.library_scroll)
             .flex_grow(1.0),
+        )
+        .child(
+            div()
+                .absolute()
+                .right_0()
+                .top_0()
+                .bottom_0()
+                .w(px(5.0))
+                .cursor_col_resize()
+                .hover(|style| style.bg(accent.opacity(0.2)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                        this.begin_sidebar_resize(event.position.x, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
         )
 }
 
@@ -791,7 +810,17 @@ fn search_bar(
     let focused = app.search_focus.is_focused(window);
     let query = app.search_input.clone();
 
-    div().flex_none().px_4().pt_3().child(
+    div()
+        .flex_none()
+        .px_4()
+        .pt_3()
+        .flex()
+        .flex_row()
+        .items_center()
+        // Invisible stand-in for the theme button so the search box centers exactly.
+        .child(div().flex_none().w(px(32.0)))
+        .child(div().flex_grow(1.0))
+        .child(
         div()
             .id("search-box")
             .key_context(crate::SEARCH_CONTEXT)
@@ -841,7 +870,15 @@ fn search_bar(
                     }))
                     .into_any_element()
             }),
-    )
+        )
+        .child(div().flex_grow(1.0))
+        .child(crate::icon_button(
+            "themes",
+            "icons/paint-board.svg",
+            muted,
+            cx,
+            |this, cx| this.toggle_themes(cx),
+        ))
 }
 
 fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
@@ -951,15 +988,28 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .hover(|style| style.bg(muted.opacity(0.08)))
                                 .cursor_pointer()
-                                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                                .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     this.state.ui.selected_track_index = ix;
-                                    if let Some(event) =
-                                        echo_core::intent::play_track_at(&mut this.state, ix)
+                                    if event.click_count() >= 2
+                                        && let Some(event) =
+                                            echo_core::intent::play_track_at(&mut this.state, ix)
                                     {
                                         this.dispatch(event);
                                     }
                                     cx.notify();
                                 }))
+                                .on_mouse_down(
+                                    MouseButton::Right,
+                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                        this.state.ui.selected_track_index = ix;
+                                        this.context_menu = None;
+                                        this.track_menu = Some(crate::TrackMenuState {
+                                            index: ix,
+                                            position: event.position,
+                                        });
+                                        cx.notify();
+                                    }),
+                                )
                                 .child(
                                     div()
                                         .flex_none()
@@ -2059,6 +2109,119 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
+/// Add-to-playlist picker over the choices both frontends share (own Spotify playlists plus
+/// local ones); Enter and row clicks resolve through `action_menu::commit_playlist_add`.
+pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+    let selected = app.state.ui.selected_playlist_modal_index;
+
+    // Materialized before the element closures capture anything from `app`.
+    let choices: Vec<(SharedString, bool)> =
+        echo_core::action_menu::playlist_add_choices(&app.state)
+            .into_iter()
+            .map(|playlist| {
+                let local = playlist.owner_id == "local";
+                (SharedString::from(playlist.name), local)
+            })
+            .collect();
+
+    div()
+        .id("playlist-add-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            echo_core::action_menu::cancel_playlist_add(&mut this.state);
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("playlist-add-panel")
+                .w(px(400.0))
+                .max_h(px(420.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(surface)
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .overflow_hidden()
+                // Clicks on the panel itself must not reach the backdrop's close handler.
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(
+                    div()
+                        .pb_2()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("Add to playlist"),
+                )
+                .child(if choices.is_empty() {
+                    div()
+                        .py_4()
+                        .text_sm()
+                        .text_color(muted)
+                        .child("No playlists you can edit")
+                        .into_any_element()
+                } else {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
+                            div()
+                                .id(ix)
+                                .px_2()
+                                .py_2()
+                                .rounded_md()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_2()
+                                .text_sm()
+                                .when(ix == selected, |el| el.bg(selected_bg))
+                                .hover(|style| style.bg(muted.opacity(0.1)))
+                                .cursor_pointer()
+                                .on_click(cx.listener(
+                                    move |this: &mut EchoApp, _event, _window, cx| {
+                                        if let Some(event) =
+                                            echo_core::action_menu::commit_playlist_add(
+                                                &mut this.state,
+                                                ix,
+                                            )
+                                        {
+                                            this.dispatch(event);
+                                        }
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(
+                                    div()
+                                        .flex_grow(1.0)
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .whitespace_nowrap()
+                                        .text_color(fg)
+                                        .child(name),
+                                )
+                                .when(local, |el| {
+                                    el.child(
+                                        div().flex_none().text_xs().text_color(muted).child("Local"),
+                                    )
+                                })
+                        }))
+                        .into_any_element()
+                }),
+        )
+}
+
 /// The main-area empty state: the TUI's ECHO wordmark with a vertical secondary→primary
 /// gradient, or plain status text while authenticating.
 fn library_placeholder(app: &EchoApp) -> AnyElement {
@@ -2144,7 +2307,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         if app.state.data.saved_albums.get(menu.index).is_some() {
             items.push(("Open".into(), MenuAction::Open, false));
             items.push((
-                "Remove from library…".into(),
+                "Remove from library".into(),
                 MenuAction::RemoveAlbum,
                 true,
             ));
@@ -2152,8 +2315,8 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     } else if let Some(node) = app.state.data.library_view.get(menu.index) {
         match node {
             LibraryNode::Folder(_) => {
-                items.push(("Rename…".into(), MenuAction::Rename, false));
-                items.push(("Delete folder…".into(), MenuAction::DeleteFolder, true));
+                items.push(("Rename".into(), MenuAction::Rename, false));
+                items.push(("Delete folder".into(), MenuAction::DeleteFolder, true));
             }
             LibraryNode::Playlist { playlist, indent } => {
                 items.push(("Open".into(), MenuAction::Open, false));
@@ -2168,7 +2331,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                     ));
                 }
                 if !special {
-                    items.push(("Rename…".into(), MenuAction::Rename, false));
+                    items.push(("Rename".into(), MenuAction::Rename, false));
                 }
                 if *indent >= 1 {
                     items.push((
@@ -2179,7 +2342,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 }
                 let own = app.state.data.user_id.as_ref() == Some(&playlist.owner_id);
                 if local || (!special && own) {
-                    items.push(("Delete playlist…".into(), MenuAction::DeletePlaylist, true));
+                    items.push(("Delete playlist".into(), MenuAction::DeletePlaylist, true));
                 }
             }
         }
@@ -2228,6 +2391,96 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, window, cx| {
                             this.run_menu_action(action, index, window, cx);
+                        }))
+                        .child(label)
+                })),
+        )
+}
+
+/// Right-click menu for a track row. The item set and labels come from the shared action-menu
+/// model (`ActionMenuContext::actions()` / `action_menu::label`), so it always matches the
+/// TUI's `A` popup; remove-from-playlist is appended for modifiable playlists, where the TUI
+/// uses `dd` instead.
+pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let menu = app
+        .track_menu
+        .clone()
+        .expect("track_context_menu rendered without state");
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
+
+    let mut items: Vec<(SharedString, TrackMenuItem, bool)> = Vec::new();
+    if let Some(track) = app.state.data.tracks.get(menu.index) {
+        let ctx = echo_core::models::ActionMenuContext::from(track);
+        for action in ctx.actions() {
+            items.push((
+                echo_core::action_menu::label(&app.state, &ctx, action).into(),
+                TrackMenuItem::Action(action),
+                false,
+            ));
+        }
+        if app
+            .state
+            .data
+            .active_tracklist_context
+            .as_ref()
+            .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
+        {
+            items.push((
+                "Remove from playlist".into(),
+                TrackMenuItem::RemoveFromPlaylist,
+                true,
+            ));
+        }
+    }
+
+    let index = menu.index;
+    div()
+        .id("track-menu-backdrop")
+        .absolute()
+        .inset_0()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.track_menu = None;
+            cx.notify();
+        }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this: &mut EchoApp, _event: &MouseDownEvent, _window, cx| {
+                this.track_menu = None;
+                cx.notify();
+            }),
+        )
+        .child(
+            div()
+                .id("track-menu")
+                .absolute()
+                .left(menu.position.x)
+                .top(menu.position.y)
+                .w(px(210.0))
+                .rounded_md()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(surface)
+                .py_1()
+                .flex()
+                .flex_col()
+                // Clicks on the menu itself must not reach the backdrop's close handler.
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .children(items.into_iter().map(|(label, item, danger)| {
+                    div()
+                        .id(label.clone())
+                        .px_3()
+                        .py_1()
+                        .text_sm()
+                        .text_color(if danger { danger_color } else { fg })
+                        .hover(move |style| style.bg(accent.opacity(0.12)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            this.run_track_menu_action(item, index, cx);
                         }))
                         .child(label)
                 })),
