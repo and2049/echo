@@ -24,9 +24,9 @@ unicode-width = { workspace = true }
 ctor = "0.4"
 
 [package.metadata.packager]
-product-name = "Echo TUI"
+product-name = "echo TUI"
 identifier = "com.echo.tui"
-publisher = "Echo"
+publisher = "echo"
 category = "Music"
 icons = [
     "../../icons/icon.icns",

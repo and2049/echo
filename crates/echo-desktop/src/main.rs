@@ -1,4 +1,4 @@
-//! Echo — the GPUI desktop frontend.
+//! echo — the GPUI desktop frontend.
 //!
 //! Same architecture as the `spotify` TUI: [`echo_core::bootstrap::init`] spawns the worker on a
 //! tokio runtime and hands back the two event channels; the frontend applies worker events to
@@ -2414,7 +2414,7 @@ fn main() {
     application().with_assets(assets::Assets).run(move |cx: &mut App| {
         // Must match the MSI shortcuts' System.AppUserModel.ID so every launch path
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
-        cx.set_app_identity("com.echo.app", "Echo");
+        cx.set_app_identity("com.echo.app", "echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),

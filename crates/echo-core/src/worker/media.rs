@@ -34,7 +34,7 @@ pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::Unb
 
         let config = PlatformConfig {
             dbus_name: "echo_player",
-            display_name: "Echo Player",
+            display_name: "echo",
             hwnd,
         };
 

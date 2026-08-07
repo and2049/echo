@@ -187,8 +187,8 @@ fn launch_in_terminal() -> ! {
     let _ = std::process::Command::new("zenity")
         .args([
             "--error",
-            "--title=Echo",
-            "--text=Echo is a terminal application but no terminal emulator was found.\nPlease run it from a terminal.",
+            "--title=echo",
+            "--text=echo is a terminal application but no terminal emulator was found.\nPlease run it from a terminal.",
         ])
         .spawn();
     std::process::exit(1);

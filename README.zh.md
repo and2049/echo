@@ -31,17 +31,17 @@ echo 是一款用 Rust 编写的终端音乐播放器和 Spotify 客户端。ech
    - 前往 [Spotify 开发者仪表盘](https://developer.spotify.com/dashboard/)。
    - 创建一个应用并获取您的 `Client ID` 和 `Client Secret`。
    - 将 `http://127.0.0.1:8888/callback` 添加到应用的 Redirect URIs 中。
-   - Echo 还使用 `http://127.0.0.1:8989/login` 进行内部第一方 Spotify 会话。
+   - echo 还使用 `http://127.0.0.1:8989/login` 进行内部第一方 Spotify 会话。
 
 ### 安装
 
-从[发布页面](https://github.com/and2049/echo/releases)下载对应平台的安装程序。**Echo** 安装包同时包含桌面应用和 `spotify` 终端命令：
+从[发布页面](https://github.com/and2049/echo/releases)下载对应平台的安装程序。**echo** 安装包同时包含桌面应用和 `spotify` 终端命令：
 
 - **Windows**（`echo-desktop_*.msi`）：安装桌面应用，并将安装目录加入 `PATH`（卸载时自动移除），安装后在新终端中即可直接运行 `spotify`。
-- **macOS**（`Echo_*.dmg`）：将 `Echo.app` 拖入 Applications。TUI 已内置于应用包中，执行一次以下命令即可加入 `PATH`：
+- **macOS**（`echo_*.dmg`）：将 `echo.app` 拖入 Applications。TUI 已内置于应用包中，执行一次以下命令即可加入 `PATH`：
 
   ```bash
-  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  sudo ln -sf /Applications/echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
   ```
 
 - **Linux**（`.deb`）：安装桌面应用及 `/usr/bin/spotify`。只想要 TUI？请改用发布页面中的 TUI AppImage（`spotify_*.AppImage`；不要与 deb 同时安装，两者都提供 `spotify`）。
@@ -131,7 +131,7 @@ echo 主要由键盘驱动。
 
 ## 本地音乐
 
-本地音乐支持与 Spotify 分开。使用 `:localpath <absolute-folder-path>` 选择 echo 应扫描的文件夹。支持的音频扩展名为 `mp3`、`wav`、`flac`、`ogg`、`m4a` 和 `aac`；echo 会递归扫描并读取标题、艺术家、专辑、时长和封面图（如有）。Echo 在启动时会刷新已配置的本地文件夹，并在运行期间监视其中的音频/封面图变化；`:rescanlocal` 仍可作为手动回退方案使用。
+本地音乐支持与 Spotify 分开。使用 `:localpath <absolute-folder-path>` 选择 echo 应扫描的文件夹。支持的音频扩展名为 `mp3`、`wav`、`flac`、`ogg`、`m4a` 和 `aac`；echo 会递归扫描并读取标题、艺术家、专辑、时长和封面图（如有）。echo 在启动时会刷新已配置的本地文件夹，并在运行期间监视其中的音频/封面图变化；`:rescanlocal` 仍可作为手动回退方案使用。
 
 本地播放列表存储在本地，不是 Spotify 播放列表。它们可以包含本地曲目和 Spotify 曲目引用。Spotify 播放列表不能包含本地曲目。本地随机播放、重复、音量、队列和播放/暂停由 echo 的本地播放引擎处理。
 

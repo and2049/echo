@@ -52,11 +52,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "FileDescription", "Echo\0"
+            VALUE "FileDescription", "echo\0"
             VALUE "FileVersion", "{pkg_version}\0"
-            VALUE "ProductName", "Echo\0"
+            VALUE "ProductName", "echo\0"
             VALUE "ProductVersion", "{pkg_version}\0"
-            VALUE "CompanyName", "Echo\0"
+            VALUE "CompanyName", "echo\0"
             VALUE "OriginalFilename", "echo-desktop.exe\0"
         END
     END

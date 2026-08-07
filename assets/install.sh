@@ -3,20 +3,20 @@
 #
 # Usage:
 #   ./install.sh                         # auto-detect AppImage or ./echo binary
-#   ./install.sh /path/to/Echo.AppImage  # install a specific AppImage
+#   ./install.sh /path/to/echo.AppImage  # install a specific AppImage
 #   ./install.sh /path/to/echo           # install a specific binary
 #   ./install.sh --uninstall             # remove echo
 #
 # Remote (curl) usage:
 #   curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
-#   curl -fsSL .../install.sh | sh -s -- /path/to/Echo.AppImage
+#   curl -fsSL .../install.sh | sh -s -- /path/to/echo.AppImage
 #   curl -fsSL .../install.sh | sh -s -- --uninstall
 
 set -eu
 
 BINARY_NAME="spotify"
 ICON_NAME="echo"
-APP_NAME="Echo"
+APP_NAME="echo"
 REPO="and2049/echo"
 RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
 
@@ -129,7 +129,7 @@ download_latest_appimage() {
     _api_url="https://api.github.com/repos/${REPO}/releases/latest"
     download "$_api_url" "$_api_json" || { rm -f "$_api_json"; err "Failed to query GitHub releases API."; }
 
-    # Releases carry two AppImages: the Echo desktop app (echo-desktop_*) and the TUI
+    # Releases carry two AppImages: the echo desktop app (echo-desktop_*) and the TUI
     # (spotify_* — AppImages are named after their main binary). This script installs the
     # TUI one, which becomes the on-PATH `spotify` command; the fallback covers older
     # single-asset releases.
@@ -203,7 +203,7 @@ install() {
         SRC="$DOWNLOADED_APPIMAGE"
     else
         err "Could not find an AppImage or binary to install.
-Pass the path explicitly:  $0 /path/to/Echo.AppImage"
+Pass the path explicitly:  $0 /path/to/echo.AppImage"
     fi
 
     if [ ! -f "$SRC" ]; then
@@ -249,7 +249,7 @@ dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 exe="$dir/spotify"
 if [ ! -x "$exe" ]; then
     if command -v zenity >/dev/null 2>&1; then
-        zenity --error --title=Echo --text="spotify binary not found at $exe"
+        zenity --error --title=echo --text="spotify binary not found at $exe"
     fi
     exit 1
 fi
@@ -274,7 +274,7 @@ try_terminal wezterm           start --
 try_terminal terminator        -e
 try_terminal xterm             -e
 if command -v zenity >/dev/null 2>&1; then
-    zenity --error --title=Echo --text="No terminal emulator found. Please install one."
+    zenity --error --title=echo --text="No terminal emulator found. Please install one."
 fi
 exit 1
 LAUNCHEREOF

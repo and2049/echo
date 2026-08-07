@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Echo (TUI)
+Name=echo (TUI)
 Comment=Terminal-based Spotify client and music player
 Exec=spotify
 Icon=echo
