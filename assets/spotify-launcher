@@ -6,7 +6,7 @@ exe="$dir/spotify"
 
 if [ ! -x "$exe" ]; then
     if command -v zenity >/dev/null 2>&1; then
-        zenity --error --title=Echo --text="spotify binary not found at $exe"
+        zenity --error --title=echo --text="spotify binary not found at $exe"
     fi
     exit 1
 fi
@@ -35,6 +35,6 @@ try_terminal terminator        -e
 try_terminal xterm             -e
 
 if command -v zenity >/dev/null 2>&1; then
-    zenity --error --title=Echo --text="No terminal emulator found. Please install one."
+    zenity --error --title=echo --text="No terminal emulator found. Please install one."
 fi
 exit 1

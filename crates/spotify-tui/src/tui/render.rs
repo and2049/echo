@@ -362,7 +362,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from("2. Open the Devices picker."),
             Line::from("3. Select 'echo-rs' from available devices."),
             Line::from(""),
-            Line::from("Echo will continue once the device connects."),
+            Line::from("echo will continue once the device connects."),
         ])
         .style(state.ui.active_theme.base_style())
         .block(

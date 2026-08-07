@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Echo
+Name=echo
 Comment=Spotify client and music player
 Exec=echo-desktop
 Icon=echo

@@ -9,7 +9,7 @@
     <Fragment>
         <DirectoryRef Id="INSTALLDIR">
             <Component Id="EnvPathEntry" Guid="*" Win64="yes">
-                <RegistryValue Root="HKCU" Key="Software\Echo\Echo" Name="EnvPathEntry" Type="integer" Value="1" KeyPath="yes" />
+                <RegistryValue Root="HKCU" Key="Software\echo\echo" Name="EnvPathEntry" Type="integer" Value="1" KeyPath="yes" />
                 <Environment Id="EchoInstallDirOnPath" Name="PATH" Value="[INSTALLDIR]" Part="last" Action="set" Permanent="no" System="yes" />
             </Component>
         </DirectoryRef>

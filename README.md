@@ -31,17 +31,17 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
    - Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/).
    - Create an app and get your `Client ID` and `Client Secret`.
    - Add `http://127.0.0.1:8888/callback` to your app's Redirect URIs.
-   - Echo also uses `http://127.0.0.1:8989/login` for its internal first-party Spotify session.
+   - echo also uses `http://127.0.0.1:8989/login` for its internal first-party Spotify session.
 
 ### Installation
 
-Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **Echo** package installs the desktop app *and* the `spotify` terminal command:
+Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **echo** package installs the desktop app *and* the `spotify` terminal command:
 
 - **Windows** (`echo-desktop_*.msi`): installs the desktop app and adds the install directory to `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again.
-- **macOS** (`Echo_*.dmg`): drag `Echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
+- **macOS** (`echo_*.dmg`): drag `echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
 
   ```bash
-  sudo ln -sf /Applications/Echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
+  sudo ln -sf /Applications/echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
   ```
 
 - **Linux** (`.deb`): installs the desktop app plus `/usr/bin/spotify`. Prefer just the TUI? Use the TUI AppImage below (`spotify_*.AppImage`) instead — don't install both, they'd both own `spotify`.
@@ -69,7 +69,7 @@ curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh |
 **Or** if you already have the AppImage downloaded, run the included install script:
 
 ```bash
-./install.sh /path/to/Echo.AppImage
+./install.sh /path/to/echo.AppImage
 ```
 
 To remove:
@@ -187,7 +187,7 @@ While in Command Mode (`:`), you can use the following:
 
 ## Custom Keybindings
 
-Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to override or add semantic mappings. Single keys, modifier keys such as `ctrl-f`, and two-key sequences are supported. Unmapped keys keep Echo's defaults.
+Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to override or add semantic mappings. Single keys, modifier keys such as `ctrl-f`, and two-key sequences are supported. Unmapped keys keep echo's defaults.
 
 ```toml
 [library.keybindings]
@@ -204,7 +204,7 @@ Track sorting and navigation operate on already-loaded data. They do not issue S
 
 ## Audio Quality
 
-Echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. These live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
+echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. These live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
 
 ```toml
 [library]
@@ -217,7 +217,7 @@ Normalisation attenuates each track by its ReplayGain value, which is typically 
 
 Volume is applied entirely client-side — Spotify streams arrive at full scale, and echo attenuates them itself, so the device's volume slider in other Spotify clients is inactive. Both Spotify and local playback use the same cubic volume curve, so a given percentage sounds the same whichever source is playing, and 100% is unity gain on both.
 
-Echo opens the output device as stereo at 44.1 kHz — librespot's native rate, so no resampling — whenever the device supports it. Devices that do not offer 44.1 kHz (most Windows endpoints default to 48 kHz) fall back to the device's own default rate.
+echo opens the output device as stereo at 44.1 kHz — librespot's native rate, so no resampling — whenever the device supports it. Devices that do not offer 44.1 kHz (most Windows endpoints default to 48 kHz) fall back to the device's own default rate.
 
 The endpoint actually opened is written to `echo-debug-audio-spotify.log` in the working directory, and `echo-debug-audio-local.log` for local files:
 
@@ -227,7 +227,7 @@ device=Headphones (WH-1000XM5) channels=2 sample_rate=48000 format=F32
 
 ## Local Music
 
-Local support is separate from Spotify. Use `:localpath <absolute-folder-path>` to choose the folder echo should scan. Supported audio extensions are `mp3`, `wav`, `flac`, `ogg`, `m4a`, and `aac`; echo scans recursively and reads title, artist, album, duration, and artwork when available. Echo refreshes the configured local folder on startup and watches it for supported audio/artwork changes while running; `:rescanlocal` is still available as a manual fallback.
+Local support is separate from Spotify. Use `:localpath <absolute-folder-path>` to choose the folder echo should scan. Supported audio extensions are `mp3`, `wav`, `flac`, `ogg`, `m4a`, and `aac`; echo scans recursively and reads title, artist, album, duration, and artwork when available. echo refreshes the configured local folder on startup and watches it for supported audio/artwork changes while running; `:rescanlocal` is still available as a manual fallback.
 
 Local playlists are stored locally and are not Spotify playlists. They can contain local tracks and Spotify track references. Spotify playlists cannot contain local tracks. Local shuffle, repeat, volume, queue, and play/pause are handled by echo's local playback engine.
 

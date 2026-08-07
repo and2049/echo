@@ -5,7 +5,7 @@ edition.workspace = true
 
 # Named `echo-desktop`, not `echo`: a bare `echo` can never win against the shell builtin
 # anyway, and on Linux a deb shipping /usr/bin/echo is rejected outright (coreutils owns it).
-# Installers and menus still present the app as "Echo" via product-name below.
+# Installers and menus still present the app as "echo" via product-name below.
 [[bin]]
 name = "echo-desktop"
 path = "src/main.rs"
@@ -27,11 +27,12 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd
 [build-dependencies]
 embed-resource = "3"
 
-# The plain "Echo" identity is this crate's: the TUI packages as "Echo TUI"/com.echo.tui.
+# The plain "echo" identity is this crate's: the TUI packages as "echo TUI"/com.echo.tui.
+# Brand is styled all-lowercase everywhere, including installers and shortcuts.
 [package.metadata.packager]
-product-name = "Echo"
+product-name = "echo"
 identifier = "com.echo.app"
-publisher = "Echo"
+publisher = "echo"
 category = "Music"
 icons = [
     "../../icons/icon.icns",
@@ -42,9 +43,9 @@ icons = [
     "../../icons/128x128@2x.png",
 ]
 resources = [{ src = "../../themes", target = "themes" }]
-# The Echo package carries both frontends: the desktop app plus the `spotify` TUI, so one
+# The echo package carries both frontends: the desktop app plus the `spotify` TUI, so one
 # install puts the terminal command on PATH (MSI: install dir appended via the WiX fragment
-# below; deb: both land in /usr/bin; macOS: both inside Echo.app/Contents/MacOS).
+# below; deb: both land in /usr/bin; macOS: both inside echo.app/Contents/MacOS).
 binaries = [
     { path = "echo-desktop", main = true },
     { path = "spotify", main = false },
