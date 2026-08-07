@@ -2412,6 +2412,9 @@ fn main() {
     let saved_bounds = boot.config.library.window_bounds;
 
     application().with_assets(assets::Assets).run(move |cx: &mut App| {
+        // Must match the MSI shortcuts' System.AppUserModel.ID so every launch path
+        // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
+        cx.set_app_identity("com.echo.app", "Echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
