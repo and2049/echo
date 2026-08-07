@@ -950,7 +950,8 @@ impl EchoApp {
     ) {
         apply(&mut self.state.ui.library_config);
         self.state.save_library_config();
-        self.state.ui.status_message = Some("Saved — takes effect on next launch".to_string());
+        self.state.ui.status_message =
+            Some(views::tr(&self.state, "desktop.saved_next_launch").to_string());
         self.state.ui.status_message_expiry =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
         cx.notify();
@@ -1194,7 +1195,8 @@ impl EchoApp {
         }
         if let Some(event) = echo_core::intent::queue_selected_track(&self.state) {
             self.dispatch(event);
-            self.state.ui.status_message = Some("Added to queue".to_string());
+            self.state.ui.status_message =
+                Some(views::tr(&self.state, "desktop.added_to_queue").to_string());
             self.state.ui.status_message_expiry =
                 Some(std::time::Instant::now() + Duration::from_secs(3));
         }
@@ -1609,7 +1611,7 @@ impl EchoApp {
 
         let playback = &self.state.playback;
         let title: SharedString = if playback.playing_track_title.is_empty() {
-            "Nothing playing".into()
+            views::tr(&self.state, "desktop.nothing_playing")
         } else {
             playback.playing_track_title.clone().into()
         };
@@ -1656,6 +1658,7 @@ impl EchoApp {
             && self.state.playback.is_playing)
             .then(|| self.state.playback.audio_visualization.clone())
             .flatten();
+        let vis_bins = self.state.ui.vis_bins.clamp(5, 32);
 
         // The pixelate transfer trick from the TUI: keep showing the previous cover while the
         // current one refetches.
@@ -1677,7 +1680,10 @@ impl EchoApp {
             .then(|| {
                 if let Some(lyrics) = self.state.playback.current_lyrics.as_ref() {
                     if lyrics.lines.is_empty() {
-                        return ("No lyrics found.".to_string(), String::new());
+                        return (
+                            views::tr(&self.state, "desktop.no_lyrics_found").to_string(),
+                            String::new(),
+                        );
                     }
                     let progress = self.state.playback.display_progress_ms();
                     let mut current = 0;
@@ -1697,7 +1703,10 @@ impl EchoApp {
                             .unwrap_or_default(),
                     )
                 } else if !self.state.playback.playing_track_title.is_empty() {
-                    ("No lyrics found.".to_string(), String::new())
+                    (
+                        views::tr(&self.state, "desktop.no_lyrics_found").to_string(),
+                        String::new(),
+                    )
                 } else {
                     (String::new(), String::new())
                 }
@@ -1823,16 +1832,28 @@ impl EchoApp {
                             .items_center()
                             .justify_end()
                             .when_some(visualizer_bands, |el, bands| {
-                                // 32 bands, 0–100, painted as bottom-anchored bars. Repaints ride
-                                // the fast tick.
+                                // The engine always fills 32 bands, 0–100; they are averaged down
+                                // to the configured bin count (`:visbins`, same math as the TUI)
+                                // and painted as bottom-anchored bars. Repaints ride the fast
+                                // tick.
                                 el.child(div().flex_none().w(px(120.0)).h(px(32.0)).child(
                                     canvas(
                                         |_, _, _| (),
                                         move |bounds, _, window, _| {
                                             let bands = bands.lock();
-                                            let count = bands.len();
-                                            let band_width = bounds.size.width / count as f32;
-                                            for (index, value) in bands.iter().enumerate() {
+                                            let chunk = bands.len() as f32 / vis_bins as f32;
+                                            let band_width =
+                                                bounds.size.width / vis_bins as f32;
+                                            for index in 0..vis_bins {
+                                                let start = (index as f32 * chunk) as usize;
+                                                let end = if index == vis_bins - 1 {
+                                                    bands.len()
+                                                } else {
+                                                    ((index + 1) as f32 * chunk) as usize
+                                                };
+                                                let slice = &bands[start..end.max(start + 1)];
+                                                let value = slice.iter().sum::<f32>()
+                                                    / slice.len() as f32;
                                                 let ratio = (value / 100.0).clamp(0.0, 1.0);
                                                 let bar_height = bounds.size.height * ratio;
                                                 let origin = gpui::point(
@@ -2110,8 +2131,10 @@ impl Render for EchoApp {
                     .clone()
                     .map(|message| format!("-- VISUAL --  {message}"))
                     .unwrap_or_else(|| {
-                        "-- VISUAL --  q queue · a add to playlist · dd delete · esc cancel"
-                            .to_string()
+                        format!(
+                            "-- VISUAL --  {}",
+                            views::tr(&self.state, "desktop.visual_hint")
+                        )
                     }),
             ),
             AppMode::Normal => self.state.ui.status_message.clone(),

@@ -62,6 +62,13 @@ fn row_selected(ix: usize, selected: usize, visual: Option<(usize, usize)>) -> b
     ix == selected || visual.is_some_and(|(start, end)| ix >= start && ix <= end)
 }
 
+/// Resolves a translation in the configured language. Every user-facing desktop string goes
+/// through this so `:lang` applies on the next frame, like the TUI. Missing keys fall back to
+/// English inside [`echo_core::i18n::t`].
+pub(crate) fn tr(state: &echo_core::app::AppState, key: &str) -> SharedString {
+    SharedString::from(echo_core::i18n::t(key, &state.ui.library_config.language))
+}
+
 /// The visual range for one pane. The range is bare row indices measured against the active
 /// view's cursor, so panes other than the one visual mode was entered in must ignore it.
 fn visual_range_in(state: &echo_core::app::AppState, view: ActiveView) -> Option<(usize, usize)> {
@@ -309,9 +316,9 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         _ => app.state.data.library_view.len(),
     };
 
-    let tab_button = |label: &'static str, target: LibraryTab, active: bool| {
+    let tab_button = |id: &'static str, label: SharedString, target: LibraryTab, active: bool| {
         div()
-            .id(label)
+            .id(id)
             .px_2()
             .py_1()
             .rounded_md()
@@ -346,17 +353,28 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .p_2()
                 .child(tab_button(
                     "Playlists",
+                    tr(&app.state, "ui.playlists"),
                     LibraryTab::Playlists,
                     tab == LibraryTab::Playlists,
                 ))
-                .child(tab_button("Albums", LibraryTab::Albums, tab == LibraryTab::Albums))
-                .child(tab_button("Artists", LibraryTab::Artists, tab == LibraryTab::Artists)),
+                .child(tab_button(
+                    "Albums",
+                    tr(&app.state, "ui.albums"),
+                    LibraryTab::Albums,
+                    tab == LibraryTab::Albums,
+                ))
+                .child(tab_button(
+                    "Artists",
+                    tr(&app.state, "ui.artists"),
+                    LibraryTab::Artists,
+                    tab == LibraryTab::Artists,
+                )),
         )
         .child({
             // The TUI's Browse nodes, as quick links.
             let browse_link = |id: &'static str,
                                icon: &'static str,
-                               label: &'static str,
+                               label: SharedString,
                                open: fn(&mut echo_core::app::AppState)
                                    -> Option<echo_core::events::AppEvent>| {
                 div()
@@ -397,13 +415,13 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .child(browse_link(
                     "top-tracks",
                     "icons/star.svg",
-                    "Top Tracks",
+                    tr(&app.state, "desktop.top_tracks"),
                     echo_core::intent::open_top_tracks,
                 ))
                 .child(browse_link(
                     "recently-played",
                     "icons/clock.svg",
-                    "Recently Played",
+                    tr(&app.state, "desktop.recently_played"),
                     echo_core::intent::open_recently_played,
                 ))
         })
@@ -740,7 +758,7 @@ fn setup_view(
         !app.state.ui.setup_client_id.is_empty() && !app.state.ui.setup_client_secret.is_empty();
 
     let field = |id: &'static str,
-                 label: &'static str,
+                 label: SharedString,
                  value: String,
                  focused: bool,
                  secret: bool,
@@ -799,7 +817,7 @@ fn setup_view(
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_lg().text_color(fg).child("Connect to Spotify"))
+                .child(div().text_lg().text_color(fg).child(tr(&app.state, "desktop.setup.title")))
                 .child(
                     div()
                         .flex()
@@ -807,9 +825,9 @@ fn setup_view(
                         .gap_1()
                         .text_sm()
                         .text_color(muted)
-                        .child("1. Create an app in the Spotify Developer Dashboard.")
-                        .child("2. Add http://127.0.0.1:8888/callback as a Redirect URI.")
-                        .child("3. Paste the app's Client ID and Secret below (ctrl-v)."),
+                        .child(tr(&app.state, "desktop.setup.step1"))
+                        .child(tr(&app.state, "desktop.setup.step2"))
+                        .child(tr(&app.state, "desktop.setup.step3")),
                 )
                 .child(
                     div()
@@ -821,11 +839,11 @@ fn setup_view(
                         .on_click(|_event, _window, _cx| {
                             let _ = webbrowser::open("https://developer.spotify.com/dashboard");
                         })
-                        .child("Open the Spotify Developer Dashboard ↗"),
+                        .child(tr(&app.state, "desktop.setup.dashboard")),
                 )
                 .child(field(
                     "setup-client-id",
-                    "Client ID",
+                    tr(&app.state, "desktop.setup.client_id"),
                     client_id,
                     id_focused,
                     false,
@@ -833,7 +851,7 @@ fn setup_view(
                 ))
                 .child(field(
                     "setup-client-secret",
-                    "Client Secret",
+                    tr(&app.state, "desktop.setup.client_secret"),
                     secret_masked,
                     secret_focused,
                     true,
@@ -868,7 +886,7 @@ fn setup_view(
                             }
                             cx.notify();
                         }))
-                        .child("Save & Connect"),
+                        .child(tr(&app.state, "desktop.setup.save")),
                 ),
         )
 }
@@ -932,7 +950,7 @@ fn search_bar(
                 div()
                     .text_sm()
                     .text_color(muted)
-                    .child("Search — ctrl-k")
+                    .child(tr(&app.state, "desktop.search_placeholder"))
                     .into_any_element()
             } else {
                 div()
@@ -965,16 +983,17 @@ fn search_bar(
         ))
 }
 
-/// Track-list sort options, as `(label, `:sort` argument)`. The desktop runs them through the
-/// command registry so the behaviour and status messages match `:sort` and the TUI exactly.
+/// Track-list sort options, as `(label i18n key, `:sort` argument)`. The desktop runs them
+/// through the command registry so the behaviour and status messages match `:sort` and the TUI
+/// exactly.
 pub const SORT_OPTIONS: &[(&str, &str)] = &[
-    ("Original order", "original"),
-    ("Title", "title"),
-    ("Artist", "artist"),
-    ("Album", "album"),
-    ("Duration", "duration"),
-    ("Date added", "added"),
-    ("Reverse", "reverse"),
+    ("desktop.sort.original", "original"),
+    ("desktop.sort.title", "title"),
+    ("ui.artist", "artist"),
+    ("ui.album", "album"),
+    ("ui.duration", "duration"),
+    ("desktop.sort.added", "added"),
+    ("desktop.sort.reverse", "reverse"),
 ];
 
 fn sort_button(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
@@ -1021,13 +1040,14 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                 .flex_col()
                 .overflow_hidden()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .children(SORT_OPTIONS.iter().enumerate().map(|(ix, (label, arg))| {
+                .children(SORT_OPTIONS.iter().enumerate().map(|(ix, (label_key, arg))| {
+                    let label = tr(&app.state, label_key);
                     // `reverse` flips the current order rather than naming one, so it never
                     // shows the active marker.
                     let is_active = *arg != "reverse" && crate::sort_arg(active) == *arg;
                     let is_selected = ix == selected;
                     div()
-                        .id(*label)
+                        .id(*arg)
                         .mx_1()
                         .px_2()
                         .py_1()
@@ -1046,7 +1066,7 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                             this.apply_sort(arg, cx);
                         }))
-                        .child(*label)
+                        .child(label)
                         .when(is_active, |el| {
                             el.child(div().flex_none().text_color(accent).child("●"))
                         })
@@ -1129,7 +1149,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                 .items_center()
                 .justify_center()
                 .text_color(muted)
-                .child("Loading…")
+                .child(tr(&app.state, "desktop.loading"))
                 .into_any_element()
         } else {
             uniform_list(
@@ -1258,12 +1278,14 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                 .py_3()
                 .flex()
                 .flex_col()
-                .child(div().text_lg().text_color(fg).child("Queue"))
+                .child(div().text_lg().text_color(fg).child(tr(&app.state, "ui.queue")))
                 .child(
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child(SharedString::from(format!("{count} upcoming"))),
+                        .child(SharedString::from(
+                            tr(&app.state, "desktop.queue_upcoming").replace("{}", &count.to_string()),
+                        )),
                 ),
         )
         .child(if count == 0 {
@@ -1273,7 +1295,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                 .items_center()
                 .justify_center()
                 .text_color(muted)
-                .child("The queue is empty")
+                .child(tr(&app.state, "desktop.queue_empty"))
                 .into_any_element()
         } else {
             uniform_list(
@@ -1463,7 +1485,10 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                     div()
                         .text_lg()
                         .text_color(fg)
-                        .child(SharedString::from(format!("Search: {query}"))),
+                        .child(SharedString::from(format!(
+                            "{}{query}",
+                            tr(&app.state, "prompts.search")
+                        ))),
                 )
                 .child(
                     div()
@@ -1472,19 +1497,19 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                         .gap_1()
                         .child(tab_button(
                             "search-tracks",
-                            format!("Tracks ({n_tracks})"),
+                            format!("{} ({n_tracks})", tr(&app.state, "ui.tracks")),
                             SearchTab::Tracks,
                             tab == SearchTab::Tracks,
                         ))
                         .child(tab_button(
                             "search-albums",
-                            format!("Albums ({n_albums})"),
+                            format!("{} ({n_albums})", tr(&app.state, "ui.albums")),
                             SearchTab::Albums,
                             tab == SearchTab::Albums,
                         ))
                         .child(tab_button(
                             "search-artists",
-                            format!("Artists ({n_artists})"),
+                            format!("{} ({n_artists})", tr(&app.state, "ui.artists")),
                             SearchTab::Artists,
                             tab == SearchTab::Artists,
                         )),
@@ -1497,7 +1522,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                 .items_center()
                 .justify_center()
                 .text_color(muted)
-                .child("No results on this tab")
+                .child(tr(&app.state, "desktop.no_results_tab"))
                 .into_any_element()
         } else {
             uniform_list(
@@ -1665,7 +1690,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
             .items_center()
             .justify_center()
             .text_color(muted)
-            .child("Loading artist…")
+            .child(tr(&app.state, "desktop.loading_artist"))
             .into_any_element();
     };
 
@@ -1750,7 +1775,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .text_color(muted)
-                .child("Loading albums…")
+                .child(tr(&app.state, "desktop.loading_albums"))
                 .into_any_element()
         } else {
             uniform_list(
@@ -1850,7 +1875,7 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
             .flex()
             .justify_center()
             .text_color(muted)
-            .child("Loading lyrics…")
+            .child(tr(&app.state, "desktop.loading_lyrics"))
             .into_any_element()
     } else if let Some(lyrics) = app.state.playback.current_lyrics.clone() {
         let progress_ms = app.state.playback.display_progress_ms();
@@ -1922,7 +1947,7 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
             .flex()
             .justify_center()
             .text_color(muted)
-            .child("No lyrics for this track")
+            .child(tr(&app.state, "desktop.no_lyrics"))
             .into_any_element()
     };
 
@@ -1957,10 +1982,10 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .pb_2()
                         .text_sm()
                         .text_color(fg)
-                        .child(SharedString::from(format!(
-                            "Lyrics — {}",
-                            app.state.playback.playing_track_title.clone()
-                        ))),
+                        .child(SharedString::from(
+                            tr(&app.state, "desktop.lyrics_title")
+                                .replace("{}", &app.state.playback.playing_track_title),
+                        )),
                 )
                 .child(body),
         )
@@ -2014,13 +2039,13 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .gap_1()
                 .overflow_hidden()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .child(div().pb_2().text_sm().text_color(muted).child("Theme"))
+                .child(div().pb_2().text_sm().text_color(muted).child(tr(&app.state, "desktop.theme")))
                 .child(if names.is_empty() {
                     div()
                         .py_4()
                         .text_sm()
                         .text_color(muted)
-                        .child("No themes found")
+                        .child(tr(&app.state, "desktop.no_themes"))
                         .into_any_element()
                 } else {
                     div()
@@ -2068,66 +2093,67 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
         )
 }
 
-/// Keyboard shortcuts, grouped, for the help overlay.
+/// Keyboard shortcuts, grouped, for the help overlay, as `(section i18n key, [(keys,
+/// description i18n key)])` — resolved through [`tr`] at render so `:lang` applies.
 ///
 /// Kept next to the `KeyBinding::new` block in `main()` conceptually — when you add a binding
 /// there, add it here too. Commands are not listed: those come from
 /// `echo_core::commands::COMMANDS` so they cannot go stale.
 pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
     (
-        "NAVIGATION",
+        "desktop.help.nav",
         &[
-            ("j / k / ↓ / ↑", "Move down / up"),
-            ("gg / G", "First / last item"),
-            ("ctrl-b / ctrl-f", "Page up / down"),
-            ("ctrl-u / ctrl-d", "Half page up / down"),
-            ("enter / z", "Open or play the selection"),
-            ("h / esc", "Back, or close what's open"),
-            ("backspace", "Back to the sidebar"),
-            ("tab", "Switch tabs"),
-            ("gc", "Jump to what's playing"),
-            ("1-9", "Repeat the next motion N times"),
+            ("j / k / ↓ / ↑", "desktop.help.move"),
+            ("gg / G", "desktop.help.first_last"),
+            ("ctrl-b / ctrl-f", "desktop.help.page"),
+            ("ctrl-u / ctrl-d", "desktop.help.half_page"),
+            ("enter / z", "desktop.help.open"),
+            ("h / esc", "desktop.help.back"),
+            ("backspace", "desktop.help.to_sidebar"),
+            ("tab", "desktop.help.tabs"),
+            ("gc", "desktop.help.jump_playing"),
+            ("1-9", "desktop.help.count"),
         ],
     ),
     (
-        "PLAYBACK",
+        "desktop.help.playback",
         &[
-            ("space", "Play / pause"),
-            ("[ / ]", "Previous / next track"),
-            (", / .", "Seek back / forward 5s"),
-            ("0", "Seek to the start"),
-            ("- / =", "Volume down / up"),
-            ("shift-M", "Mute"),
-            ("s / r", "Shuffle / repeat"),
-            ("shift-D", "Devices"),
-            ("shift-L", "Lyrics"),
-            ("ctrl-shift-L", "Lyrics in the playback bar"),
+            ("space", "desktop.help.play_pause"),
+            ("[ / ]", "desktop.help.prev_next"),
+            (", / .", "desktop.help.seek"),
+            ("0", "desktop.help.seek_start"),
+            ("- / =", "desktop.help.volume"),
+            ("shift-M", "desktop.help.mute"),
+            ("s / r", "desktop.help.shuffle_repeat"),
+            ("shift-D", "desktop.help.devices"),
+            ("shift-L", "desktop.help.lyrics"),
+            ("ctrl-shift-L", "desktop.help.lyrics_bar"),
         ],
     ),
     (
-        "LIBRARY",
+        "desktop.help.library",
         &[
-            ("a", "Add to playlist (or save album)"),
-            ("shift-A", "Track actions"),
-            ("q / shift-Q", "Queue track / open queue"),
-            ("dd", "Delete — press twice, then confirm"),
-            ("v", "Select a range; shift-click does it too"),
-            ("m", "Pin / unpin"),
-            ("c / e", "New playlist / rename"),
-            ("shift-R", "Refresh"),
+            ("a", "desktop.help.add_playlist"),
+            ("shift-A", "desktop.help.track_actions"),
+            ("q / shift-Q", "desktop.help.queue"),
+            ("dd", "desktop.help.delete"),
+            ("v", "desktop.help.select_range"),
+            ("m", "desktop.help.pin"),
+            ("c / e", "desktop.help.new_rename"),
+            ("shift-R", "desktop.help.refresh"),
         ],
     ),
     (
-        "FINDING THINGS",
+        "desktop.help.finding",
         &[
-            ("ctrl-k", "Search Spotify"),
-            ("/", "Filter the loaded track list"),
-            ("n / shift-N", "Next / previous match"),
-            (":", "Command bar"),
-            ("t", "Themes"),
-            ("ctrl-,", "Settings"),
-            ("?", "This help"),
-            ("ctrl-q", "Quit"),
+            ("ctrl-k", "desktop.help.search"),
+            ("/", "desktop.help.filter"),
+            ("n / shift-N", "desktop.help.next_match"),
+            (":", "desktop.help.command_bar"),
+            ("t", "desktop.help.themes"),
+            ("ctrl-,", "desktop.help.settings"),
+            ("?", "desktop.help.this_help"),
+            ("ctrl-q", "desktop.help.quit"),
         ],
     ),
 ];
@@ -2140,7 +2166,7 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
 
-    let entry = |keys: &'static str, what: &'static str| {
+    let entry = |keys: &'static str, what: SharedString| {
         div()
             .flex()
             .flex_row()
@@ -2158,13 +2184,14 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             .child(div().text_xs().text_color(muted).child(what))
     };
 
-    let section = move |title: &'static str, rows: &'static [(&'static str, &'static str)]| {
+    let state = &app.state;
+    let section = move |title_key: &'static str, rows: &'static [(&'static str, &'static str)]| {
         div()
             .flex()
             .flex_col()
             .pb_2()
-            .child(div().pb_1().text_xs().text_color(fg).child(title))
-            .children(rows.iter().map(|(keys, what)| entry(keys, what)))
+            .child(div().pb_1().text_xs().text_color(fg).child(tr(state, title_key)))
+            .children(rows.iter().map(|(keys, what_key)| entry(keys, tr(state, what_key))))
     };
 
     div()
@@ -2201,8 +2228,8 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                         .items_center()
                         .justify_between()
                         .pb_2()
-                        .child(div().text_sm().text_color(fg).child("Keys & commands"))
-                        .child(div().text_xs().text_color(muted).child("esc to close")),
+                        .child(div().text_sm().text_color(fg).child(tr(&app.state, "desktop.help.title")))
+                        .child(div().text_xs().text_color(muted).child(tr(&app.state, "desktop.help.esc_close"))),
                 )
                 .child(
                     div()
@@ -2231,7 +2258,7 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                         .pb_1()
                                         .text_xs()
                                         .text_color(fg)
-                                        .child("COMMANDS — press :"),
+                                        .child(tr(&app.state, "desktop.help.commands")),
                                 )
                                 .children(echo_core::commands::COMMANDS.iter().map(
                                     |(usage, description)| {
@@ -2277,9 +2304,14 @@ pub fn settings_modal(
     let config = app.state.ui.library_config.clone();
     let path_focused = app.settings_path_focus.is_focused(window);
     let path_value = app.settings_path_input.clone();
+    // Owns its language so translation never borrows `app` across the listener closures below.
+    let s = {
+        let lang = config.language.clone();
+        move |key: &str| SharedString::from(echo_core::i18n::t(key, &lang))
+    };
 
-    // A labelled row with its control on the right.
-    let row = |label: &'static str, hint: Option<&'static str>, control: AnyElement| {
+    // A labelled row with its control on the right. Labels and hints arrive translated.
+    let row = |label: SharedString, hint: Option<SharedString>, control: AnyElement| {
         div()
             .flex()
             .flex_row()
@@ -2299,7 +2331,7 @@ pub fn settings_modal(
             .child(control)
     };
 
-    let heading = |label: &'static str| {
+    let heading = |label: SharedString| {
         div()
             .pt_3()
             .pb_1()
@@ -2339,7 +2371,7 @@ pub fn settings_modal(
 
     let language = config.language.clone();
     let language_row = row(
-        "Language",
+        s("desktop.settings.language"),
         None,
         choices(
             "lang",
@@ -2353,21 +2385,21 @@ pub fn settings_modal(
     );
 
     let visualizer_row = row(
-        "Audio visualizer",
-        Some("Spectrum bars in the playback bar"),
+        s("desktop.settings.visualizer"),
+        Some(s("desktop.settings.visualizer_desc")),
         choices(
             "vis",
             vec![
-                ("On".into(), "vis".into(), config.enable_visualizer),
-                ("Off".into(), "vis".into(), !config.enable_visualizer),
+                (s("ui.on"), "vis".into(), config.enable_visualizer),
+                (s("ui.off"), "vis".into(), !config.enable_visualizer),
             ],
             cx,
         ),
     );
 
     let bins_row = row(
-        "Visualizer bands",
-        Some("5–32"),
+        s("desktop.settings.bins"),
+        Some("5–32".into()),
         choices(
             "visbins",
             [7usize, 9, 16, 24, 32]
@@ -2385,8 +2417,8 @@ pub fn settings_modal(
     );
 
     let pixelate_row = row(
-        "Cover pixelation",
-        Some("Retro 8-bit album art; Off is full resolution"),
+        s("desktop.settings.pixelate"),
+        Some(s("desktop.settings.pixelate_desc")),
         choices(
             "pixelate",
             [0u32, 8, 16, 32]
@@ -2394,7 +2426,7 @@ pub fn settings_modal(
                 .map(|n| {
                     (
                         if n == 0 {
-                            SharedString::from("Off")
+                            s("ui.off")
                         } else {
                             SharedString::from(n.to_string())
                         },
@@ -2408,8 +2440,8 @@ pub fn settings_modal(
     );
 
     let index_row = row(
-        "Track numbering",
-        Some("First row is 1 or 0"),
+        s("desktop.settings.numbering"),
+        Some(s("desktop.settings.numbering_desc")),
         choices(
             "index",
             vec![
@@ -2421,18 +2453,18 @@ pub fn settings_modal(
     );
 
     let relative_row = row(
-        "Relative line numbers",
-        Some("Vim-style offsets from the selected track"),
+        s("desktop.settings.relative"),
+        Some(s("desktop.settings.relative_desc")),
         choices(
             "relative",
             vec![
                 (
-                    "On".into(),
+                    s("ui.on"),
                     "relative on".into(),
                     config.relative_line_numbers,
                 ),
                 (
-                    "Off".into(),
+                    s("ui.off"),
                     "relative off".into(),
                     !config.relative_line_numbers,
                 ),
@@ -2442,24 +2474,24 @@ pub fn settings_modal(
     );
 
     let sort_row = row(
-        "Library order",
-        Some("Custom is the order you set by dragging"),
+        s("desktop.settings.order"),
+        Some(s("desktop.settings.order_desc")),
         choices(
             "libsort",
             vec![
                 (
                     // The manual drag-and-drop order.
-                    "Custom".into(),
+                    s("desktop.settings.order_custom"),
                     "sort default".into(),
                     config.sort_mode == echo_core::config::SortMode::Default,
                 ),
                 (
-                    "Alphabetical".into(),
+                    s("desktop.settings.order_alpha"),
                     "sort alpha".into(),
                     config.sort_mode == echo_core::config::SortMode::Alphabetical,
                 ),
                 (
-                    "Creator".into(),
+                    s("desktop.settings.order_creator"),
                     "sort creator".into(),
                     config.sort_mode == echo_core::config::SortMode::Creator,
                 ),
@@ -2469,8 +2501,8 @@ pub fn settings_modal(
     );
 
     let bitrate_row = row(
-        "Streaming quality",
-        Some("kbps — applies on next launch"),
+        s("desktop.settings.quality"),
+        Some(s("desktop.settings.quality_desc")),
         div()
             .flex()
             .flex_row()
@@ -2497,9 +2529,11 @@ pub fn settings_modal(
     );
 
     let normalisation = config.normalisation;
+    let norm_on_label = s("ui.on");
+    let norm_off_label = s("ui.off");
     let normalisation_row = row(
-        "Volume normalisation",
-        Some("Even out loudness between tracks — applies on next launch"),
+        s("desktop.settings.normalisation"),
+        Some(s("desktop.settings.normalisation_desc")),
         div()
             .flex()
             .flex_row()
@@ -2520,7 +2554,11 @@ pub fn settings_modal(
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.set_audio_quality(|config| config.normalisation = on, cx);
                     }))
-                    .child(if on { "On" } else { "Off" })
+                    .child(if on {
+                        norm_on_label.clone()
+                    } else {
+                        norm_off_label.clone()
+                    })
             }))
             .into_any_element(),
     );
@@ -2553,8 +2591,8 @@ pub fn settings_modal(
             .child(label)
     };
     let pregain_row = row(
-        "Normalisation pregain",
-        Some("dB added back after normalisation — raise if playback is quiet"),
+        s("desktop.settings.pregain"),
+        Some(s("desktop.settings.pregain_desc")),
         div()
             .flex()
             .flex_row()
@@ -2603,12 +2641,12 @@ pub fn settings_modal(
         .child(SharedString::from(if path_focused {
             format!("{path_value}▏")
         } else if path_value.is_empty() {
-            "No folder set — type an absolute path".to_string()
+            s("desktop.settings.folder_empty").to_string()
         } else {
             path_value
         }));
 
-    let small_button = |id: &'static str, label: &'static str, cmd: &'static str, cx: &mut Context<EchoApp>| {
+    let small_button = |id: &'static str, label: SharedString, cmd: &'static str, cx: &mut Context<EchoApp>| {
         div()
             .id(id)
             .flex_none()
@@ -2661,12 +2699,12 @@ pub fn settings_modal(
                         .items_center()
                         .justify_between()
                         .pb_2()
-                        .child(div().text_sm().text_color(fg).child("Settings"))
+                        .child(div().text_sm().text_color(fg).child(s("desktop.settings.title")))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(muted)
-                                .child("Everything here is also a : command"),
+                                .child(s("desktop.settings.subtitle")),
                         ),
                 )
                 .child(
@@ -2677,9 +2715,9 @@ pub fn settings_modal(
                         .max_h(px(470.0))
                         .overflow_y_scroll()
                         .track_scroll(&app.settings_scroll)
-                        .child(heading("APPEARANCE"))
+                        .child(heading(s("desktop.settings.appearance")))
                         .child(row(
-                            "Theme",
+                            s("desktop.theme"),
                             None,
                             div()
                                 .id("settings-theme")
@@ -2703,18 +2741,18 @@ pub fn settings_modal(
                         ))
                         .child(language_row)
                         .child(pixelate_row)
-                        .child(heading("LIBRARY"))
+                        .child(heading(s("desktop.settings.library")))
                         .child(sort_row)
                         .child(index_row)
                         .child(relative_row)
-                        .child(heading("PLAYBACK"))
+                        .child(heading(s("desktop.settings.playback")))
                         .child(visualizer_row)
                         .child(bins_row)
-                        .child(heading("AUDIO QUALITY"))
+                        .child(heading(s("desktop.settings.audio")))
                         .child(bitrate_row)
                         .child(normalisation_row)
                         .child(pregain_row)
-                        .child(heading("LOCAL MUSIC"))
+                        .child(heading(s("desktop.settings.local")))
                         .child(
                             div()
                                 .flex()
@@ -2725,7 +2763,7 @@ pub fn settings_modal(
                                     div()
                                         .text_xs()
                                         .text_color(muted)
-                                        .child("Folder to scan — must be an absolute path. Enter to apply."),
+                                        .child(s("desktop.settings.folder_desc")),
                                 )
                                 .child(local_field)
                                 .child(
@@ -2735,7 +2773,7 @@ pub fn settings_modal(
                                         .gap_1()
                                         .child(small_button(
                                             "settings-rescan",
-                                            "Rescan now",
+                                            s("desktop.settings.rescan"),
                                             "rescanlocal",
                                             cx,
                                         )),
@@ -2791,14 +2829,14 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .pb_2()
                         .text_sm()
                         .text_color(muted)
-                        .child("Connect to a device"),
+                        .child(tr(&app.state, "desktop.devices_title")),
                 )
                 .child(if devices.is_empty() {
                     div()
                         .py_4()
                         .text_sm()
                         .text_color(muted)
-                        .child("No devices found — is Spotify open anywhere?")
+                        .child(tr(&app.state, "desktop.devices_none"))
                         .into_any_element()
                 } else {
                     div()
@@ -2917,14 +2955,14 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .pb_2()
                         .text_sm()
                         .text_color(muted)
-                        .child("Add to playlist"),
+                        .child(tr(&app.state, "desktop.playlist_add_title")),
                 )
                 .child(if choices.is_empty() {
                     div()
                         .py_4()
                         .text_sm()
                         .text_color(muted)
-                        .child("No playlists you can edit")
+                        .child(tr(&app.state, "desktop.playlist_add_none"))
                         .into_any_element()
                 } else {
                     div()
@@ -2935,6 +2973,7 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .overflow_y_scroll()
                         .track_scroll(&app.playlist_modal_scroll)
                         .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
+                            let local_label = tr(&app.state, "ui.local");
                             div()
                                 .id(ix)
                                 .px_2()
@@ -2974,7 +3013,7 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                                 )
                                 .when(local, |el| {
                                     el.child(
-                                        div().flex_none().text_xs().text_color(muted).child("Local"),
+                                        div().flex_none().text_xs().text_color(muted).child(local_label),
                                     )
                                 })
                         }))
@@ -2991,8 +3030,8 @@ fn library_placeholder(app: &EchoApp) -> AnyElement {
 
     if matches!(app.state.ui.mode, AppMode::Setup | AppMode::Authenticating) {
         let message: SharedString = match app.state.ui.mode {
-            AppMode::Setup => "Waiting for Spotify credentials…".into(),
-            _ => "Authenticating with Spotify… complete the login in your browser".into(),
+            AppMode::Setup => tr(&app.state, "desktop.setup.waiting"),
+            _ => tr(&app.state, "desktop.setup.authenticating"),
         };
         return div()
             .flex_grow(1.0)
@@ -3066,9 +3105,9 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let mut items: Vec<(SharedString, MenuAction, bool)> = Vec::new();
     if app.state.ui.active_library_tab == LibraryTab::Albums {
         if app.state.data.saved_albums.get(menu.index).is_some() {
-            items.push(("Open".into(), MenuAction::Open, false));
+            items.push((tr(&app.state, "desktop.menu.open"), MenuAction::Open, false));
             items.push((
-                "Remove from library".into(),
+                tr(&app.state, "desktop.menu.remove_library"),
                 MenuAction::RemoveAlbum,
                 true,
             ));
@@ -3076,34 +3115,45 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     } else if let Some(node) = app.state.data.library_view.get(menu.index) {
         match node {
             LibraryNode::Folder(_) => {
-                items.push(("Rename".into(), MenuAction::Rename, false));
-                items.push(("Delete folder".into(), MenuAction::DeleteFolder, true));
+                items.push((tr(&app.state, "desktop.menu.rename"), MenuAction::Rename, false));
+                items.push((
+                    tr(&app.state, "desktop.menu.delete_folder"),
+                    MenuAction::DeleteFolder,
+                    true,
+                ));
             }
             LibraryNode::Playlist { playlist, indent } => {
-                items.push(("Open".into(), MenuAction::Open, false));
+                items.push((tr(&app.state, "desktop.menu.open"), MenuAction::Open, false));
                 let special = playlist.id == "LIKED_SONGS" || playlist.id == "local-library";
                 let local = playlist.id.starts_with("local-playlist:");
                 if !special && !local {
                     let pinned = app.state.ui.library_config.pinned.contains(&playlist.id);
                     items.push((
-                        if pinned { "Unpin" } else { "Pin" }.into(),
+                        tr(
+                            &app.state,
+                            if pinned { "desktop.menu.unpin" } else { "desktop.menu.pin" },
+                        ),
                         MenuAction::TogglePin,
                         false,
                     ));
                 }
                 if !special {
-                    items.push(("Rename".into(), MenuAction::Rename, false));
+                    items.push((tr(&app.state, "desktop.menu.rename"), MenuAction::Rename, false));
                 }
                 if *indent >= 1 {
                     items.push((
-                        "Remove from folder".into(),
+                        tr(&app.state, "desktop.menu.remove_folder"),
                         MenuAction::RemoveFromFolder,
                         false,
                     ));
                 }
                 let own = app.state.data.user_id.as_ref() == Some(&playlist.owner_id);
                 if local || (!special && own) {
-                    items.push(("Delete playlist".into(), MenuAction::DeletePlaylist, true));
+                    items.push((
+                        tr(&app.state, "desktop.menu.delete_playlist"),
+                        MenuAction::DeletePlaylist,
+                        true,
+                    ));
                 }
             }
         }
@@ -3196,7 +3246,7 @@ pub fn track_menu_items(app: &EchoApp) -> Vec<(SharedString, TrackMenuItem, bool
             .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
     {
         items.push((
-            "Remove from playlist".into(),
+            tr(&app.state, "desktop.menu.remove_playlist"),
             TrackMenuItem::RemoveFromPlaylist,
             true,
         ));
@@ -3288,11 +3338,14 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
     let ui = &app.state.ui;
-    let (message, confirm_label): (String, &'static str) =
+    let delete_label = tr(&app.state, "desktop.prompt.delete");
+    let remove_label = tr(&app.state, "desktop.prompt.remove");
+    let (message, confirm_label): (String, SharedString) =
         if let Some(name) = &ui.folder_delete_prompt {
             (
-                format!("Delete folder “{name}”? Its playlists return to the library."),
-                "Delete",
+                tr(&app.state, "desktop.prompt.delete_folder")
+                    .replace("{}", name),
+                delete_label,
             )
         } else if let Some(ids) = &ui.playlist_delete_prompt {
             let name = ids
@@ -3305,10 +3358,10 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         _ => None,
                     })
                 })
-                .unwrap_or_else(|| "this playlist".to_string());
+                .unwrap_or_else(|| tr(&app.state, "desktop.prompt.this_playlist").to_string());
             (
-                format!("Delete “{name}”? This removes it from your library."),
-                "Delete",
+                tr(&app.state, "desktop.prompt.delete_playlist").replace("{}", &name),
+                delete_label,
             )
         } else if let Some(ids) = &ui.album_mass_delete_prompt {
             let name = ids
@@ -3321,18 +3374,24 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .find(|album| &album.id == id)
                         .map(|album| album.name.clone())
                 })
-                .unwrap_or_else(|| "this album".to_string());
-            (format!("Remove “{name}” from your saved albums?"), "Remove")
+                .unwrap_or_else(|| tr(&app.state, "desktop.prompt.this_album").to_string());
+            (
+                tr(&app.state, "desktop.prompt.remove_album").replace("{}", &name),
+                remove_label,
+            )
         } else if ui.track_delete_prompt.is_some() {
             (
-                "Remove the selected tracks from this playlist?".to_string(),
-                "Remove",
+                tr(&app.state, "desktop.prompt.remove_tracks").to_string(),
+                remove_label,
             )
         } else {
-            ("Remove this track from Liked Songs?".to_string(), "Remove")
+            (
+                tr(&app.state, "desktop.prompt.remove_liked").to_string(),
+                remove_label,
+            )
         };
 
-    let button = |id: &'static str, label: &'static str, color: gpui::Hsla| {
+    let button = |id: &'static str, label: SharedString, color: gpui::Hsla| {
         div()
             .id(id)
             .px_3()
@@ -3379,7 +3438,7 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .flex_row()
                         .justify_end()
                         .gap_2()
-                        .child(button("prompt-cancel", "Cancel", muted).on_click(cx.listener(
+                        .child(button("prompt-cancel", tr(&app.state, "desktop.prompt.cancel"), muted).on_click(cx.listener(
                             |this: &mut EchoApp, _event, _window, cx| {
                                 echo_core::intent::cancel_prompt(&mut this.state);
                                 cx.notify();
