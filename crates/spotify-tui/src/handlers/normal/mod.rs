@@ -293,79 +293,30 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('N') if !state.ui.search_matches.is_empty() => {
             echo_core::intent::next_search_match(state, false);
         }
-        KeyCode::Char('d') | KeyCode::Char('x') if state.ui.active_view == ActiveView::Library => {
+        // `x` cuts a playlist into the operation register so `p` can paste it into a folder.
+        // Only loose Spotify playlists can be cut: the synthetic rows and local playlists have
+        // no folder membership to move.
+        KeyCode::Char('x') if state.ui.active_view == ActiveView::Library => {
             if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
-                if key.code == KeyCode::Char('d')
-                    && state.ui.selected_playlist_index < state.data.saved_albums.len()
-                {
-                    let album = &state.data.saved_albums[state.ui.selected_playlist_index];
-                    if state.ui.pending_d_press {
-                        state.ui.album_mass_delete_prompt = Some(vec![album.id.clone()]);
-                        state.ui.pending_d_press = false;
-                    } else {
-                        state.ui.pending_d_press = true;
-                    }
-                }
                 return None;
             }
-            if state.ui.selected_playlist_index < state.data.library_view.len() {
-                match &state.data.library_view[state.ui.selected_playlist_index] {
-                    echo_core::models::LibraryNode::Playlist { playlist, .. } => {
-                        if playlist.id == "LIKED_SONGS" {
-                            return None;
-                        }
-                        if playlist.id == "local-library" {
-                            return None;
-                        }
-                        if playlist.id.starts_with("local-playlist:") {
-                            if key.code == KeyCode::Char('d') {
-                                if state.ui.pending_d_press {
-                                    state.ui.playlist_delete_prompt =
-                                        Some(vec![playlist.id.clone()]);
-                                    state.ui.pending_d_press = false;
-                                } else {
-                                    state.ui.pending_d_press = true;
-                                }
-                            }
-                            return None;
-                        }
-
-                        if key.code == KeyCode::Char('x') {
-                            state.ui.operation_register = vec![playlist.id.clone()];
-
-                            for f in &mut state.ui.library_config.folders {
-                                f.playlists.retain(|id| id != &playlist.id);
-                            }
-                            state.save_library_config();
-                            state.compute_library_view();
-                        } else if key.code == KeyCode::Char('d')
-                            && Some(&playlist.owner_id) == state.data.user_id.as_ref()
-                        {
-                            if state.ui.pending_d_press {
-                                state.ui.playlist_delete_prompt = Some(vec![playlist.id.clone()]);
-                                state.ui.pending_d_press = false;
-                            } else {
-                                state.ui.pending_d_press = true;
-                            }
-                        }
-                    }
-                    echo_core::models::LibraryNode::Folder(f) => {
-                        if key.code == KeyCode::Char('d') {
-                            if state.ui.pending_d_press {
-                                state.ui.folder_delete_prompt = Some(f.name.clone());
-                                state.ui.pending_d_press = false;
-                            } else {
-                                state.ui.pending_d_press = true;
-                            }
-                        }
-                    }
+            if let Some(echo_core::models::LibraryNode::Playlist { playlist, .. }) =
+                state.data.library_view.get(state.ui.selected_playlist_index)
+                && playlist.id != "LIKED_SONGS"
+                && playlist.id != "local-library"
+                && !playlist.id.starts_with("local-playlist:")
+            {
+                let playlist_id = playlist.id.clone();
+                state.ui.operation_register = vec![playlist_id.clone()];
+                for f in &mut state.ui.library_config.folders {
+                    f.playlists.retain(|id| id != &playlist_id);
                 }
+                state.save_library_config();
+                state.compute_library_view();
             }
         }
         KeyCode::Char('d') => {
-            if state.ui.active_view == ActiveView::TrackList {
-                tracklist::mark_selected_for_delete(state);
-            }
+            echo_core::intent::mark_selected_for_delete(state);
         }
         KeyCode::Char('A') => {
             let ctx = if state.ui.active_view == ActiveView::TrackList

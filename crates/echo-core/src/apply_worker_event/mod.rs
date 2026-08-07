@@ -51,8 +51,8 @@ pub fn apply_worker_event(
         WorkerEvent::PlaybackStarted { item } => {
             playback::handle_playback_started(state, app_tx, worker_tx, item)
         }
-        WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item } => {
-            playback::handle_sync_playback_state(state, app_tx, worker_tx, is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item)
+        WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item, context } => {
+            playback::handle_sync_playback_state(state, app_tx, worker_tx, is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item, context)
         }
         WorkerEvent::PlaybackControlState { is_playing } => {
             playback::handle_playback_control_state(state, is_playing)

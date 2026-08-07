@@ -39,6 +39,8 @@ icons!(
     "repeat",
     "repeat-one",
     "search",
+    // Sliders rather than a gear — hand-drawn in the same stroke style, like the win-* icons.
+    "settings",
     "shuffle",
     "star",
     "volume-high",

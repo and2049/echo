@@ -75,12 +75,14 @@ pub fn handle_sync_playback_state(
     device_name: String,
     progress_ms: u32,
     item: Option<PlaybackItem>,
+    context: Option<crate::models::PlayingContext>,
 ) {
     state.playback.is_playing = is_playing;
     state.playback.is_shuffled = is_shuffled;
     state.playback.repeat_mode = repeat_mode;
     state.playback.device_name = device_name;
     state.playback.progress_ms = progress_ms;
+    state.playback.playing_context = context;
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if let Some(item) = item {

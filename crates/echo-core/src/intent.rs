@@ -8,7 +8,8 @@
 use crate::app::{ActiveView, AppState, SearchTab};
 use crate::events::AppEvent;
 use crate::models::{
-    Artist, LibraryNode, PlaybackTarget, SearchTrack, Track, TrackListContext, TrackSource,
+    Artist, LibraryNode, PlaybackTarget, PlayingContext, SearchTrack, Track, TrackListContext,
+    TrackSource,
 };
 
 /// Activates row `index` of the playlists sidebar (the `library_view` tree): opens playlists,
@@ -76,7 +77,7 @@ pub fn play_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
         return None;
     }
     state.ui.selected_track_index = index;
-    let track = state.data.tracks.get(index)?;
+    let track = state.data.tracks.get(index)?.clone();
     let context = state.data.active_tracklist_context.as_ref()?;
     let target = if track.source == TrackSource::Local {
         let tracks: Vec<_> = state
@@ -95,17 +96,21 @@ pub fn play_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
             selected_index,
         }
     } else {
-        context.playback_target_for_track(track)?
+        context.playback_target_for_track(&track)?
     };
-    play_event_with_target(track, target)
+    note_playing_context(state, &target);
+    play_event_with_target(&track, target)
 }
 
 /// Plays row `index` of the live queue, selecting it first.
 ///
-/// Spotify's API has no "jump to queue position", so the track is played standalone rather than
-/// as an offset into a context: the device then rebuilds its up-next list around it. That is the
-/// closest thing to "go to this song" the API allows, and it is why this can't reuse
-/// [`play_track_at`] — the queue is not a tracklist with a context behind it.
+/// Spotify's API has no "jump to queue position", so the closest match is replaying the current
+/// context ([`crate::app::PlaybackState::playing_context`], kept fresh by the status poll) with
+/// this track as the offset: up-next then continues from it and repeat-context still loops the
+/// whole playlist or album. When no such context exists (local engine, Liked Songs, artist
+/// radio) — or the track was manually queued and the context play is rejected, which the worker
+/// handles as a fallback — the track plays standalone and the device rebuilds its up-next list
+/// around it, which is why this can't reuse [`play_track_at`].
 pub fn play_queue_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
     if index >= state.data.queue.len() {
         return None;
@@ -117,11 +122,38 @@ pub fn play_queue_track_at(state: &mut AppState, index: usize) -> Option<AppEven
             track_id: track.id.clone(),
             path: track.local_path.clone()?,
         },
-        TrackSource::Spotify => PlaybackTarget::SpotifyTrack {
-            track_id: track.id.clone(),
+        TrackSource::Spotify => match &state.playback.playing_context {
+            Some(context) => PlaybackTarget::SpotifyContextJump {
+                context_id: context.context_id.clone(),
+                is_album: context.is_album,
+            },
+            None => PlaybackTarget::SpotifyTrack {
+                track_id: track.id.clone(),
+            },
         },
     };
     play_event_with_target(track, target)
+}
+
+/// Optimistically records the context a play `target` starts, so a queue jump issued before the
+/// next status poll lands still knows what's playing. The poll remains the source of truth.
+fn note_playing_context(state: &mut AppState, target: &PlaybackTarget) {
+    state.playback.playing_context = match target {
+        PlaybackTarget::SpotifyContext {
+            context_id,
+            is_album,
+        }
+        | PlaybackTarget::SpotifyContextJump {
+            context_id,
+            is_album,
+        } => Some(PlayingContext {
+            context_id: context_id.clone(),
+            is_album: *is_album,
+        }),
+        PlaybackTarget::SpotifyTrack { .. }
+        | PlaybackTarget::LocalTrack { .. }
+        | PlaybackTarget::LocalContext { .. } => None,
+    };
 }
 
 /// The track a row index addresses in the active view: the loaded tracklist, or the live queue
@@ -760,6 +792,270 @@ pub fn remove_playlist_from_folders(state: &mut AppState, id: &str) -> bool {
 // confirm UI, and resolves it through these — the TUI with y/other keys, the desktop with
 // modal buttons.
 
+// Visual mode: a contiguous range anchored where `v` was pressed, extended by moving the
+// selection. `AppState::get_visual_selection_range` resolves the anchor and the live selection
+// into an inclusive range; everything below operates on that range.
+
+/// `v` — start a selection anchored at the focused row.
+pub fn enter_visual(state: &mut AppState) {
+    let anchor = match state.ui.active_view {
+        ActiveView::TrackList => state.ui.selected_track_index,
+        ActiveView::SearchResults => state.ui.selected_search_index,
+        ActiveView::Queue => state.ui.selected_queue_index,
+        ActiveView::Library => state.ui.selected_playlist_index,
+        // The remaining views have nothing a range operation could act on.
+        _ => return,
+    };
+    state.ui.mode = crate::app::AppMode::Visual;
+    state.ui.visual_selection_start = Some(anchor);
+}
+
+/// Leave visual mode, dropping the anchor.
+pub fn exit_visual(state: &mut AppState) {
+    if state.ui.mode == crate::app::AppMode::Visual {
+        state.ui.mode = crate::app::AppMode::Normal;
+        state.ui.status_message = None;
+    }
+    state.ui.visual_selection_start = None;
+    state.ui.pending_d_press = false;
+}
+
+/// Anchor the selection at `index` without entering visual mode first — the desktop's
+/// shift-click, which selects a range in one gesture.
+pub fn set_visual_anchor(state: &mut AppState, index: usize) {
+    state.ui.mode = crate::app::AppMode::Visual;
+    state.ui.visual_selection_start = Some(index);
+}
+
+/// The tracks the current visual range covers, for the views that list tracks.
+pub fn visual_tracks(state: &AppState) -> Vec<Track> {
+    let Some((start, end)) = state.get_visual_selection_range() else {
+        return Vec::new();
+    };
+    // `end` comes from a live selection index, so clamp rather than slice blindly.
+    let slice = |len: usize| -> Option<(usize, usize)> {
+        (start < len).then(|| (start, end.min(len.saturating_sub(1))))
+    };
+    match state.ui.active_view {
+        ActiveView::TrackList => slice(state.data.tracks.len())
+            .map(|(s, e)| state.data.tracks[s..=e].to_vec())
+            .unwrap_or_default(),
+        ActiveView::Queue => slice(state.data.queue.len())
+            .map(|(s, e)| state.data.queue[s..=e].to_vec())
+            .unwrap_or_default(),
+        ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => {
+            slice(state.data.search_results.tracks.len())
+                .map(|(s, e)| {
+                    state.data.search_results.tracks[s..=e]
+                        .iter()
+                        .map(Track::from)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The library playlists the visual range covers that the user may actually delete. Synthetic
+/// rows, folders and other people's playlists are skipped rather than failing the whole range.
+fn visual_deletable_playlists(state: &AppState) -> Vec<String> {
+    let Some((start, end)) = state.get_visual_selection_range() else {
+        return Vec::new();
+    };
+    let view = &state.data.library_view;
+    if start >= view.len() {
+        return Vec::new();
+    }
+    view[start..=end.min(view.len() - 1)]
+        .iter()
+        .filter_map(|node| match node {
+            LibraryNode::Playlist { playlist, .. } => {
+                let deletable = playlist.id.starts_with("local-playlist:")
+                    || (playlist.id != "LIKED_SONGS"
+                        && playlist.id != "local-library"
+                        && Some(&playlist.owner_id) == state.data.user_id.as_ref());
+                deletable.then(|| playlist.id.clone())
+            }
+            LibraryNode::Folder(_) => None,
+        })
+        .collect()
+}
+
+/// `q` in visual mode — queue every track in the range, then leave visual mode.
+pub fn queue_visual_selection(state: &mut AppState) -> Option<AppEvent> {
+    let ids: Vec<String> = visual_tracks(state)
+        .into_iter()
+        .map(|track| track.id)
+        .collect();
+    exit_visual(state);
+    if ids.is_empty() {
+        return None;
+    }
+    state.ui.status_message = Some(format!("Added {} tracks to queue", ids.len()));
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    Some(AppEvent::AddToQueue(ids))
+}
+
+/// `a` in visual mode — stage the range in the operation register and open the playlist picker.
+/// `action_menu::commit_playlist_add` reads the register, so the range survives the picker.
+pub fn add_visual_selection_to_playlist(state: &mut AppState) {
+    let ids: Vec<String> = visual_tracks(state)
+        .into_iter()
+        .map(|track| track.id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    state.ui.operation_register = ids;
+    state.ui.playlist_add_modal_open = true;
+    state.ui.selected_playlist_modal_index = 0;
+    // Visual mode ends here; the register carries the selection from now on.
+    state.ui.mode = crate::app::AppMode::Normal;
+    state.ui.visual_selection_start = None;
+}
+
+/// `d` twice in visual mode — stage the delete prompt covering the whole range.
+pub fn delete_visual_selection(state: &mut AppState) {
+    let armed = state.ui.pending_d_press;
+    match state.ui.active_view {
+        ActiveView::TrackList => {
+            let Some(context) = state.data.active_tracklist_context.clone() else {
+                return;
+            };
+            if !context.can_modify_playlist(state.data.user_id.as_ref()) {
+                return;
+            }
+            let ids: Vec<String> = visual_tracks(state)
+                .into_iter()
+                .map(|track| track.id)
+                .collect();
+            if ids.is_empty() {
+                return;
+            }
+            if armed {
+                state.ui.track_delete_prompt = Some((context.id, ids));
+                state.ui.pending_d_press = false;
+            } else {
+                state.ui.pending_d_press = true;
+            }
+        }
+        ActiveView::Library if state.ui.active_library_tab == crate::app::LibraryTab::Albums => {
+            let Some((start, end)) = state.get_visual_selection_range() else {
+                return;
+            };
+            let albums = &state.data.saved_albums;
+            if start >= albums.len() {
+                return;
+            }
+            let ids: Vec<String> = albums[start..=end.min(albums.len() - 1)]
+                .iter()
+                .map(|album| album.id.clone())
+                .collect();
+            if armed {
+                state.ui.album_mass_delete_prompt = Some(ids);
+                state.ui.pending_d_press = false;
+            } else {
+                state.ui.pending_d_press = true;
+            }
+        }
+        ActiveView::Library => {
+            let ids = visual_deletable_playlists(state);
+            if ids.is_empty() {
+                return;
+            }
+            if armed {
+                state.ui.playlist_delete_prompt = Some(ids);
+                state.ui.pending_d_press = false;
+            } else {
+                state.ui.pending_d_press = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `d` pressed on the focused row — the first press arms `pending_d_press`, the second stages
+/// the `*_prompt` matching whatever is focused, which the frontend then confirms.
+///
+/// Rows with nothing to delete (Liked Songs, the local library, a playlist someone else owns)
+/// leave the flag untouched, so a stray `d` never arms a delete that a later `d` on a
+/// different row would fire.
+pub fn mark_selected_for_delete(state: &mut AppState) {
+    // Second press of the pair; `armed` is consumed by whichever branch stages a prompt.
+    let armed = state.ui.pending_d_press;
+    let stage = |state: &mut AppState, set: &mut dyn FnMut(&mut AppState)| {
+        if armed {
+            set(state);
+            state.ui.pending_d_press = false;
+        } else {
+            state.ui.pending_d_press = true;
+        }
+    };
+
+    match state.ui.active_view {
+        ActiveView::TrackList => {
+            let Some(track) = state.data.tracks.get(state.ui.selected_track_index) else {
+                return;
+            };
+            let Some(context) = state.data.active_tracklist_context.clone() else {
+                return;
+            };
+            if !context.can_modify_playlist(state.data.user_id.as_ref()) {
+                return;
+            }
+            let track_id = track.id.clone();
+            stage(state, &mut |state| {
+                state.ui.track_delete_prompt = Some((context.id.clone(), vec![track_id.clone()]));
+            });
+        }
+        ActiveView::Library => {
+            if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
+                let Some(album) = state.data.saved_albums.get(state.ui.selected_playlist_index)
+                else {
+                    return;
+                };
+                let album_id = album.id.clone();
+                stage(state, &mut |state| {
+                    state.ui.album_mass_delete_prompt = Some(vec![album_id.clone()]);
+                });
+                return;
+            }
+            let Some(node) = state.data.library_view.get(state.ui.selected_playlist_index).cloned()
+            else {
+                return;
+            };
+            match node {
+                LibraryNode::Playlist { playlist, .. } => {
+                    // Liked Songs and the local library are synthetic rows, not deletable; a
+                    // Spotify playlist someone else owns can only be unfollowed, which the
+                    // delete prompt does not model.
+                    if playlist.id == "LIKED_SONGS" || playlist.id == "local-library" {
+                        return;
+                    }
+                    let deletable = playlist.id.starts_with("local-playlist:")
+                        || Some(&playlist.owner_id) == state.data.user_id.as_ref();
+                    if !deletable {
+                        return;
+                    }
+                    let playlist_id = playlist.id.clone();
+                    stage(state, &mut |state| {
+                        state.ui.playlist_delete_prompt = Some(vec![playlist_id.clone()]);
+                    });
+                }
+                LibraryNode::Folder(folder) => {
+                    let name = folder.name.clone();
+                    stage(state, &mut |state| {
+                        state.ui.folder_delete_prompt = Some(name.clone());
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Whether any delete/remove confirmation is pending.
 pub fn prompt_active(state: &AppState) -> bool {
     state.ui.folder_delete_prompt.is_some()
@@ -913,6 +1209,152 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn library_with(playlists: Vec<crate::models::Playlist>) -> AppState {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.ui.active_view = ActiveView::Library;
+        state.data.user_id = Some("owner".to_string());
+        state.data.playlists = playlists;
+        state.compute_library_view();
+        state
+    }
+
+    fn select_row(state: &mut AppState, id: &str) {
+        state.ui.selected_playlist_index = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(
+                node,
+                LibraryNode::Playlist { playlist, .. } if playlist.id == id
+            ))
+            .expect("row exists");
+    }
+
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.to_string(),
+            source: TrackSource::Spotify,
+            local_path: None,
+            name: id.to_string(),
+            artist: String::new(),
+            album: String::new(),
+            added_at: None,
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+            artist_id: None,
+        }
+    }
+
+    fn tracklist_with(ids: &[&str]) -> AppState {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.tracks = ids.iter().map(|id| track(id)).collect();
+        state
+    }
+
+    #[test]
+    fn a_visual_range_covers_every_row_between_anchor_and_cursor() {
+        let mut state = tracklist_with(&["a", "b", "c", "d"]);
+        state.ui.selected_track_index = 1;
+        enter_visual(&mut state);
+        state.ui.selected_track_index = 3;
+
+        let ids: Vec<String> = visual_tracks(&state).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["b", "c", "d"]);
+    }
+
+    #[test]
+    fn a_visual_range_works_when_dragged_upwards() {
+        let mut state = tracklist_with(&["a", "b", "c", "d"]);
+        state.ui.selected_track_index = 2;
+        enter_visual(&mut state);
+        state.ui.selected_track_index = 0;
+
+        let ids: Vec<String> = visual_tracks(&state).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn queueing_a_range_emits_one_event_and_leaves_visual_mode() {
+        let mut state = tracklist_with(&["a", "b", "c"]);
+        enter_visual(&mut state);
+        state.ui.selected_track_index = 1;
+
+        let event = queue_visual_selection(&mut state);
+
+        match event {
+            Some(AppEvent::AddToQueue(ids)) => assert_eq!(ids, ["a", "b"]),
+            other => panic!("expected AddToQueue, got {}", other.is_some()),
+        }
+        assert!(state.ui.visual_selection_start.is_none());
+        assert!(state.ui.mode == crate::app::AppMode::Normal);
+    }
+
+    #[test]
+    fn adding_a_range_to_a_playlist_stages_it_in_the_operation_register() {
+        let mut state = tracklist_with(&["a", "b", "c"]);
+        enter_visual(&mut state);
+        state.ui.selected_track_index = 2;
+
+        add_visual_selection_to_playlist(&mut state);
+
+        // commit_playlist_add reads the register, so the range outlives visual mode.
+        assert_eq!(state.ui.operation_register, ["a", "b", "c"]);
+        assert!(state.ui.playlist_add_modal_open);
+        assert!(state.ui.visual_selection_start.is_none());
+    }
+
+    #[test]
+    fn a_stale_cursor_index_does_not_panic_the_range() {
+        let mut state = tracklist_with(&["a", "b"]);
+        enter_visual(&mut state);
+        // Longer list replaced by a shorter one while the range was open.
+        state.ui.selected_track_index = 9;
+
+        let ids: Vec<String> = visual_tracks(&state).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["a", "b"]);
+    }
+
+    #[test]
+    fn a_single_d_arms_and_the_second_stages_the_delete_prompt() {
+        let mut state = library_with(vec![library_playlist("mine")]);
+        select_row(&mut state, "mine");
+
+        mark_selected_for_delete(&mut state);
+        assert!(state.ui.pending_d_press);
+        assert!(state.ui.playlist_delete_prompt.is_none());
+
+        mark_selected_for_delete(&mut state);
+        assert!(!state.ui.pending_d_press);
+        assert_eq!(
+            state.ui.playlist_delete_prompt.as_deref(),
+            Some(["mine".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn delete_never_arms_on_rows_that_cannot_be_deleted() {
+        let mut state = library_with(vec![library_playlist("mine")]);
+
+        // Liked Songs is a synthetic row with nothing behind it to delete.
+        select_row(&mut state, "LIKED_SONGS");
+        mark_selected_for_delete(&mut state);
+        assert!(!state.ui.pending_d_press);
+        assert!(state.ui.playlist_delete_prompt.is_none());
+
+        // A playlist owned by someone else can only be unfollowed, which this does not model.
+        let mut other = library_playlist("theirs");
+        other.owner_id = "someone-else".to_string();
+        let mut state = library_with(vec![other]);
+        select_row(&mut state, "theirs");
+        mark_selected_for_delete(&mut state);
+        mark_selected_for_delete(&mut state);
+        assert!(!state.ui.pending_d_press);
+        assert!(state.ui.playlist_delete_prompt.is_none());
     }
 
     #[test]
@@ -1123,6 +1565,77 @@ mod tests {
                 track_id: "track".to_string()
             }
         );
+    }
+
+    #[test]
+    fn queue_jump_replays_the_live_context_with_the_track_as_offset() {
+        let mut state = AppState::new();
+        state.playback.playing_context = Some(PlayingContext {
+            context_id: "playlist-1".to_string(),
+            is_album: false,
+        });
+        state.data.queue = vec![spotify_track("queue:a"), spotify_track("queue:b")];
+
+        let Some(AppEvent::PlayTrack {
+            target, track_id, ..
+        }) = play_queue_track_at(&mut state, 1)
+        else {
+            panic!("expected play event");
+        };
+
+        assert_eq!(track_id, "queue:b");
+        assert_eq!(state.ui.selected_queue_index, 1);
+        assert_eq!(
+            target,
+            PlaybackTarget::SpotifyContextJump {
+                context_id: "playlist-1".to_string(),
+                is_album: false,
+            }
+        );
+    }
+
+    #[test]
+    fn queue_jump_without_a_context_plays_the_track_standalone() {
+        let mut state = AppState::new();
+        state.data.queue = vec![spotify_track("queue:a")];
+
+        let Some(AppEvent::PlayTrack { target, .. }) = play_queue_track_at(&mut state, 0) else {
+            panic!("expected play event");
+        };
+
+        assert_eq!(
+            target,
+            PlaybackTarget::SpotifyTrack {
+                track_id: "queue:a".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn context_plays_note_the_playing_context_before_the_next_poll() {
+        let mut state = AppState::new();
+        state.data.active_tracklist_context = Some(TrackListContext::playlist(
+            "playlist-1".to_string(),
+            "Playlist".to_string(),
+            "owner".to_string(),
+            "owner-id".to_string(),
+            None,
+        ));
+        state.data.tracks = vec![spotify_track("track:a")];
+
+        assert!(play_track_at(&mut state, 0).is_some());
+        assert_eq!(
+            state.playback.playing_context,
+            Some(PlayingContext {
+                context_id: "playlist-1".to_string(),
+                is_album: false,
+            })
+        );
+
+        state.data.active_tracklist_context =
+            Some(TrackListContext::generated("TOP_TRACKS", "Top Tracks"));
+        assert!(play_track_at(&mut state, 0).is_some());
+        assert_eq!(state.playback.playing_context, None);
     }
 
     #[test]
