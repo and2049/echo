@@ -133,6 +133,7 @@ async fn emit_local_snapshot(
             device_name: "Local".to_string(),
             progress_ms: snapshot.progress_ms,
             item: snapshot.item,
+            context: None,
         })
         .await;
     let _ = tx.send(WorkerEvent::QueueLoaded(snapshot.queue)).await;
@@ -492,6 +493,7 @@ impl Worker {
                         device_name,
                         progress_ms,
                         item,
+                        context,
                     ))) => {
                         let item_id = item.as_ref().map(|item| item.id.clone());
                         if let Some(item) = item.as_ref() {
@@ -526,6 +528,7 @@ impl Worker {
                                     device_name,
                                     progress_ms,
                                     item,
+                                    context,
                                 })
                                 .await;
                             return;
@@ -635,7 +638,7 @@ impl Worker {
                         let sync_inflight_clone = sync_inflight.clone();
                         let output_available = self.spotify_output_available.clone();
                         tokio::spawn(async move {
-                            if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item))) = SpotifyWorker::playback_snapshot_from_client(&client).await {
+                            if let Ok(Some((playing, shuffled, repeat, vol, dev_name, progress_ms, item, context))) = SpotifyWorker::playback_snapshot_from_client(&client).await {
                                 let playing = playing
                                     && output_available.load(Ordering::SeqCst);
                                 is_playing_clone.store(playing, std::sync::atomic::Ordering::SeqCst);
@@ -649,7 +652,7 @@ impl Worker {
                                         cover_url: track.image_url.clone(),
                                     }).await;
                                 }
-                                let _ = tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
+                                let _ = tx.send(WorkerEvent::SyncPlaybackState { is_playing: playing, is_shuffled: shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item, context }).await;
                             }
                             sync_inflight_clone.store(false, Ordering::SeqCst);
                         });
@@ -727,9 +730,40 @@ impl Worker {
                                                 let mut cache = crate::config::AppConfig::load_cache();
                                                 let mut tracks = cache.liked_tracks.clone();
                                                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                                                let should_fetch = cache.last_liked_sync_time.map(|t| now > t + 3600).unwrap_or(true);
+                                                // A full walk rebuilds the set, so unlikes made elsewhere disappear; it is
+                                                // the expensive path, so it runs daily. In between, top up hourly with the
+                                                // most recent page to pick up new likes cheaply.
+                                                let full_sync = cache.last_liked_full_sync_time.map(|t| now > t + 86400).unwrap_or(true);
+                                                let top_up = cache.last_liked_sync_time.map(|t| now > t + 3600).unwrap_or(true);
 
-                                                if should_fetch {
+                                                if full_sync {
+                                                    let mut stream = client.current_user_saved_tracks(None);
+                                                    let mut rebuilt = std::collections::HashSet::new();
+                                                    let mut seen = 0u32;
+
+                                                    while let Some(item) = stream.next().await {
+                                                        if let Ok(saved_track) = item {
+                                                            if let Some(id) = saved_track.track.id {
+                                                                rebuilt.insert(id.id().to_string());
+                                                            }
+                                                        }
+                                                        seen += 1;
+                                                        // rspotify pages this 50 at a time. A large library is a lot of
+                                                        // requests back to back, so pause briefly between pages; this runs
+                                                        // in the background and nothing waits on it.
+                                                        if seen % 50 == 0 {
+                                                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                                        }
+                                                    }
+
+                                                    // Replace rather than union: the point of the walk is to drop ids that
+                                                    // are no longer saved.
+                                                    tracks = rebuilt;
+                                                    cache.last_liked_full_sync_time = Some(now);
+                                                    cache.last_liked_sync_time = Some(now);
+                                                    cache.liked_tracks = tracks.clone();
+                                                    let _ = crate::config::AppConfig::save_cache(&cache);
+                                                } else if top_up {
                                                     let mut stream = client.current_user_saved_tracks(None);
                                                     let mut fetched_count = 0;
 
@@ -741,7 +775,7 @@ impl Worker {
                                                         }
                                                         fetched_count += 1;
                                                         if fetched_count >= 100 {
-                                                            break; // Only fetch the 100 most recent liked songs on startup to avoid rate limits
+                                                            break; // One page is enough to catch recent likes between full walks.
                                                         }
                                                     }
 
@@ -783,7 +817,7 @@ impl Worker {
                                             // authenticate and register the device. 1s → 2s → 4s = ~7s total wait.
                                             let mut found_playback = false;
                                             for attempt in 0..4u32 {
-                                                if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item))) = sp.sync_playback_state().await {
+                                                if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item, context))) = sp.sync_playback_state().await {
                                                     let mut actual_playing = playing;
 
                                                     // On first boot, if librespot automatically resumed playing, force it to pause
@@ -796,7 +830,7 @@ impl Worker {
                                                     if let Some(item) = item.as_ref() {
                                                         current_track_id = Some(item.id.clone());
                                                     }
-                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: actual_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item }).await;
+                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: actual_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item, context }).await;
                                                     found_playback = true;
                                                     break;
                                                 }
@@ -1007,6 +1041,15 @@ impl Worker {
                                     let play_result = match &target {
                                         PlaybackTarget::SpotifyContext { context_id, is_album } => {
                                             sp.play_track(context_id, &track_id, *is_album).await
+                                        }
+                                        // A queue jump: the track may be a manual queue addition
+                                        // that isn't part of the playing context, which the API
+                                        // rejects — fall back to playing it standalone.
+                                        PlaybackTarget::SpotifyContextJump { context_id, is_album } => {
+                                            match sp.play_track(context_id, &track_id, *is_album).await {
+                                                Err(_) => sp.play_track("LIKED_SONGS", &track_id, false).await,
+                                                ok => ok,
+                                            }
                                         }
                                         PlaybackTarget::SpotifyTrack { track_id } => {
                                             sp.play_track("LIKED_SONGS", track_id, false).await

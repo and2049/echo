@@ -37,6 +37,11 @@ pub struct CacheData {
     pub liked_tracks: HashSet<String>,
     #[serde(default)]
     pub last_liked_sync_time: Option<u64>,
+    /// When the whole Liked Songs library was last walked. The hourly sync only tops up with
+    /// the most recent page, which cannot observe an unlike; the full walk rebuilds the set so
+    /// tracks unliked on another device stop showing a heart.
+    #[serde(default)]
+    pub last_liked_full_sync_time: Option<u64>,
     #[serde(default)]
     pub playlists: Option<CachedEntry<Vec<Playlist>>>,
     #[serde(default)]
@@ -363,6 +368,21 @@ pub struct LibraryConfig {
     pub normalisation: bool,
     #[serde(default = "default_normalisation_pregain")]
     pub normalisation_pregain: f64,
+    /// Desktop window geometry, so a resized window comes back the same size. Ignored by the
+    /// TUI. `None` until the desktop app has been run and closed at least once.
+    #[serde(default)]
+    pub sidebar_width: Option<f32>,
+    #[serde(default)]
+    pub window_bounds: Option<WindowBoundsConfig>,
+}
+
+/// A saved desktop window rectangle, in logical pixels.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct WindowBoundsConfig {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 fn default_volume() -> u32 {
@@ -411,6 +431,8 @@ impl Default for LibraryConfig {
             bitrate: 320,
             normalisation: true,
             normalisation_pregain: default_normalisation_pregain(),
+            sidebar_width: None,
+            window_bounds: None,
         }
     }
 }

@@ -1,5 +1,5 @@
 use super::SpotifyWorker;
-use crate::models::{PlaybackItem, Track, TrackSource};
+use crate::models::{PlaybackItem, PlayingContext, Track, TrackSource};
 use anyhow::Result;
 use rspotify::AuthCodeSpotify;
 use rspotify::model::Id;
@@ -149,6 +149,7 @@ impl SpotifyWorker {
             String,
             u32,
             Option<PlaybackItem>,
+            Option<PlayingContext>,
         )>,
     > {
         if let Some(playback) = client.current_playback(None, Some(PLAYBACK_TYPES)).await? {
@@ -162,6 +163,7 @@ impl SpotifyWorker {
                 .item
                 .as_ref()
                 .and_then(Self::playback_item_from_playable);
+            let context = Self::playing_context_from_playback(playback.context.as_ref());
 
             return Ok(Some((
                 is_playing,
@@ -171,10 +173,27 @@ impl SpotifyWorker {
                 device_name,
                 progress_ms,
                 item,
+                context,
             )));
         }
 
         Ok(None)
+    }
+
+    fn playing_context_from_playback(
+        context: Option<&rspotify::model::Context>,
+    ) -> Option<PlayingContext> {
+        let context = context?;
+        let is_album = match context._type {
+            rspotify::model::Type::Album => true,
+            rspotify::model::Type::Playlist => false,
+            _ => return None,
+        };
+        let context_id = context.uri.rsplit(':').next()?.to_string();
+        (!context_id.is_empty()).then_some(PlayingContext {
+            context_id,
+            is_album,
+        })
     }
 
     fn repeat_mode_label(repeat_state: rspotify::model::RepeatState) -> String {
@@ -196,6 +215,7 @@ impl SpotifyWorker {
             String,
             u32,
             Option<PlaybackItem>,
+            Option<PlayingContext>,
         )>,
     > {
         if let Some(playback) = self
@@ -230,6 +250,7 @@ impl SpotifyWorker {
                 device_name,
                 progress_ms,
                 item,
+                Self::playing_context_from_playback(playback.context.as_ref()),
             )));
         }
 
@@ -254,6 +275,7 @@ impl SpotifyWorker {
                 "Unknown Device".to_string(),
                 progress_ms,
                 item,
+                Self::playing_context_from_playback(playing.context.as_ref()),
             )));
         }
 

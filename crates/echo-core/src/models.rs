@@ -14,6 +14,13 @@ pub enum PlaybackTarget {
         context_id: String,
         is_album: bool,
     },
+    /// Like [`PlaybackTarget::SpotifyContext`], but the track may not be part of the context
+    /// (a manually queued item): the worker falls back to a standalone play when the context
+    /// play is rejected, instead of surfacing an error.
+    SpotifyContextJump {
+        context_id: String,
+        is_album: bool,
+    },
     SpotifyTrack {
         track_id: String,
     },
@@ -25,6 +32,15 @@ pub enum PlaybackTarget {
         tracks: Vec<Track>,
         selected_index: usize,
     },
+}
+
+/// The playlist or album the playing device reports as its context, from the status poll.
+/// Artist, show and collection (Liked Songs) contexts can't be restarted through the API's
+/// context-playback call, so they map to `None` and queue jumps fall back to standalone plays.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlayingContext {
+    pub context_id: String,
+    pub is_album: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

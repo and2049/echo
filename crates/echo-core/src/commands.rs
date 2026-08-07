@@ -9,36 +9,51 @@ use crate::app::{AppMode, AppState};
 use crate::events::AppEvent;
 use crate::models::TrackListContext;
 
+/// Every `:` command, as `(usage, description)`.
+///
+/// This is the single source for both Tab completion and the desktop's help overlay — adding a
+/// command here makes it complete *and* documented, so the two cannot drift apart. The name is
+/// the first whitespace-separated token of the usage string.
+pub const COMMANDS: &[(&str, &str)] = &[
+    ("q", "Quit"),
+    ("qa", "Quit"),
+    ("wq", "Quit"),
+    ("newfolder <name>", "Create a folder to organise playlists"),
+    ("delfolder", "Delete the selected folder"),
+    ("sort <mode>", "Sort the library, or the loaded track list"),
+    ("index <n>", "Track numbering base (0 or 1)"),
+    ("theme <name>", "Switch theme"),
+    ("search <query>", "Search Spotify and local tracks"),
+    ("queue", "Open the queue"),
+    ("vis", "Toggle the audio visualizer"),
+    ("visbins <5-32>", "Visualizer frequency bands"),
+    ("album", "Jump to the selected track's album"),
+    ("lang <en|zh-CN|zh-TW>", "Switch language"),
+    ("newplaylist <name>", "Create a Spotify playlist"),
+    ("newlocalplaylist <name>", "Create a local playlist"),
+    ("localpath <abs-path>", "Set and scan the local music folder"),
+    ("rescanlocal", "Rescan the local music folder"),
+    ("spotifylogin", "Re-authenticate with Spotify"),
+    ("rename <name>", "Rename the selected playlist or folder"),
+    ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
+    ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
+    ("seek <s|+s|-s>", "Seek to, or by, a number of seconds"),
+    ("mute", "Mute, or restore the previous volume"),
+    ("open [url|uri]", "Open a Spotify link, or read the clipboard"),
+    ("relative <on|off|toggle>", "Vim-style relative line numbers"),
+    ("redraw", "Clear and redraw (TUI only)"),
+];
+
+/// Just the command names, for completion matching.
+fn command_names() -> Vec<&'static str> {
+    COMMANDS
+        .iter()
+        .map(|(usage, _)| usage.split_whitespace().next().unwrap_or(usage))
+        .collect()
+}
+
 fn generate_command_suggestions(state: &AppState) -> Vec<String> {
-    let commands = vec![
-        "q",
-        "qa",
-        "wq",
-        "newfolder",
-        "delfolder",
-        "sort",
-        "index",
-        "theme",
-        "search",
-        "queue",
-        "vis",
-        "visbins",
-        "album",
-        "lang",
-        "newplaylist",
-        "newlocalplaylist",
-        "localpath",
-        "rescanlocal",
-        "spotifylogin",
-        "rename",
-        "pixelate",
-        "thumbs",
-        "seek",
-        "mute",
-        "open",
-        "relative",
-        "redraw",
-    ];
+    let commands = command_names();
     let mut parts = state.ui.command_buffer.splitn(2, ' ');
     let cmd = parts.next().unwrap_or("");
     let arg = parts.next();
@@ -55,8 +70,8 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
             }
             "sort" => {
                 let options = vec![
-                    "alpha", "creator", "original", "title", "artist", "album", "duration",
-                    "added", "reverse",
+                    "default", "alpha", "creator", "original", "title", "artist", "album",
+                    "duration", "added", "reverse",
                 ]
                 .into_iter()
                 .map(String::from)
@@ -142,6 +157,14 @@ pub fn submit(state: &mut AppState) -> Option<AppEvent> {
     state.ui.mode = AppMode::Normal;
     state.ui.needs_terminal_clear = true;
     execute(state, &cmd)
+}
+
+/// Run a command by name, as if it had been typed into the `:` bar.
+///
+/// Lets non-textual UI — the desktop's settings and sort controls — reuse the registry rather
+/// than duplicating the config mutation and status messages each command already performs.
+pub fn run(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
+    execute(state, cmd)
 }
 
 fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
@@ -347,6 +370,11 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
             "sort" => {
                 if let Some(mode) = args.next() {
                     match mode {
+                        // The manual order drag-and-drop builds in `playlist_order`. Without
+                        // this there is no way back to it once alpha or creator is picked.
+                        "default" => {
+                            state.ui.library_config.sort_mode = crate::config::SortMode::Default
+                        }
                         "alpha" => {
                             state.ui.library_config.sort_mode =
                                 crate::config::SortMode::Alphabetical
@@ -383,7 +411,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                         }
                         _ => set_status(
                             state,
-                            "Usage: sort <alpha|creator|original|title|artist|album|duration|added|reverse>",
+                            "Usage: sort <default|alpha|creator|original|title|artist|album|duration|added|reverse>",
                         ),
                     }
                     state.save_library_config();
@@ -776,6 +804,34 @@ mod tests {
             Some(AppEvent::StartAuth)
         ));
         assert!(state.ui.mode == AppMode::Authenticating);
+    }
+
+    #[test]
+    fn every_documented_command_is_offered_by_completion() {
+        let mut state = AppState::new();
+        state.ui.command_buffer.clear();
+        let suggestions = generate_command_suggestions(&state);
+        for name in command_names() {
+            assert!(
+                suggestions.iter().any(|s| s == name),
+                "{name} is documented but never completes"
+            );
+        }
+    }
+
+    #[test]
+    fn command_names_are_unique_and_documented() {
+        let names = command_names();
+        for (index, name) in names.iter().enumerate() {
+            assert!(!name.is_empty());
+            assert!(
+                !names[index + 1..].contains(name),
+                "{name} is listed twice in COMMANDS"
+            );
+        }
+        for (usage, description) in COMMANDS {
+            assert!(!description.is_empty(), "{usage} has no description");
+        }
     }
 
     #[test]

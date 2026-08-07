@@ -56,6 +56,20 @@ const COMPACT_PILL: PillMetrics = PillMetrics {
     hover_opacity: 0.08,
 };
 
+/// Whether row `ix` reads as selected: the cursor row, or any row inside a visual range.
+/// The range shares the cursor's highlight so the selection looks like one block.
+fn row_selected(ix: usize, selected: usize, visual: Option<(usize, usize)>) -> bool {
+    ix == selected || visual.is_some_and(|(start, end)| ix >= start && ix <= end)
+}
+
+/// The visual range for one pane. The range is bare row indices measured against the active
+/// view's cursor, so panes other than the one visual mode was entered in must ignore it.
+fn visual_range_in(state: &echo_core::app::AppState, view: ActiveView) -> Option<(usize, usize)> {
+    (state.ui.active_view == view)
+        .then(|| state.get_visual_selection_range())
+        .flatten()
+}
+
 /// A selectable list row, drawn as an inset rounded pill.
 ///
 /// Every list in the app shares this shell. `uniform_list` measures a fixed row height, so the
@@ -406,6 +420,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
+                    let visual = visual_range_in(&this.state, ActiveView::Library);
 
                     let rows: Vec<_> = range
                         .map(|ix| {
@@ -543,7 +558,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     None
                                 };
 
-                            pill_row(ix, SIDEBAR_PILL, ix == selected, selected_bg, muted, |row| {
+                            pill_row(ix, SIDEBAR_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 row.pl(px(8.0 + indent_px))
                                 .gap_2()
                                 .text_color(label_color)
@@ -688,7 +703,8 @@ pub fn main_area(
         ActiveView::TrackList => track_list(app, cx).into_any_element(),
         ActiveView::Queue => queue_list(app, cx).into_any_element(),
         ActiveView::SearchResults => search_results(app, cx).into_any_element(),
-        ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
+        // No `ArtistList` arm: the sidebar's Artists tab replaces the TUI's full-page
+        // artist list, so that view is never activated here.
         ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
             _ => library_placeholder(app),
         }
@@ -940,6 +956,102 @@ fn search_bar(
             cx,
             |this, cx| this.toggle_themes(cx),
         ))
+        .child(crate::icon_button(
+            "settings",
+            "icons/settings.svg",
+            muted,
+            cx,
+            |this, cx| this.toggle_settings(cx),
+        ))
+}
+
+/// Track-list sort options, as `(label, `:sort` argument)`. The desktop runs them through the
+/// command registry so the behaviour and status messages match `:sort` and the TUI exactly.
+pub const SORT_OPTIONS: &[(&str, &str)] = &[
+    ("Original order", "original"),
+    ("Title", "title"),
+    ("Artist", "artist"),
+    ("Album", "album"),
+    ("Duration", "duration"),
+    ("Date added", "added"),
+    ("Reverse", "reverse"),
+];
+
+fn sort_button(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    crate::icon_button("track-sort", "icons/arrow-down.svg", muted, cx, |this, cx| {
+        this.sort_menu_open = !this.sort_menu_open;
+        cx.notify();
+    })
+}
+
+/// The sort picker, anchored under the track-list header's sort button.
+pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let active = app.state.ui.track_sort;
+    let selected = app.sort_menu_index;
+
+    div()
+        .id("sort-backdrop")
+        .absolute()
+        .inset_0()
+        .occlude()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.sort_menu_open = false;
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("sort-menu")
+                .absolute()
+                .right(px(16.0))
+                .top(px(96.0))
+                .w(px(180.0))
+                .rounded_md()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(surface)
+                .py_1()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .children(SORT_OPTIONS.iter().enumerate().map(|(ix, (label, arg))| {
+                    // `reverse` flips the current order rather than naming one, so it never
+                    // shows the active marker.
+                    let is_active = *arg != "reverse" && crate::sort_arg(active) == *arg;
+                    let is_selected = ix == selected;
+                    div()
+                        .id(*label)
+                        .mx_1()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .text_sm()
+                        .text_color(if is_active { accent } else { fg })
+                        .when(is_selected, |el| el.bg(accent.opacity(0.12)))
+                        .when(!is_selected, |el| {
+                            el.hover(move |style| style.bg(accent.opacity(0.12)))
+                        })
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            this.apply_sort(arg, cx);
+                        }))
+                        .child(*label)
+                        .when(is_active, |el| {
+                            el.child(div().flex_none().text_color(accent).child("●"))
+                        })
+                })),
+        )
 }
 
 fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
@@ -991,6 +1103,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                 })
                 .child(
                     div()
+                        .flex_grow(1.0)
                         .flex()
                         .flex_col()
                         .overflow_hidden()
@@ -1006,7 +1119,8 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                 .text_color(muted)
                                 .child(SharedString::from(context_author)),
                         ),
-                ),
+                )
+                .child(sort_button(app, cx)),
         )
         .child(if loading {
             div()
@@ -1028,6 +1142,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let accent = theme.primary.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
                     let selected = this.state.ui.selected_track_index;
+                    let visual = visual_range_in(&this.state, ActiveView::TrackList);
                     let playing_id = this.state.playback.playing_track_id.clone();
 
                     range
@@ -1036,9 +1151,15 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
 
-                            pill_row(ix, COMPACT_PILL, ix == selected, selected_bg, muted, |row| {
+                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 row.gap_3()
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
+                                    // Shift-click selects from the previously focused row to
+                                    // this one — the desktop's version of `v` plus motion.
+                                    if event.modifiers().shift {
+                                        this.extend_selection_to(ix, cx);
+                                        return;
+                                    }
                                     this.state.ui.selected_track_index = ix;
                                     if event.click_count() >= 2
                                         && let Some(event) =
@@ -1053,10 +1174,13 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                     cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
                                         this.state.ui.selected_track_index = ix;
                                         this.context_menu = None;
-                                        this.track_menu = Some(crate::TrackMenuState {
-                                            index: ix,
-                                            position: event.position,
-                                        });
+                                        if let Some(ctx) = this.action_target() {
+                                            this.track_menu = Some(crate::TrackMenuState {
+                                                ctx,
+                                                position: Some(event.position),
+                                                selected: 0,
+                                            });
+                                        }
                                         cx.notify();
                                     }),
                                 )
@@ -1161,14 +1285,19 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
                     let selected = this.state.ui.selected_queue_index;
+                    let visual = visual_range_in(&this.state, ActiveView::Queue);
 
                     range
                         .map(|ix| {
                             let track = &this.state.data.queue[ix];
 
-                            pill_row(ix, COMPACT_PILL, ix == selected, selected_bg, muted, |row| {
+                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 row.gap_3()
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
+                                    if event.modifiers().shift {
+                                        this.extend_selection_to(ix, cx);
+                                        return;
+                                    }
                                     this.state.ui.selected_queue_index = ix;
                                     if event.click_count() >= 2
                                         && let Some(event) =
@@ -1183,10 +1312,13 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                     cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
                                         this.state.ui.selected_queue_index = ix;
                                         this.context_menu = None;
-                                        this.track_menu = Some(crate::TrackMenuState {
-                                            index: ix,
-                                            position: event.position,
-                                        });
+                                        if let Some(ctx) = this.action_target() {
+                                            this.track_menu = Some(crate::TrackMenuState {
+                                                ctx,
+                                                position: Some(event.position),
+                                                selected: 0,
+                                            });
+                                        }
                                         cx.notify();
                                     }),
                                 )
@@ -1378,10 +1510,11 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
                     let tab = this.state.ui.active_search_tab;
                     let selected = this.state.ui.selected_search_index;
+                    let visual = visual_range_in(&this.state, ActiveView::SearchResults);
 
                     let rows: Vec<AnyElement> = range
                         .map(|ix| {
-                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                            pill_row(ix, LIST_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 let row = row.gap_3().on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) =
@@ -1515,113 +1648,6 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                 }),
             )
             .track_scroll(&app.search_scroll)
-            .flex_grow(1.0)
-            .into_any_element()
-        })
-}
-
-fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    let theme = &app.state.ui.active_theme;
-    let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
-
-    let count = app.state.data.followed_artists.len();
-
-    div()
-        .flex_grow(1.0)
-        .flex()
-        .flex_col()
-        .overflow_hidden()
-        .child(
-            div()
-                .flex_none()
-                .px_4()
-                .py_3()
-                .flex()
-                .flex_col()
-                .child(div().text_lg().text_color(fg).child("Followed artists"))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(muted)
-                        .child(SharedString::from(format!("{count} artists"))),
-                ),
-        )
-        .child(if count == 0 {
-            div()
-                .flex_grow(1.0)
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(muted)
-                .child("Loading artists…")
-                .into_any_element()
-        } else {
-            uniform_list(
-                "artist-rows",
-                count,
-                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                    let theme = &this.state.ui.active_theme;
-                    let fg = theme.text.gpui(WINDOW_FG());
-                    let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
-                    let selected = this.state.ui.selected_artist_index;
-
-                    let rows: Vec<AnyElement> = range
-                        .map(|ix| {
-                            let artist = this.state.data.followed_artists[ix].clone();
-                            let thumb = thumb_element(
-                                this,
-                                artist.image_url.as_deref(),
-                                26.0,
-                                true,
-                                muted,
-                            );
-                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
-                                row.gap_3()
-                                .on_click(cx.listener(
-                                    move |this: &mut EchoApp, _event, _window, cx| {
-                                        if let Some(event) =
-                                            echo_core::intent::open_followed_artist(
-                                                &mut this.state,
-                                                ix,
-                                            )
-                                        {
-                                            this.dispatch(event);
-                                        }
-                                        cx.notify();
-                                    },
-                                ))
-                                .child(thumb)
-                                .child(
-                                    div()
-                                        .flex_grow(1.0)
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .whitespace_nowrap()
-                                        .text_color(fg)
-                                        .child(SharedString::from(artist.name)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(SharedString::from(format!(
-                                            "{} followers",
-                                            artist.followers
-                                        ))),
-                                )
-                            })
-                            .into_any_element()
-                        })
-                        .collect();
-
-                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                    rows
-                }),
-            )
-            .track_scroll(&app.artists_scroll)
             .flex_grow(1.0)
             .into_any_element()
         })
@@ -1941,6 +1967,14 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
 }
 
 /// The theme picker: every loaded theme by name, the active one accented.
+/// Theme names in the order the picker lists them. `EchoApp::theme_modal_index` indexes into
+/// this, so keyboard selection and rendering must both go through here or the two drift.
+pub fn sorted_theme_names(state: &echo_core::app::AppState) -> Vec<String> {
+    let mut names: Vec<String> = state.ui.themes.keys().cloned().collect();
+    names.sort();
+    names
+}
+
 pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
@@ -1948,9 +1982,9 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
 
-    let mut names: Vec<String> = app.state.ui.themes.keys().cloned().collect();
-    names.sort();
+    let names = sorted_theme_names(&app.state);
     let active = app.state.ui.library_config.active_theme.clone();
+    let selected = app.theme_modal_index;
 
     div()
         .id("theme-backdrop")
@@ -1998,6 +2032,7 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .track_scroll(&app.theme_modal_scroll)
                         .children(names.into_iter().enumerate().map(|(ix, name)| {
                             let is_active = active.as_deref() == Some(name.as_str());
+                            let is_selected = ix == selected;
                             let color = if is_active { accent } else { fg };
                             let clicked = name.clone();
                             div()
@@ -2011,7 +2046,10 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                 .justify_between()
                                 .text_sm()
                                 .text_color(color)
-                                .hover(|style| style.bg(muted.opacity(0.1)))
+                                .when(is_selected, |el| el.bg(muted.opacity(0.18)))
+                                .when(!is_selected, |el| {
+                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
@@ -2027,6 +2065,683 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         }))
                         .into_any_element()
                 }),
+        )
+}
+
+/// Keyboard shortcuts, grouped, for the help overlay.
+///
+/// Kept next to the `KeyBinding::new` block in `main()` conceptually — when you add a binding
+/// there, add it here too. Commands are not listed: those come from
+/// `echo_core::commands::COMMANDS` so they cannot go stale.
+pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
+    (
+        "NAVIGATION",
+        &[
+            ("j / k / ↓ / ↑", "Move down / up"),
+            ("gg / G", "First / last item"),
+            ("ctrl-b / ctrl-f", "Page up / down"),
+            ("ctrl-u / ctrl-d", "Half page up / down"),
+            ("enter / z", "Open or play the selection"),
+            ("h / esc", "Back, or close what's open"),
+            ("backspace", "Back to the sidebar"),
+            ("tab", "Switch tabs"),
+            ("gc", "Jump to what's playing"),
+            ("1-9", "Repeat the next motion N times"),
+        ],
+    ),
+    (
+        "PLAYBACK",
+        &[
+            ("space", "Play / pause"),
+            ("[ / ]", "Previous / next track"),
+            (", / .", "Seek back / forward 5s"),
+            ("0", "Seek to the start"),
+            ("- / =", "Volume down / up"),
+            ("shift-M", "Mute"),
+            ("s / r", "Shuffle / repeat"),
+            ("shift-D", "Devices"),
+            ("shift-L", "Lyrics"),
+            ("ctrl-shift-L", "Lyrics in the playback bar"),
+        ],
+    ),
+    (
+        "LIBRARY",
+        &[
+            ("a", "Add to playlist (or save album)"),
+            ("shift-A", "Track actions"),
+            ("q / shift-Q", "Queue track / open queue"),
+            ("dd", "Delete — press twice, then confirm"),
+            ("v", "Select a range; shift-click does it too"),
+            ("m", "Pin / unpin"),
+            ("c / e", "New playlist / rename"),
+            ("shift-R", "Refresh"),
+        ],
+    ),
+    (
+        "FINDING THINGS",
+        &[
+            ("ctrl-k", "Search Spotify"),
+            ("/", "Filter the loaded track list"),
+            ("n / shift-N", "Next / previous match"),
+            (":", "Command bar"),
+            ("t", "Themes"),
+            ("ctrl-,", "Settings"),
+            ("?", "This help"),
+            ("ctrl-q", "Quit"),
+        ],
+    ),
+];
+
+/// The help overlay: every keybinding, plus every `:` command straight from the registry.
+pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+
+    let entry = |keys: &'static str, what: &'static str| {
+        div()
+            .flex()
+            .flex_row()
+            .items_baseline()
+            .gap_2()
+            .py_0p5()
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(112.0))
+                    .text_xs()
+                    .text_color(accent)
+                    .child(keys),
+            )
+            .child(div().text_xs().text_color(muted).child(what))
+    };
+
+    let section = move |title: &'static str, rows: &'static [(&'static str, &'static str)]| {
+        div()
+            .flex()
+            .flex_col()
+            .pb_2()
+            .child(div().pb_1().text_xs().text_color(fg).child(title))
+            .children(rows.iter().map(|(keys, what)| entry(keys, what)))
+    };
+
+    div()
+        .id("help-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .occlude()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.help_open = false;
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("help-panel")
+                .w(px(700.0))
+                .max_h(px(600.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(surface)
+                .p_4()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .pb_2()
+                        .child(div().text_sm().text_color(fg).child("Keys & commands"))
+                        .child(div().text_xs().text_color(muted).child("esc to close")),
+                )
+                .child(
+                    div()
+                        .id("help-body")
+                        .flex()
+                        .flex_row()
+                        .gap_6()
+                        .max_h(px(510.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&app.help_scroll)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .w(px(320.0))
+                                .flex_none()
+                                .children(KEY_HELP.iter().map(|(title, rows)| section(title, rows))),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_grow(1.0)
+                                .child(
+                                    div()
+                                        .pb_1()
+                                        .text_xs()
+                                        .text_color(fg)
+                                        .child("COMMANDS — press :"),
+                                )
+                                .children(echo_core::commands::COMMANDS.iter().map(
+                                    |(usage, description)| {
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .py_0p5()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(accent)
+                                                    .child(SharedString::from(format!(":{usage}"))),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .child(*description),
+                                            )
+                                    },
+                                )),
+                        ),
+                ),
+        )
+}
+
+/// The settings sheet.
+///
+/// Every control here runs a `:` command through `echo_core::commands::run` rather than
+/// touching the config itself, so the GUI and the command bar cannot drift apart. The three
+/// audio-quality keys are the exception — they have no command — and write the config directly.
+pub fn settings_modal(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+
+    let config = app.state.ui.library_config.clone();
+    let path_focused = app.settings_path_focus.is_focused(window);
+    let path_value = app.settings_path_input.clone();
+
+    // A labelled row with its control on the right.
+    let row = |label: &'static str, hint: Option<&'static str>, control: AnyElement| {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .py_1p5()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(div().text_sm().text_color(fg).child(label))
+                    .when_some(hint, |el, hint| {
+                        el.child(div().text_xs().text_color(muted).child(hint))
+                    }),
+            )
+            .child(control)
+    };
+
+    let heading = |label: &'static str| {
+        div()
+            .pt_3()
+            .pb_1()
+            .text_xs()
+            .text_color(muted)
+            .child(label)
+    };
+
+    // A segmented control: one button per option, the active one accented.
+    let choices = |id: &'static str,
+                   options: Vec<(SharedString, String, bool)>,
+                   cx: &mut Context<EchoApp>| {
+        div()
+            .id(id)
+            .flex()
+            .flex_row()
+            .gap_1()
+            .children(options.into_iter().map(|(label, cmd, active)| {
+                div()
+                    .id(SharedString::from(format!("{id}-{label}")))
+                    .px_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .text_xs()
+                    .text_color(if active { accent } else { muted })
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        this.run_setting(cmd.clone(), cx);
+                    }))
+                    .child(label)
+            }))
+            .into_any_element()
+    };
+
+    let language = config.language.clone();
+    let language_row = row(
+        "Language",
+        None,
+        choices(
+            "lang",
+            vec![
+                ("English".into(), "lang en".into(), language == "en"),
+                ("简体".into(), "lang zh-CN".into(), language == "zh-CN"),
+                ("繁體".into(), "lang zh-TW".into(), language == "zh-TW"),
+            ],
+            cx,
+        ),
+    );
+
+    let visualizer_row = row(
+        "Audio visualizer",
+        Some("Spectrum bars in the playback bar"),
+        choices(
+            "vis",
+            vec![
+                ("On".into(), "vis".into(), config.enable_visualizer),
+                ("Off".into(), "vis".into(), !config.enable_visualizer),
+            ],
+            cx,
+        ),
+    );
+
+    let bins_row = row(
+        "Visualizer bands",
+        Some("5–32"),
+        choices(
+            "visbins",
+            [7usize, 9, 16, 24, 32]
+                .into_iter()
+                .map(|n| {
+                    (
+                        SharedString::from(n.to_string()),
+                        format!("visbins {n}"),
+                        config.vis_bins == n,
+                    )
+                })
+                .collect(),
+            cx,
+        ),
+    );
+
+    let pixelate_row = row(
+        "Cover pixelation",
+        Some("Retro 8-bit album art; Off is full resolution"),
+        choices(
+            "pixelate",
+            [0u32, 8, 16, 32]
+                .into_iter()
+                .map(|n| {
+                    (
+                        if n == 0 {
+                            SharedString::from("Off")
+                        } else {
+                            SharedString::from(n.to_string())
+                        },
+                        format!("pixelate {n}"),
+                        config.cover_img_pixels == n,
+                    )
+                })
+                .collect(),
+            cx,
+        ),
+    );
+
+    let index_row = row(
+        "Track numbering",
+        Some("First row is 1 or 0"),
+        choices(
+            "index",
+            vec![
+                ("1".into(), "index 1".into(), config.track_index_base == 1),
+                ("0".into(), "index 0".into(), config.track_index_base == 0),
+            ],
+            cx,
+        ),
+    );
+
+    let relative_row = row(
+        "Relative line numbers",
+        Some("Vim-style offsets from the selected track"),
+        choices(
+            "relative",
+            vec![
+                (
+                    "On".into(),
+                    "relative on".into(),
+                    config.relative_line_numbers,
+                ),
+                (
+                    "Off".into(),
+                    "relative off".into(),
+                    !config.relative_line_numbers,
+                ),
+            ],
+            cx,
+        ),
+    );
+
+    let sort_row = row(
+        "Library order",
+        Some("Custom is the order you set by dragging"),
+        choices(
+            "libsort",
+            vec![
+                (
+                    // The manual drag-and-drop order.
+                    "Custom".into(),
+                    "sort default".into(),
+                    config.sort_mode == echo_core::config::SortMode::Default,
+                ),
+                (
+                    "Alphabetical".into(),
+                    "sort alpha".into(),
+                    config.sort_mode == echo_core::config::SortMode::Alphabetical,
+                ),
+                (
+                    "Creator".into(),
+                    "sort creator".into(),
+                    config.sort_mode == echo_core::config::SortMode::Creator,
+                ),
+            ],
+            cx,
+        ),
+    );
+
+    let bitrate_row = row(
+        "Streaming quality",
+        Some("kbps — applies on next launch"),
+        div()
+            .flex()
+            .flex_row()
+            .gap_1()
+            .children([96u32, 160, 320].into_iter().map(|rate| {
+                let active = config.bitrate == rate;
+                div()
+                    .id(SharedString::from(format!("bitrate-{rate}")))
+                    .px_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .text_xs()
+                    .text_color(if active { accent } else { muted })
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        this.set_audio_quality(|config| config.bitrate = rate, cx);
+                    }))
+                    .child(SharedString::from(rate.to_string()))
+            }))
+            .into_any_element(),
+    );
+
+    let normalisation = config.normalisation;
+    let normalisation_row = row(
+        "Volume normalisation",
+        Some("Even out loudness between tracks — applies on next launch"),
+        div()
+            .flex()
+            .flex_row()
+            .gap_1()
+            .children([true, false].into_iter().map(|on| {
+                let active = normalisation == on;
+                div()
+                    .id(if on { "norm-on" } else { "norm-off" })
+                    .px_2()
+                    .py_0p5()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .text_xs()
+                    .text_color(if active { accent } else { muted })
+                    .cursor_pointer()
+                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        this.set_audio_quality(|config| config.normalisation = on, cx);
+                    }))
+                    .child(if on { "On" } else { "Off" })
+            }))
+            .into_any_element(),
+    );
+
+    let pregain = config.normalisation_pregain;
+    let step_button = |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
+        div()
+            .id(id)
+            .w(px(22.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_md()
+            .border_1()
+            .border_color(muted.opacity(0.3))
+            .text_xs()
+            .text_color(muted)
+            .cursor_pointer()
+            .hover(move |style| style.bg(accent.opacity(0.1)))
+            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                this.set_audio_quality(
+                    |config| {
+                        // Matches librespot's usable range; beyond this the limiter dominates.
+                        config.normalisation_pregain = (config.normalisation_pregain + delta)
+                            .clamp(-10.0, 10.0);
+                    },
+                    cx,
+                );
+            }))
+            .child(label)
+    };
+    let pregain_row = row(
+        "Normalisation pregain",
+        Some("dB added back after normalisation — raise if playback is quiet"),
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .child(step_button("pregain-down", "−", -0.5, cx))
+            .child(
+                div()
+                    .w(px(52.0))
+                    .text_xs()
+                    .text_color(fg)
+                    .text_center()
+                    .child(SharedString::from(format!("{pregain:+.1} dB"))),
+            )
+            .child(step_button("pregain-up", "+", 0.5, cx))
+            .into_any_element(),
+    );
+
+    let local_field = div()
+        .id("settings-localpath")
+        .key_context(crate::SEARCH_CONTEXT)
+        .track_focus(&app.settings_path_focus)
+        .on_key_down(cx.listener(|this: &mut EchoApp, event, window, cx| {
+            this.handle_settings_path_key(event, window, cx)
+        }))
+        .w_full()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(if path_focused {
+            accent
+        } else {
+            muted.opacity(0.3)
+        })
+        .text_xs()
+        .text_color(if path_value.is_empty() { muted } else { fg })
+        .whitespace_nowrap()
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
+            let handle = this.settings_path_focus.clone();
+            window.focus(&handle, cx);
+            cx.notify();
+        }))
+        .child(SharedString::from(if path_focused {
+            format!("{path_value}▏")
+        } else if path_value.is_empty() {
+            "No folder set — type an absolute path".to_string()
+        } else {
+            path_value
+        }));
+
+    let small_button = |id: &'static str, label: &'static str, cmd: &'static str, cx: &mut Context<EchoApp>| {
+        div()
+            .id(id)
+            .flex_none()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(muted.opacity(0.3))
+            .text_xs()
+            .text_color(muted)
+            .cursor_pointer()
+            .hover(move |style| style.bg(accent.opacity(0.1)))
+            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                this.run_setting(cmd.to_string(), cx);
+            }))
+            .child(label)
+    };
+
+    div()
+        .id("settings-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .occlude()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            this.settings_open = false;
+            cx.notify();
+        }))
+        .child(
+            div()
+                .id("settings-panel")
+                .w(px(520.0))
+                .max_h(px(560.0))
+                .rounded_lg()
+                .border_1()
+                .border_color(muted.opacity(0.4))
+                .bg(surface)
+                .p_4()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .pb_2()
+                        .child(div().text_sm().text_color(fg).child("Settings"))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child("Everything here is also a : command"),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("settings-list")
+                        .flex()
+                        .flex_col()
+                        .max_h(px(470.0))
+                        .overflow_y_scroll()
+                        .track_scroll(&app.settings_scroll)
+                        .child(heading("APPEARANCE"))
+                        .child(row(
+                            "Theme",
+                            None,
+                            div()
+                                .id("settings-theme")
+                                .px_2()
+                                .py_0p5()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(muted.opacity(0.3))
+                                .text_xs()
+                                .text_color(muted)
+                                .cursor_pointer()
+                                .hover(move |style| style.bg(accent.opacity(0.1)))
+                                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                                    this.settings_open = false;
+                                    this.toggle_themes(cx);
+                                }))
+                                .child(SharedString::from(
+                                    config.active_theme.clone().unwrap_or_else(|| "echo".into()),
+                                ))
+                                .into_any_element(),
+                        ))
+                        .child(language_row)
+                        .child(pixelate_row)
+                        .child(heading("LIBRARY"))
+                        .child(sort_row)
+                        .child(index_row)
+                        .child(relative_row)
+                        .child(heading("PLAYBACK"))
+                        .child(visualizer_row)
+                        .child(bins_row)
+                        .child(heading("AUDIO QUALITY"))
+                        .child(bitrate_row)
+                        .child(normalisation_row)
+                        .child(pregain_row)
+                        .child(heading("LOCAL MUSIC"))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .py_1()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child("Folder to scan — must be an absolute path. Enter to apply."),
+                                )
+                                .child(local_field)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .gap_1()
+                                        .child(small_button(
+                                            "settings-rescan",
+                                            "Rescan now",
+                                            "rescanlocal",
+                                            cx,
+                                        )),
+                                ),
+                        ),
+                ),
         )
 }
 
@@ -2452,6 +3167,43 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
 /// model (`ActionMenuContext::actions()` / `action_menu::label`), so it always matches the
 /// TUI's `A` popup; remove-from-playlist is appended for modifiable playlists, where the TUI
 /// uses `dd` instead.
+/// The open track menu's rows: `(label, item, is_destructive)`. Keyboard selection indexes
+/// into this, so it is the single source of the menu's contents.
+pub fn track_menu_items(app: &EchoApp) -> Vec<(SharedString, TrackMenuItem, bool)> {
+    let Some(menu) = app.track_menu.as_ref() else {
+        return Vec::new();
+    };
+    let ctx = &menu.ctx;
+    let mut items: Vec<(SharedString, TrackMenuItem, bool)> = ctx
+        .actions()
+        .into_iter()
+        .map(|action| {
+            (
+                echo_core::action_menu::label(&app.state, ctx, action).into(),
+                TrackMenuItem::Action(action),
+                false,
+            )
+        })
+        .collect();
+    // Queue rows have no playlist behind them — `active_tracklist_context` is whatever was
+    // last browsed, so removing would hit the wrong playlist.
+    if app.state.ui.active_view != ActiveView::Queue
+        && app
+            .state
+            .data
+            .active_tracklist_context
+            .as_ref()
+            .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
+    {
+        items.push((
+            "Remove from playlist".into(),
+            TrackMenuItem::RemoveFromPlaylist,
+            true,
+        ));
+    }
+    items
+}
+
 pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let menu = app
         .track_menu
@@ -2464,35 +3216,9 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
     let accent = theme.primary.gpui(WINDOW_FG());
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
-    let mut items: Vec<(SharedString, TrackMenuItem, bool)> = Vec::new();
-    if let Some(track) = echo_core::intent::row_track(&app.state, menu.index) {
-        let ctx = echo_core::models::ActionMenuContext::from(track);
-        for action in ctx.actions() {
-            items.push((
-                echo_core::action_menu::label(&app.state, &ctx, action).into(),
-                TrackMenuItem::Action(action),
-                false,
-            ));
-        }
-        // Queue rows have no playlist behind them — `active_tracklist_context` is whatever was
-        // last browsed, so removing would hit the wrong playlist.
-        if app.state.ui.active_view != ActiveView::Queue
-            && app
-                .state
-                .data
-                .active_tracklist_context
-                .as_ref()
-                .is_some_and(|context| context.can_modify_playlist(app.state.data.user_id.as_ref()))
-        {
-            items.push((
-                "Remove from playlist".into(),
-                TrackMenuItem::RemoveFromPlaylist,
-                true,
-            ));
-        }
-    }
+    let items = track_menu_items(app);
+    let selected = menu.selected;
 
-    let index = menu.index;
     div()
         .id("track-menu-backdrop")
         .absolute()
@@ -2508,12 +3234,16 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 cx.notify();
             }),
         )
+        .when(menu.position.is_none(), |el| {
+            // Keyboard-opened: no click to anchor to, so center it like the other modals.
+            el.flex().items_center().justify_center()
+        })
         .child(
             div()
                 .id("track-menu")
-                .absolute()
-                .left(menu.position.x)
-                .top(menu.position.y)
+                .when_some(menu.position, |el, position| {
+                    el.absolute().left(position.x).top(position.y)
+                })
                 .w(px(210.0))
                 .rounded_md()
                 .border_1()
@@ -2525,7 +3255,8 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 .overflow_hidden()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .children(items.into_iter().map(|(label, item, danger)| {
+                .children(items.into_iter().enumerate().map(|(ix, (label, item, danger))| {
+                    let is_selected = ix == selected;
                     div()
                         .id(label.clone())
                         .mx_1()
@@ -2534,10 +3265,13 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
-                        .hover(move |style| style.bg(accent.opacity(0.12)))
+                        .when(is_selected, |el| el.bg(accent.opacity(0.12)))
+                        .when(!is_selected, |el| {
+                            el.hover(move |style| style.bg(accent.opacity(0.12)))
+                        })
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            this.run_track_menu_action(item, index, cx);
+                            this.run_track_menu_action(item, cx);
                         }))
                         .child(label)
                 })),

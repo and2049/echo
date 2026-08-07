@@ -77,7 +77,14 @@ actions!(
         OpenFilter,
         NextMatch,
         PrevMatch,
-        BackOrFocusLibrary
+        BackOrFocusLibrary,
+        ConfirmPrompt,
+        AddToPlaylist,
+        OpenActionMenu,
+        MarkDelete,
+        ToggleSettings,
+        ToggleHelp,
+        EnterVisual
     ]
 );
 
@@ -113,13 +120,18 @@ struct SidebarResize {
     start_width: f32,
 }
 
-/// A right-click menu anchored where the click landed, over track row `index` of the loaded
-/// track list. Kept separate from [`ContextMenuState`]: items and execution share nothing
-/// with the sidebar menu.
+/// The track action menu. Kept separate from [`ContextMenuState`]: items and execution share
+/// nothing with the sidebar menu.
+///
+/// It holds the resolved context rather than a row index because `shift-a` can open it over
+/// the *playing* track when no track row is focused, which no row index describes.
 #[derive(Clone)]
 pub(crate) struct TrackMenuState {
-    pub index: usize,
-    pub position: gpui::Point<Pixels>,
+    pub ctx: echo_core::models::ActionMenuContext,
+    /// Where the right-click landed. `None` when opened from the keyboard, which centers it.
+    pub position: Option<gpui::Point<Pixels>>,
+    /// Keyboard selection within the item list.
+    pub selected: usize,
 }
 
 /// What a track-menu item does. Most entries are the shared action-menu actions; remove is
@@ -157,7 +169,6 @@ pub(crate) struct EchoApp {
     pub(crate) tracks_scroll: UniformListScrollHandle,
     pub(crate) queue_scroll: UniformListScrollHandle,
     pub(crate) search_scroll: UniformListScrollHandle,
-    pub(crate) artists_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
     /// The modal pickers' lists. Plain scroll handles rather than uniform-list ones: their rows
@@ -170,6 +181,23 @@ pub(crate) struct EchoApp {
     pub(crate) sidebar_width: f32,
     /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
     pub(crate) theme_modal_open: bool,
+    /// Keyboard selection within the theme picker, indexing [`views::sorted_theme_names`].
+    /// Desktop-local because the modal itself is.
+    pub(crate) theme_modal_index: usize,
+    /// The track-list sort picker. The TUI reaches the same sorts through `:sort`.
+    pub(crate) sort_menu_open: bool,
+    pub(crate) sort_menu_index: usize,
+    /// Settings sheet. Everything it changes is otherwise only reachable by typing a `:`
+    /// command or editing `config.toml` by hand.
+    pub(crate) settings_open: bool,
+    /// Edit buffer for the local-music folder field, seeded from the config when the sheet
+    /// opens. A hand-rolled field like the setup card's, so no native dialog dependency.
+    pub(crate) settings_path_input: String,
+    pub(crate) settings_path_focus: FocusHandle,
+    pub(crate) settings_scroll: ScrollHandle,
+    /// The `?` cheat sheet. Nothing else in the GUI reveals the `:` commands or vim motions.
+    pub(crate) help_open: bool,
+    pub(crate) help_scroll: ScrollHandle,
     /// Right-click menu over a sidebar row; the TUI reaches these through keys instead.
     pub(crate) context_menu: Option<ContextMenuState>,
     /// Right-click menu over a track row; mutually exclusive with `context_menu`.
@@ -260,6 +288,35 @@ impl EchoApp {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
 
+        let sidebar_width = state
+            .ui
+            .library_config
+            .sidebar_width
+            .unwrap_or(views::SIDEBAR_WIDTH);
+
+        // Save the window rectangle on close so the next launch reopens the same size and
+        // place. All three `WindowBounds` variants carry the restore bounds, so a window closed
+        // while maximized still remembers a sensible windowed size.
+        let this = cx.entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            let bounds = match window.window_bounds() {
+                WindowBounds::Windowed(bounds)
+                | WindowBounds::Maximized(bounds)
+                | WindowBounds::Fullscreen(bounds) => bounds,
+            };
+            this.update(cx, |this: &mut EchoApp, _cx| {
+                this.state.ui.library_config.window_bounds =
+                    Some(echo_core::config::WindowBoundsConfig {
+                        x: f32::from(bounds.origin.x),
+                        y: f32::from(bounds.origin.y),
+                        width: f32::from(bounds.size.width),
+                        height: f32::from(bounds.size.height),
+                    });
+                this.state.save_library_config();
+            });
+            true
+        });
+
         Self {
             state,
             app_tx,
@@ -274,14 +331,22 @@ impl EchoApp {
             tracks_scroll: UniformListScrollHandle::new(),
             queue_scroll: UniformListScrollHandle::new(),
             search_scroll: UniformListScrollHandle::new(),
-            artists_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
-            sidebar_width: views::SIDEBAR_WIDTH,
+            sidebar_width: sidebar_width.clamp(180.0, 480.0),
             theme_modal_open: false,
+            theme_modal_index: 0,
+            sort_menu_open: false,
+            sort_menu_index: 0,
+            settings_open: false,
+            settings_path_input: String::new(),
+            settings_path_focus: cx.focus_handle(),
+            settings_scroll: ScrollHandle::new(),
+            help_open: false,
+            help_scroll: ScrollHandle::new(),
             context_menu: None,
             track_menu: None,
             pending_count: None,
@@ -303,6 +368,15 @@ impl EchoApp {
         if self.state.ui.device_modal_open {
             return self.state.data.devices.len();
         }
+        if self.theme_modal_open {
+            return views::sorted_theme_names(&self.state).len();
+        }
+        if self.track_menu.is_some() {
+            return views::track_menu_items(self).len();
+        }
+        if self.sort_menu_open {
+            return views::SORT_OPTIONS.len();
+        }
         match self.state.ui.active_view {
             ActiveView::TrackList => self.state.data.tracks.len(),
             ActiveView::Queue => self.state.data.queue.len(),
@@ -311,7 +385,6 @@ impl EchoApp {
                 echo_core::app::SearchTab::Albums => self.state.data.search_results.albums.len(),
                 echo_core::app::SearchTab::Artists => self.state.data.search_results.artists.len(),
             },
-            ActiveView::ArtistList => self.state.data.followed_artists.len(),
             ActiveView::ArtistPage => self
                 .state
                 .data
@@ -327,12 +400,27 @@ impl EchoApp {
     }
 
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
+        // A confirm prompt is modal: moving the list behind it would leave the prompt
+        // describing a row that is no longer selected.
+        if echo_core::intent::prompt_active(&self.state) {
+            return;
+        }
+        // An armed `d` belongs to the row it was pressed on; moving off that row disarms it so
+        // the second `d` can't delete something the user never pointed at.
+        self.state.ui.pending_d_press = false;
         if self.state.ui.playlist_add_modal_open {
             self.state.ui.selected_playlist_modal_index = index;
             self.playlist_modal_scroll.scroll_to_item(index);
         } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index = index;
             self.device_modal_scroll.scroll_to_item(index);
+        } else if self.theme_modal_open {
+            self.theme_modal_index = index;
+            self.theme_modal_scroll.scroll_to_item(index);
+        } else if let Some(menu) = self.track_menu.as_mut() {
+            menu.selected = index;
+        } else if self.sort_menu_open {
+            self.sort_menu_index = index;
         } else {
             match self.state.ui.active_view {
                 ActiveView::TrackList => {
@@ -346,10 +434,6 @@ impl EchoApp {
                 ActiveView::SearchResults => {
                     self.state.ui.selected_search_index = index;
                     self.search_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
-                }
-                ActiveView::ArtistList => {
-                    self.state.ui.selected_artist_index = index;
-                    self.artists_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
                 }
                 ActiveView::ArtistPage => {
                     self.state.ui.artist_page_album_index = index;
@@ -374,12 +458,17 @@ impl EchoApp {
             self.state.ui.selected_playlist_modal_index
         } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index
+        } else if self.theme_modal_open {
+            self.theme_modal_index
+        } else if let Some(menu) = self.track_menu.as_ref() {
+            menu.selected
+        } else if self.sort_menu_open {
+            self.sort_menu_index
         } else {
             match self.state.ui.active_view {
                 ActiveView::TrackList => self.state.ui.selected_track_index,
                 ActiveView::Queue => self.state.ui.selected_queue_index,
                 ActiveView::SearchResults => self.state.ui.selected_search_index,
-                ActiveView::ArtistList => self.state.ui.selected_artist_index,
                 ActiveView::ArtistPage => self.state.ui.artist_page_album_index,
                 _ => self.state.ui.selected_playlist_index,
             }
@@ -394,8 +483,28 @@ impl EchoApp {
         }
     }
 
+    /// Accept an open confirm prompt, mirroring the Confirm button in `views::prompt_modal`.
+    /// Bound to Enter (through [`Self::activate_selection`]) and to `y` like the TUI.
+    fn confirm_prompt(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
+        if !echo_core::intent::prompt_active(&self.state) {
+            return;
+        }
+        if let Some(event) = echo_core::intent::confirm_prompt(&mut self.state) {
+            self.dispatch(event);
+        }
+        // A prompt staged from a visual range consumes it, so the range goes away with it.
+        echo_core::intent::exit_visual(&mut self.state);
+        cx.notify();
+    }
+
     /// Enter on the focused list — the same intents the row click handlers use.
     fn activate_selection(&mut self, cx: &mut Context<Self>) {
+        // A confirm prompt sits above everything else, exactly as it does in `dismiss`.
+        if echo_core::intent::prompt_active(&self.state) {
+            self.confirm_prompt(cx);
+            return;
+        }
         self.pending_count = None;
         let event = if self.state.ui.playlist_add_modal_open {
             let index = self.state.ui.selected_playlist_modal_index;
@@ -403,6 +512,23 @@ impl EchoApp {
         } else if self.state.ui.device_modal_open {
             let index = self.state.ui.selected_device_index;
             echo_core::intent::transfer_to_device(&mut self.state, index)
+        } else if self.theme_modal_open {
+            if let Some(name) = views::sorted_theme_names(&self.state).get(self.theme_modal_index) {
+                echo_core::intent::apply_theme(&mut self.state, name);
+            }
+            self.theme_modal_open = false;
+            None
+        } else if let Some(menu) = self.track_menu.as_ref() {
+            let selected = menu.selected;
+            if let Some((_, item, _)) = views::track_menu_items(self).into_iter().nth(selected) {
+                self.run_track_menu_action(item, cx);
+            }
+            None
+        } else if self.sort_menu_open {
+            if let Some((_, arg)) = views::SORT_OPTIONS.get(self.sort_menu_index) {
+                self.apply_sort(arg, cx);
+            }
+            None
         } else {
             match self.state.ui.active_view {
                 ActiveView::TrackList => {
@@ -416,10 +542,6 @@ impl EchoApp {
                 ActiveView::SearchResults => {
                     let index = self.state.ui.selected_search_index;
                     echo_core::intent::activate_search_result(&mut self.state, index)
-                }
-                ActiveView::ArtistList => {
-                    let index = self.state.ui.selected_artist_index;
-                    echo_core::intent::open_followed_artist(&mut self.state, index)
                 }
                 ActiveView::ArtistPage => {
                     let index = self.state.ui.artist_page_album_index;
@@ -469,6 +591,18 @@ impl EchoApp {
 
     fn toggle_themes(&mut self, cx: &mut Context<Self>) {
         self.theme_modal_open = !self.theme_modal_open;
+        if self.theme_modal_open {
+            // Open on the theme that is already applied, so j/k start from where the user is.
+            let active = self.state.ui.library_config.active_theme.clone();
+            self.theme_modal_index = active
+                .and_then(|name| {
+                    views::sorted_theme_names(&self.state)
+                        .iter()
+                        .position(|n| *n == name)
+                })
+                .unwrap_or(0);
+            self.theme_modal_scroll.scroll_to_item(self.theme_modal_index);
+        }
         cx.notify();
     }
 
@@ -476,8 +610,12 @@ impl EchoApp {
     /// as the TUI's back handling, with the desktop-only modals checked first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         self.pending_count = None;
+        self.state.ui.pending_d_press = false;
         if echo_core::intent::prompt_active(&self.state) {
             echo_core::intent::cancel_prompt(&mut self.state);
+        } else if self.in_visual() {
+            // Escape drops the range before it starts walking the view history.
+            echo_core::intent::exit_visual(&mut self.state);
         } else if self.context_menu.is_some() {
             self.context_menu = None;
         } else if self.track_menu.is_some() {
@@ -488,6 +626,12 @@ impl EchoApp {
             self.state.ui.device_modal_open = false;
         } else if self.theme_modal_open {
             self.theme_modal_open = false;
+        } else if self.sort_menu_open {
+            self.sort_menu_open = false;
+        } else if self.settings_open {
+            self.settings_open = false;
+        } else if self.help_open {
+            self.help_open = false;
         } else if self.state.ui.lyrics_modal_open {
             self.state.ui.lyrics_modal_open = false;
         } else if self.state.pop_view_history() {
@@ -518,9 +662,7 @@ impl EchoApp {
             if self.state.data.tracklist_image_url.is_some() {
                 self.dispatch(AppEvent::ReloadHeaderImage);
             }
-        } else if self.state.ui.active_view == ActiveView::Queue
-            || self.state.ui.active_view == ActiveView::ArtistList
-        {
+        } else if self.state.ui.active_view == ActiveView::Queue {
             self.state.ui.active_view = ActiveView::Library;
             if self.state.data.tracklist_image_url.is_some() {
                 self.dispatch(AppEvent::ReloadHeaderImage);
@@ -613,20 +755,14 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Runs a track-menu item against track row `index`, then closes the menu. Remove only
-    /// stages `track_delete_prompt` — the confirm modal fires the actual event.
-    pub(crate) fn run_track_menu_action(
-        &mut self,
-        item: TrackMenuItem,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        self.track_menu = None;
-        let Some(track) = echo_core::intent::row_track(&self.state, index) else {
+    /// Runs a track-menu item against the menu's staged context, then closes the menu. Remove
+    /// only stages `track_delete_prompt` — the confirm modal fires the actual event.
+    pub(crate) fn run_track_menu_action(&mut self, item: TrackMenuItem, cx: &mut Context<Self>) {
+        let Some(menu) = self.track_menu.take() else {
             cx.notify();
             return;
         };
-        let ctx = echo_core::models::ActionMenuContext::from(track);
+        let ctx = menu.ctx;
         match item {
             TrackMenuItem::Action(action) => {
                 if let Some(event) = echo_core::action_menu::run(&mut self.state, ctx, action) {
@@ -648,6 +784,221 @@ impl EchoApp {
         cx.notify();
     }
 
+    /// The track `a` / `shift-a` act on: the focused row where the view has one, otherwise the
+    /// currently playing track. Mirrors the TUI's `A` handler.
+    pub(crate) fn action_target(&self) -> Option<echo_core::models::ActionMenuContext> {
+        use echo_core::models::ActionMenuContext;
+        let ui = &self.state.ui;
+        let data = &self.state.data;
+        let row = match ui.active_view {
+            ActiveView::TrackList => data.tracks.get(ui.selected_track_index),
+            ActiveView::Queue => data.queue.get(ui.selected_queue_index),
+            ActiveView::SearchResults
+                if ui.active_search_tab == echo_core::app::SearchTab::Tracks =>
+            {
+                return data
+                    .search_results
+                    .tracks
+                    .get(ui.selected_search_index)
+                    .map(ActionMenuContext::from);
+            }
+            _ => None,
+        };
+        if let Some(track) = row {
+            return Some(ActionMenuContext::from(track));
+        }
+
+        let playback = &self.state.playback;
+        let track_id = playback.playing_track_id.clone()?;
+        Some(ActionMenuContext {
+            album_name: data
+                .local_library
+                .tracks
+                .iter()
+                .find(|track| track.id == track_id)
+                .map(|track| track.album.clone())
+                .unwrap_or_default(),
+            track_id,
+            source: playback
+                .playing_track_source
+                .unwrap_or(echo_core::models::TrackSource::Spotify),
+            track_name: playback.playing_track_title.clone(),
+            local_path: playback.playing_track_local_path.clone(),
+            album_id: playback.playing_track_album_id.clone(),
+            artist_id: playback.playing_track_artist_id.clone(),
+            artist_name: playback.playing_track_artist.clone(),
+        })
+    }
+
+    /// `shift-a` — the track action menu, centered because there is no click to anchor it to.
+    fn open_action_menu(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
+        if let Some(ctx) = self.action_target() {
+            self.context_menu = None;
+            self.track_menu = Some(TrackMenuState {
+                ctx,
+                position: None,
+                selected: 0,
+            });
+        }
+        cx.notify();
+    }
+
+    /// Whether a visual-mode range is being built.
+    pub(crate) fn in_visual(&self) -> bool {
+        self.state.ui.mode == AppMode::Visual
+    }
+
+    /// Shift-click on row `ix`: anchor at the row that was focused (unless a range is already
+    /// open, which keeps its anchor) and extend the selection to `ix`.
+    pub(crate) fn extend_selection_to(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if !self.in_visual() {
+            let anchor = match self.state.ui.active_view {
+                ActiveView::TrackList => self.state.ui.selected_track_index,
+                ActiveView::Queue => self.state.ui.selected_queue_index,
+                ActiveView::SearchResults => self.state.ui.selected_search_index,
+                ActiveView::Library => self.state.ui.selected_playlist_index,
+                _ => return,
+            };
+            echo_core::intent::set_visual_anchor(&mut self.state, anchor);
+        }
+        self.set_selection(ix, cx);
+        cx.notify();
+    }
+
+    /// `v` — start a range selection, or leave one already in progress.
+    fn toggle_visual(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
+        if self.in_visual() {
+            echo_core::intent::exit_visual(&mut self.state);
+        } else {
+            echo_core::intent::enter_visual(&mut self.state);
+        }
+        cx.notify();
+    }
+
+    /// `a` — add the selection to a playlist, or save the album when an album row is focused.
+    /// The picker commits through `action_menu::commit_playlist_add`, which resolves the
+    /// tracks from the current selection.
+    fn add_to_playlist(&mut self, cx: &mut Context<Self>) {
+        self.pending_count = None;
+        if self.in_visual() {
+            echo_core::intent::add_visual_selection_to_playlist(&mut self.state);
+            cx.notify();
+            return;
+        }
+        let album_id = match self.state.ui.active_view {
+            ActiveView::SearchResults
+                if self.state.ui.active_search_tab == echo_core::app::SearchTab::Albums =>
+            {
+                self.state
+                    .data
+                    .search_results
+                    .albums
+                    .get(self.state.ui.selected_search_index)
+                    .map(|album| (album.id.clone(), album.name.clone()))
+            }
+            _ => None,
+        };
+
+        if let Some((id, name)) = album_id {
+            let language = self.state.ui.library_config.language.clone();
+            self.state.ui.status_message = Some(
+                echo_core::i18n::t("messages.saved_to_library", &language).replace("{}", &name),
+            );
+            self.state.ui.status_message_expiry =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            self.dispatch(AppEvent::SaveAlbums(vec![id]));
+        } else {
+            self.state.ui.playlist_add_modal_open = true;
+            self.state.ui.selected_playlist_modal_index = 0;
+        }
+        cx.notify();
+    }
+
+    /// Open or close the settings sheet, seeding the folder field from the saved config.
+    pub(crate) fn toggle_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
+        if self.settings_open {
+            self.settings_path_input = self
+                .state
+                .ui
+                .library_config
+                .local_music_dir
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+        }
+        cx.notify();
+    }
+
+    /// Run a settings control through the `:` registry. Every command the sheet exposes already
+    /// validates its own input and sets its own status message, so the rows stay declarative.
+    pub(crate) fn run_setting(&mut self, cmd: String, cx: &mut Context<Self>) {
+        if let Some(event) = echo_core::commands::run(&mut self.state, &cmd) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    /// Audio-quality keys have no `:` command, so they write the config directly. They are read
+    /// when the librespot daemon starts, hence the "next launch" note in the sheet.
+    pub(crate) fn set_audio_quality(
+        &mut self,
+        apply: impl FnOnce(&mut echo_core::config::LibraryConfig),
+        cx: &mut Context<Self>,
+    ) {
+        apply(&mut self.state.ui.library_config);
+        self.state.save_library_config();
+        self.state.ui.status_message = Some("Saved — takes effect on next launch".to_string());
+        self.state.ui.status_message_expiry =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        cx.notify();
+    }
+
+    /// Typing in the settings sheet's local-folder field. Enter submits it as `:localpath`.
+    fn handle_settings_path_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event.keystroke.key.as_str() {
+            "enter" => {
+                let path = self.settings_path_input.trim().to_string();
+                if !path.is_empty() {
+                    self.run_setting(format!("localpath {path}"), cx);
+                }
+                window.focus(&self.focus_handle.clone(), cx);
+            }
+            "escape" => window.focus(&self.focus_handle.clone(), cx),
+            "backspace" => {
+                self.settings_path_input.pop();
+            }
+            "v" if event.keystroke.modifiers.control => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.settings_path_input.push_str(text.trim());
+                }
+            }
+            _ => {
+                if let Some(text) = event.keystroke.key_char.as_deref() {
+                    self.settings_path_input.push_str(text);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Apply a sort from the picker by running the matching `:sort` command, so the desktop
+    /// and the TUI cannot drift apart on what each option does.
+    pub(crate) fn apply_sort(&mut self, arg: &str, cx: &mut Context<Self>) {
+        self.sort_menu_open = false;
+        if let Some(event) = echo_core::commands::run(&mut self.state, &format!("sort {arg}")) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
     /// Consume the pending vim count, defaulting to a single step.
     fn take_count(&mut self) -> isize {
         self.pending_count.take().unwrap_or(1).max(1) as isize
@@ -660,6 +1011,9 @@ impl EchoApp {
             || self.state.ui.playlist_add_modal_open
             || self.state.ui.device_modal_open
             || self.theme_modal_open
+            || self.sort_menu_open
+            || self.settings_open
+            || self.help_open
             || self.state.ui.lyrics_modal_open
     }
 
@@ -830,6 +1184,14 @@ impl EchoApp {
     }
 
     fn add_to_queue(&mut self, cx: &mut Context<Self>) {
+        // In visual mode `q` queues the whole range, matching the TUI.
+        if self.in_visual() {
+            if let Some(event) = echo_core::intent::queue_visual_selection(&mut self.state) {
+                self.dispatch(event);
+            }
+            cx.notify();
+            return;
+        }
         if let Some(event) = echo_core::intent::queue_selected_track(&self.state) {
             self.dispatch(event);
             self.state.ui.status_message = Some("Added to queue".to_string());
@@ -868,6 +1230,7 @@ impl EchoApp {
     /// library tab — those entries live in the sidebar — so the library just flips between
     /// Playlists and Albums.
     fn cycle_tab(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.pending_d_press = false;
         match self.state.ui.active_view {
             ActiveView::SearchResults => {
                 self.state.ui.active_search_tab = match self.state.ui.active_search_tab {
@@ -1058,11 +1421,13 @@ impl EchoApp {
     }
 
     fn focus_library(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.pending_d_press = false;
         self.state.ui.active_view = ActiveView::Library;
         cx.notify();
     }
 
     fn focus_tracks(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.pending_d_press = false;
         // Nothing to focus before a context has been opened.
         if !self.state.data.tracks.is_empty() || self.state.data.active_tracklist_context.is_some()
         {
@@ -1184,7 +1549,7 @@ impl EchoApp {
     }
 
     // Drag-to-resize of the library sidebar: mouse-down on its right edge starts it, window-level
-    // mouse moves update the width optimistically, and release just settles it (width persists).
+    // mouse moves update the width optimistically, and release settles and saves it.
 
     fn begin_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
         self.sidebar_resizing = Some(SidebarResize {
@@ -1203,13 +1568,18 @@ impl EchoApp {
 
     fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
         if self.sidebar_resizing.take().is_some() {
+            // Saved on release rather than on every pointer move — a drag is one decision, not
+            // a few hundred config writes.
+            self.state.ui.library_config.sidebar_width = Some(self.sidebar_width);
+            self.state.save_library_config();
             cx.notify();
         }
     }
 
-        /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
+    /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
     /// TUI's full-page artist list, so there is no ArtistList view to return to.
-    pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {        self.state.ui.active_view = ActiveView::Library;
+    pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.active_view = ActiveView::Library;
         self.state.clear_pending_artist_page();
         self.dispatch(AppEvent::CancelArtistPageLoad);
         cx.notify();
@@ -1687,6 +2057,19 @@ const PLAYBACK_ROW_HEIGHT: f32 = 40.0;
 
 /// A small round icon button for the playback bar. `icon` is an embedded SVG path (see
 /// [`assets`]), tinted with `color` like any themed text.
+/// The `:sort` argument that produces `sort`, so the picker can mark the active option.
+pub(crate) fn sort_arg(sort: echo_core::app::TrackSort) -> &'static str {
+    use echo_core::app::TrackSort;
+    match sort {
+        TrackSort::Original => "original",
+        TrackSort::Title => "title",
+        TrackSort::Artist => "artist",
+        TrackSort::Album => "album",
+        TrackSort::Duration => "duration",
+        TrackSort::Added => "added",
+    }
+}
+
 pub(crate) fn icon_button(
     id: &'static str,
     icon: &'static str,
@@ -1717,19 +2100,33 @@ impl Render for EchoApp {
         // Built ahead of the chain because they borrow self mutably, like the other views.
         let command_bar = matches!(self.state.ui.mode, AppMode::Command | AppMode::Search)
             .then(|| self.render_command_bar(cx).into_any_element());
-        let status_line = (self.state.ui.mode == AppMode::Normal)
-            .then(|| self.state.ui.status_message.clone())
-            .flatten()
-            .map(|message| {
-                div()
-                    .flex_none()
-                    .px_4()
-                    .py_1()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(SharedString::from(message))
-                    .into_any_element()
-            });
+        // Visual mode says so on the status line: without a mode indicator a range selection
+        // looks like the list has simply highlighted several rows for no reason.
+        let status_line = match self.state.ui.mode {
+            AppMode::Visual => Some(
+                self.state
+                    .ui
+                    .status_message
+                    .clone()
+                    .map(|message| format!("-- VISUAL --  {message}"))
+                    .unwrap_or_else(|| {
+                        "-- VISUAL --  q queue · a add to playlist · dd delete · esc cancel"
+                            .to_string()
+                    }),
+            ),
+            AppMode::Normal => self.state.ui.status_message.clone(),
+            _ => None,
+        }
+        .map(|message| {
+            div()
+                .flex_none()
+                .px_4()
+                .py_1()
+                .text_xs()
+                .text_color(muted)
+                .child(SharedString::from(message))
+                .into_any_element()
+        });
         let lyrics_modal = self
             .state
             .ui
@@ -1743,6 +2140,15 @@ impl Render for EchoApp {
             .ui
             .device_modal_open
             .then(|| views::device_modal(self, cx).into_any_element());
+        let sort_menu = self
+            .sort_menu_open
+            .then(|| views::sort_menu(self, cx).into_any_element());
+        let settings_modal = self
+            .settings_open
+            .then(|| views::settings_modal(self, window, cx).into_any_element());
+        let help_modal = self
+            .help_open
+            .then(|| views::help_modal(self, cx).into_any_element());
         let context_menu = self
             .context_menu
             .is_some()
@@ -1810,6 +2216,30 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &SelectFirst, _window, cx| this.set_selection(0, cx)))
             .on_action(cx.listener(|this, _: &SelectLast, _window, cx| this.select_last(cx)))
             .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
+            .on_action(cx.listener(|this, _: &ConfirmPrompt, _window, cx| this.confirm_prompt(cx)))
+            .on_action(cx.listener(|this, _: &AddToPlaylist, _window, cx| {
+                this.add_to_playlist(cx)
+            }))
+            .on_action(cx.listener(|this, _: &OpenActionMenu, _window, cx| {
+                this.open_action_menu(cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSettings, _window, cx| {
+                this.toggle_settings(cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleHelp, _window, cx| {
+                this.help_open = !this.help_open;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &MarkDelete, _window, cx| {
+                this.pending_count = None;
+                if this.in_visual() {
+                    echo_core::intent::delete_visual_selection(&mut this.state);
+                } else {
+                    echo_core::intent::mark_selected_for_delete(&mut this.state);
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &EnterVisual, _window, cx| this.toggle_visual(cx)))
             .on_action(cx.listener(|this, _: &FocusLibrary, _window, cx| this.focus_library(cx)))
             .on_action(cx.listener(|this, _: &FocusTracks, _window, cx| this.focus_tracks(cx)))
             .on_action(cx.listener(|this, _: &NextTrack, _window, cx| this.play_next(cx)))
@@ -1934,6 +2364,9 @@ impl Render for EchoApp {
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
             .when_some(playlist_add_modal, |el, modal| el.child(modal))
+            .when_some(sort_menu, |el, menu| el.child(menu))
+            .when_some(settings_modal, |el, modal| el.child(modal))
+            .when_some(help_modal, |el, modal| el.child(modal))
             .when_some(context_menu, |el, menu| el.child(menu))
             .when_some(track_menu, |el, menu| el.child(menu))
             .when_some(prompt_modal, |el, modal| el.child(modal))
@@ -1953,6 +2386,7 @@ fn main() {
 
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();
+    let saved_bounds = boot.config.library.window_bounds;
 
     application().with_assets(assets::Assets).run(move |cx: &mut App| {
         cx.on_action(|_: &Quit, cx| cx.quit());
@@ -1972,6 +2406,8 @@ fn main() {
             KeyBinding::new("enter", Activate, LIST_KEYS),
             // `z` is the TUI's Enter alias.
             KeyBinding::new("z", Activate, LIST_KEYS),
+            // The TUI answers confirm prompts with `y`; Enter reaches the same handler.
+            KeyBinding::new("y", ConfirmPrompt, LIST_KEYS),
             KeyBinding::new("left", FocusLibrary, LIST_KEYS),
             KeyBinding::new("right", FocusTracks, LIST_KEYS),
             KeyBinding::new("l", FocusTracks, LIST_KEYS),
@@ -2009,6 +2445,10 @@ fn main() {
             KeyBinding::new("shift--", VolumeDownBig, LIST_KEYS),
             // Views, prompts and toggles.
             KeyBinding::new("q", AddToQueue, LIST_KEYS),
+            KeyBinding::new("a", AddToPlaylist, LIST_KEYS),
+            KeyBinding::new("shift-a", OpenActionMenu, LIST_KEYS),
+            // `dd`: the first press arms, the second stages the confirm prompt.
+            KeyBinding::new("d", MarkDelete, LIST_KEYS),
             KeyBinding::new("shift-q", ToggleQueue, LIST_KEYS),
             KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
             KeyBinding::new("shift-r", Refresh, LIST_KEYS),
@@ -2026,6 +2466,11 @@ fn main() {
             KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
             KeyBinding::new("ctrl-shift-l", ToggleInlineLyrics, LIST_KEYS),
             KeyBinding::new("t", ToggleThemes, LIST_KEYS),
+            // The platform-conventional preferences shortcut; global so it also works while
+            // the search box has focus.
+            KeyBinding::new("ctrl-,", ToggleSettings, None),
+            KeyBinding::new("?", ToggleHelp, LIST_KEYS),
+            KeyBinding::new("v", EnterVisual, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {
@@ -2034,7 +2479,20 @@ fn main() {
         })
         .detach();
 
-        let bounds = Bounds::centered(None, size(px(1100.0), px(720.0)), cx);
+        // Restore the saved rectangle, but only if it still lands on a display — a window saved
+        // on a monitor that is no longer attached would otherwise open off-screen with no way
+        // to drag it back.
+        let bounds = saved_bounds
+            .map(|saved| Bounds {
+                origin: gpui::point(px(saved.x), px(saved.y)),
+                size: size(px(saved.width), px(saved.height)),
+            })
+            .filter(|bounds| {
+                cx.displays()
+                    .iter()
+                    .any(|display| display.bounds().intersects(bounds))
+            })
+            .unwrap_or_else(|| Bounds::centered(None, size(px(1100.0), px(720.0)), cx));
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
