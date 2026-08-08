@@ -159,10 +159,10 @@ impl gpui::Render for DragPreview {
     }
 }
 
-/// True for the sidebar rows drag-and-drop must not move (their position is fixed or comes
-/// from the local store, mirroring `echo_core::intent`'s own check).
+/// True for the sidebar rows drag-and-drop must not move (their position is fixed, mirroring
+/// `echo_core::intent`'s own check).
 fn is_fixed_library_row(id: &str) -> bool {
-    id == "LIKED_SONGS" || id == "local-library" || id.starts_with("local-playlist:")
+    id == "LIKED_SONGS" || id == "local-library"
 }
 
 /// The custom titlebar: themed like the rest of the window, draggable, with caption buttons
@@ -562,9 +562,20 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 }
                             });
 
-                            // Regular Spotify playlists can be dragged between folders, the
-                            // pinned block and the loose list; every playlist-tab row is a
-                            // drop target (the intent rejects invalid ones).
+                            // Local playlists look like Spotify ones in the sidebar, so they are
+                            // tagged to keep the distinction visible.
+                            let local_badge: Option<SharedString> = (tab
+                                == LibraryTab::Playlists
+                                && matches!(
+                                    &this.state.data.library_view[ix],
+                                    LibraryNode::Playlist { playlist, .. }
+                                        if playlist.id.starts_with("local-playlist:")
+                                ))
+                            .then(|| tr(&this.state, "desktop.local_badge"));
+
+                            // Playlists can be dragged between folders, the pinned block and the
+                            // loose list; every playlist-tab row is a drop target (the intent
+                            // rejects invalid ones).
                             let drag_source: Option<(String, SharedString)> =
                                 if tab == LibraryTab::Playlists {
                                     match &this.state.data.library_view[ix] {
@@ -702,6 +713,16 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         .whitespace_nowrap()
                                         .child(label),
                                 )
+                                .when_some(local_badge, |el, badge| {
+                                    el.child(
+                                        div()
+                                            .ml_auto()
+                                            .flex_none()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(badge),
+                                    )
+                                })
                             })
                         })
                         .collect();
@@ -3628,7 +3649,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 items.push((tr(&app.state, "desktop.menu.open"), MenuAction::Open, false));
                 let special = playlist.id == "LIKED_SONGS" || playlist.id == "local-library";
                 let local = playlist.id.starts_with("local-playlist:");
-                if !special && !local {
+                if !special {
                     let pinned = app.state.ui.library_config.pinned.contains(&playlist.id);
                     items.push((
                         tr(

@@ -294,8 +294,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             echo_core::intent::next_search_match(state, false);
         }
         // `x` cuts a playlist into the operation register so `p` can paste it into a folder.
-        // Only loose Spotify playlists can be cut: the synthetic rows and local playlists have
-        // no folder membership to move.
+        // The synthetic rows are excluded: their position is fixed.
         KeyCode::Char('x') if state.ui.active_view == ActiveView::Library => {
             if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
                 return None;
@@ -304,7 +303,6 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.data.library_view.get(state.ui.selected_playlist_index)
                 && playlist.id != "LIKED_SONGS"
                 && playlist.id != "local-library"
-                && !playlist.id.starts_with("local-playlist:")
             {
                 let playlist_id = playlist.id.clone();
                 state.ui.operation_register = vec![playlist_id.clone()];

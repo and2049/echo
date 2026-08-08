@@ -595,25 +595,26 @@ impl AppState {
             });
         }
 
-        for playlist in self
+        // Local playlists go through the same pinned/folder/loose pipeline as Spotify ones so
+        // they can be pinned, foldered and reordered identically. Listing them first keeps them
+        // at the top of the loose block under the default (manual) sort.
+        let local_playlists = self
             .data
             .local_playlists
-            .to_library_playlists(&self.data.local_library)
-        {
-            view.push(LibraryNode::Playlist {
-                playlist,
-                indent: 0,
-            });
-        }
+            .to_library_playlists(&self.data.local_library);
+        let all: Vec<&crate::models::Playlist> = local_playlists
+            .iter()
+            .chain(self.data.playlists.iter())
+            .collect();
 
         let pinned_set: HashSet<String> = self.ui.library_config.pinned.iter().cloned().collect();
         let mut folder_playlists: HashSet<String> = HashSet::new();
 
         // 1. Pinned Playlists
         for pid in &self.ui.library_config.pinned {
-            if let Some(p) = self.data.playlists.iter().find(|p| &p.id == pid) {
+            if let Some(p) = all.iter().find(|p| &p.id == pid) {
                 view.push(LibraryNode::Playlist {
-                    playlist: p.clone(),
+                    playlist: (*p).clone(),
                     indent: 0,
                 });
             }
@@ -627,9 +628,9 @@ impl AppState {
             view.push(LibraryNode::Folder(folder.clone()));
             if folder.is_open {
                 for pid in &folder.playlists {
-                    if let Some(p) = self.data.playlists.iter().find(|p| &p.id == pid) {
+                    if let Some(p) = all.iter().find(|p| &p.id == pid) {
                         view.push(LibraryNode::Playlist {
-                            playlist: p.clone(),
+                            playlist: (*p).clone(),
                             indent: 1,
                         });
                     }
@@ -638,12 +639,10 @@ impl AppState {
         }
 
         // 3. Loose playlists
-        let mut loose: Vec<_> = self
-            .data
-            .playlists
+        let mut loose: Vec<_> = all
             .iter()
             .filter(|p| !pinned_set.contains(&p.id) && !folder_playlists.contains(&p.id))
-            .cloned()
+            .map(|p| (*p).clone())
             .collect();
 
         match self.ui.library_config.sort_mode {
