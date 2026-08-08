@@ -57,6 +57,66 @@ pub fn open_library_entry(state: &mut AppState, index: usize) -> Option<AppEvent
     Some(AppEvent::LoadContextTracks(context))
 }
 
+/// Starts playing library row `index` in place — a Spotify playlist plays as a context from
+/// the top, local collections play their local files. Folders and rows the context-playback
+/// API can't start (Liked Songs) return None.
+pub fn play_library_entry(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    let node = state.data.library_view.get(index).cloned()?;
+    let LibraryNode::Playlist { playlist, .. } = node else {
+        return None;
+    };
+    state.ui.selected_playlist_index = index;
+    if playlist.id == "LIKED_SONGS" {
+        return None;
+    }
+    if playlist.id == "local-library" {
+        return play_local_collection(state.data.local_library.to_tracks());
+    }
+    if playlist.id.starts_with("local-playlist:") {
+        let tracks = state
+            .data
+            .local_playlists
+            .tracks_for_playlist(&playlist.id, &state.data.local_library);
+        return play_local_collection(tracks);
+    }
+    Some(AppEvent::PlayContext {
+        context_id: playlist.id,
+        is_album: false,
+    })
+}
+
+/// Starts playing saved album `index` from the top.
+pub fn play_album_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    let album = state.data.saved_albums.get(index)?;
+    state.ui.selected_playlist_index = index;
+    Some(AppEvent::PlayContext {
+        context_id: album.id.clone(),
+        is_album: true,
+    })
+}
+
+/// Plays a local collection from its first playable file. Spotify entries mixed into a local
+/// playlist are skipped — the local engine can only feed the queue from files.
+fn play_local_collection(tracks: Vec<Track>) -> Option<AppEvent> {
+    let tracks: Vec<Track> = tracks
+        .into_iter()
+        .filter(|track| track.source == TrackSource::Local && track.local_path.is_some())
+        .collect();
+    let first = tracks.first()?.clone();
+    Some(AppEvent::PlayTrack {
+        target: PlaybackTarget::LocalContext {
+            tracks,
+            selected_index: 0,
+        },
+        track_id: first.id,
+        title: first.name,
+        artist: first.artist,
+        duration_ms: first.duration_ms,
+        image_url: first.image_url,
+        album_id: first.album_id,
+    })
+}
+
 /// Activates row `index` of the saved-albums list.
 pub fn open_album(state: &mut AppState, index: usize) -> Option<AppEvent> {
     let album = state.data.saved_albums.get(index)?;

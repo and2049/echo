@@ -626,9 +626,29 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         },
                                     ))
                                 })
-                                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                                .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     this.state.ui.selected_playlist_index = ix;
-                                    let event = match this.state.ui.active_library_tab {
+                                    let tab = this.state.ui.active_library_tab;
+                                    // The first click of a double-click already opened the
+                                    // entry; the second one starts it playing.
+                                    if event.click_count() >= 2 {
+                                        let play = match tab {
+                                            LibraryTab::Albums => {
+                                                echo_core::intent::play_album_at(&mut this.state, ix)
+                                            }
+                                            LibraryTab::Artists => None,
+                                            _ => echo_core::intent::play_library_entry(
+                                                &mut this.state,
+                                                ix,
+                                            ),
+                                        };
+                                        if let Some(event) = play {
+                                            this.dispatch(event);
+                                        }
+                                        cx.notify();
+                                        return;
+                                    }
+                                    let event = match tab {
                                         LibraryTab::Albums => {
                                             echo_core::intent::open_album(&mut this.state, ix)
                                         }
