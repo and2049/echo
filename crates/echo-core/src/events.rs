@@ -19,6 +19,12 @@ pub enum AppEvent {
         image_url: Option<String>,
         album_id: Option<String>,
     },
+    /// Start a whole Spotify playlist/album from the top — context playback with no track
+    /// offset, so it works before the context's tracks are loaded.
+    PlayContext {
+        context_id: String,
+        is_album: bool,
+    },
     StartAuth,
     Quit,
     TogglePlayback(bool),

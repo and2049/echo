@@ -38,6 +38,7 @@ const PLAY_DEBOUNCE: Duration = Duration::from_millis(300);
 enum PlayDebounceKey {
     TogglePlayback,
     PlayTrack(String),
+    PlayContext(String),
 }
 
 struct PlayGuard {
@@ -1088,6 +1089,44 @@ impl Worker {
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayTrack failed: {:?}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::PlayContext { context_id, is_album } => {
+                                if let Some(ref mut sp) = spotify_opt {
+                                    let now = Instant::now();
+                                    let debounce_key = PlayDebounceKey::PlayContext(context_id.clone());
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
+                                        if *last_key == debounce_key
+                                            && now.duration_since(*last_time) < PLAY_DEBOUNCE
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    self.play_debounce = Some((debounce_key, now));
+
+                                    let _guard = PlayGuard::try_acquire(&self.play_in_flight);
+                                    if _guard.is_none() {
+                                        continue;
+                                    }
+
+                                    if active_playback_source == Some(ActivePlaybackSource::Local) {
+                                        local_playback.stop();
+                                    }
+                                    active_playback_source = Some(ActivePlaybackSource::Spotify);
+                                    match sp.play_context(&context_id, is_album).await {
+                                        Ok(_) => {
+                                            is_playing.store(true, std::sync::atomic::Ordering::SeqCst);
+                                            if self.spotify_output_available.load(Ordering::SeqCst) {
+                                                emit_audio_output_recovered(&self.tx).await;
+                                            }
+                                            // No track metadata here — the status sync fills in
+                                            // the now-playing item.
+                                            Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), current_track_id.clone(), true, self.spotify_output_available.clone());
+                                        }
+                                        Err(e) => {
+                                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayContext failed: {:?}", e));
                                         }
                                     }
                                 }

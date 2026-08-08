@@ -391,6 +391,33 @@ impl SpotifyWorker {
         Ok(())
     }
 
+    /// Starts a playlist/album from the top — context playback with no track offset.
+    pub async fn play_context(&mut self, context_id: &str, is_album: bool) -> Result<()> {
+        let result = self.play_context_inner(context_id, is_album).await;
+        match result {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                self.play_context_inner(context_id, is_album).await
+            }
+            other => other,
+        }
+    }
+
+    async fn play_context_inner(&mut self, context_id: &str, is_album: bool) -> Result<()> {
+        let target_device = self.get_device_id().await;
+        let context_uri = if is_album {
+            rspotify::model::PlayContextId::Album(rspotify::model::AlbumId::from_id(context_id)?)
+        } else {
+            rspotify::model::PlayContextId::Playlist(rspotify::model::PlaylistId::from_id(
+                context_id,
+            )?)
+        };
+        self.client
+            .start_context_playback(context_uri, target_device.as_deref(), None, None)
+            .await?;
+        Ok(())
+    }
+
     pub async fn play_track(
         &mut self,
         context_id: &str,
