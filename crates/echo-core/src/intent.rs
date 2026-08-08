@@ -821,10 +821,10 @@ pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
 // Library drag-and-drop: moving playlists between folders, the pinned section and the loose
 // list, plus reordering within each. Positions are visible `library_view` row indices.
 
-/// True for the fixed rows drag-and-drop must leave alone: Liked Songs, the local-library
-/// entry and local playlists (whose order comes from the local store, not the config).
+/// True for the fixed rows drag-and-drop must leave alone: Liked Songs and the local-library
+/// entry. Local playlists are ordinary draggable rows.
 fn is_fixed_library_row(id: &str) -> bool {
-    id == "LIKED_SONGS" || id == "local-library" || id.starts_with("local-playlist:")
+    id == "LIKED_SONGS" || id == "local-library"
 }
 
 /// Drops the playlist `src_id` onto visible row `dest_index`:
@@ -1750,6 +1750,49 @@ mod tests {
         assert!(state.data.library_view.iter().any(|node| matches!(
             node,
             LibraryNode::Playlist { playlist, indent: 1 } if playlist.id == "a"
+        )));
+    }
+
+    #[test]
+    fn a_local_playlist_can_be_dragged_into_a_folder() {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.playlists = vec![library_playlist("a")];
+        state.data.local_playlists = crate::models::LocalPlaylists {
+            playlists: vec![crate::models::LocalPlaylist {
+                id: "local-playlist:one".to_string(),
+                name: "Road".to_string(),
+                created_unix_secs: 1,
+                updated_unix_secs: 1,
+                entries: Vec::new(),
+            }],
+        };
+        state.ui.library_config.folders.push(crate::config::Folder {
+            name: "Mix".to_string(),
+            is_open: true,
+            playlists: vec![],
+        });
+        state.compute_library_view();
+        let folder_row = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(node, LibraryNode::Folder(_)))
+            .expect("folder row");
+
+        assert!(move_library_playlist(
+            &mut state,
+            "local-playlist:one",
+            folder_row
+        ));
+
+        assert_eq!(
+            state.ui.library_config.folders[0].playlists,
+            ["local-playlist:one"]
+        );
+        assert!(state.data.library_view.iter().any(|node| matches!(
+            node,
+            LibraryNode::Playlist { playlist, indent: 1 } if playlist.id == "local-playlist:one"
         )));
     }
 

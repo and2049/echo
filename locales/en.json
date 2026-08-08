@@ -61,6 +61,7 @@
   "desktop": {
     "top_tracks": "Top Tracks",
     "recently_played": "Recently Played",
+    "local_badge": "local",
     "popular": "Popular",
     "albums_section": "Albums",
     "top_artists": "Top Artists",
