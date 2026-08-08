@@ -28,6 +28,7 @@ pub struct UIState {
     // Selection indices
     pub selected_playlist_index: usize,
     pub selected_artist_index: usize,
+    pub selected_whats_new_index: usize,
     pub selected_track_index: usize,
     pub selected_search_index: usize,
     pub selected_queue_index: usize,
@@ -103,6 +104,7 @@ impl UIState {
             pending_browse_open: None,
             selected_playlist_index: 0,
             selected_artist_index: 0,
+            selected_whats_new_index: 0,
             selected_track_index: 0,
             selected_search_index: 0,
             selected_queue_index: 0,
@@ -258,6 +260,9 @@ pub struct DataState {
     pub top_artists: Vec<crate::models::Artist>,
     pub recently_played: Vec<Track>,
     pub followed_artists: Vec<crate::models::Artist>,
+    pub whats_new: Vec<crate::models::Album>,
+    /// `(done, total)` artists scanned by an in-flight What's New refresh; `None` when idle.
+    pub whats_new_progress: Option<(usize, usize)>,
     // Search
     pub search_results: SearchResults,
     // TrackList
@@ -291,6 +296,8 @@ impl DataState {
             top_artists: Vec::new(),
             recently_played: Vec::new(),
             followed_artists: Vec::new(),
+            whats_new: Vec::new(),
+            whats_new_progress: None,
             search_results: SearchResults::default(),
             tracks: Vec::new(),
             original_tracks: Vec::new(),
@@ -328,6 +335,7 @@ pub enum ActiveView {
     Devices,
     ArtistList,
     ArtistPage,
+    WhatsNew,
 }
 
 #[derive(Clone)]
@@ -338,6 +346,7 @@ pub struct NavigationSnapshot {
     selected_search_index: usize,
     selected_queue_index: usize,
     selected_artist_index: usize,
+    selected_whats_new_index: usize,
     artist_page_album_index: usize,
     artist_list_source: ArtistListSource,
     active_library_tab: LibraryTab,
@@ -461,6 +470,7 @@ impl AppState {
                 ActiveView::Devices => self.ui.selected_device_index,
                 ActiveView::ArtistList => self.ui.selected_artist_index,
                 ActiveView::ArtistPage => self.ui.artist_page_album_index,
+                ActiveView::WhatsNew => self.ui.selected_whats_new_index,
             };
             Some((std::cmp::min(start, current), std::cmp::max(start, current)))
         } else {
@@ -507,6 +517,7 @@ impl AppState {
             selected_search_index: self.ui.selected_search_index,
             selected_queue_index: self.ui.selected_queue_index,
             selected_artist_index: self.ui.selected_artist_index,
+            selected_whats_new_index: self.ui.selected_whats_new_index,
             artist_page_album_index: self.ui.artist_page_album_index,
             artist_list_source: self.ui.artist_list_source,
             active_library_tab: self.ui.active_library_tab,
@@ -534,6 +545,7 @@ impl AppState {
         self.ui.selected_search_index = snapshot.selected_search_index;
         self.ui.selected_queue_index = snapshot.selected_queue_index;
         self.ui.selected_artist_index = snapshot.selected_artist_index;
+        self.ui.selected_whats_new_index = snapshot.selected_whats_new_index;
         self.ui.artist_page_album_index = snapshot.artist_page_album_index;
         self.ui.artist_list_source = snapshot.artist_list_source;
         self.ui.active_library_tab = snapshot.active_library_tab;
@@ -829,10 +841,29 @@ impl AppState {
     }
 }
 
+/// The number shown in a list's index column, shared by both frontends: `base` shifts the
+/// count (0- or 1-based), `relative` shows vim-style distances from the selected row (which
+/// keeps its absolute number).
+pub fn displayed_track_number(index: usize, selected: usize, base: isize, relative: bool) -> isize {
+    if relative && index != selected {
+        index.abs_diff(selected) as isize
+    } else {
+        index as isize + base
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::TrackListContextKind;
+
+    #[test]
+    fn relative_numbers_keep_current_absolute_and_show_distance_elsewhere() {
+        assert_eq!(displayed_track_number(4, 4, 1, true), 5);
+        assert_eq!(displayed_track_number(1, 4, 1, true), 3);
+        assert_eq!(displayed_track_number(7, 4, 1, true), 3);
+        assert_eq!(displayed_track_number(1, 4, 1, false), 2);
+    }
 
     #[test]
     fn begin_tracklist_load_preserves_album_context() {

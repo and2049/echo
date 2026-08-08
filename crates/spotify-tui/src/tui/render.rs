@@ -62,6 +62,8 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
         crate::tui::library::render_artist_list(frame, state, tracks_area);
     } else if state.ui.active_view == ActiveView::ArtistPage {
         crate::tui::library::render_artist_page(frame, state, tracks_area);
+    } else if state.ui.active_view == ActiveView::WhatsNew {
+        crate::tui::library::render_whats_new(frame, state, tracks_area);
     } else {
         crate::tui::library::render_track_list(frame, state, tracks_area);
     }

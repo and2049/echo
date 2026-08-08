@@ -172,6 +172,7 @@ mod tests {
                 image_url: None,
                 thumb_url: None,
                 release_year: "2024".to_string(),
+                release_date: None,
                 track_count: None,
             }],
         );
@@ -248,6 +249,7 @@ mod tests {
                 image_url: None,
                 thumb_url: None,
                 release_year: "2024".to_string(),
+                release_date: None,
                 track_count: None,
             }],
         );

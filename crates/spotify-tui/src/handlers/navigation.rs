@@ -124,7 +124,7 @@ fn selected_list_len(state: &AppState) -> usize {
         ActiveView::Library => match state.ui.active_library_tab {
             LibraryTab::Playlists => state.data.library_view.len(),
             LibraryTab::Albums => state.data.saved_albums.len(),
-            LibraryTab::Browse => 4,
+            LibraryTab::Browse => 5,
             // Desktop-only tab; unreachable in the TUI.
             LibraryTab::Artists => state.data.followed_artists.len(),
         },
@@ -143,6 +143,7 @@ fn selected_list_len(state: &AppState) -> usize {
             .artist_page_data
             .as_ref()
             .map_or(0, |data| data.albums.len()),
+        ActiveView::WhatsNew => state.data.whats_new.len(),
     }
 }
 
@@ -155,6 +156,7 @@ fn selected_index(state: &AppState) -> usize {
         ActiveView::Devices => state.ui.selected_device_index,
         ActiveView::ArtistList => state.ui.selected_artist_index,
         ActiveView::ArtistPage => state.ui.artist_page_album_index,
+        ActiveView::WhatsNew => state.ui.selected_whats_new_index,
     }
 }
 
@@ -167,6 +169,7 @@ fn set_selected_index(state: &mut AppState, index: usize) {
         ActiveView::Devices => state.ui.selected_device_index = index,
         ActiveView::ArtistList => state.ui.selected_artist_index = index,
         ActiveView::ArtistPage => state.ui.artist_page_album_index = index,
+        ActiveView::WhatsNew => state.ui.selected_whats_new_index = index,
     }
 }
 

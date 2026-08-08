@@ -57,6 +57,8 @@ pub struct CacheData {
     #[serde(default)]
     pub recently_played: Option<CachedEntry<Vec<Track>>>,
     #[serde(default)]
+    pub whats_new: Option<CachedEntry<Vec<Album>>>,
+    #[serde(default)]
     pub context_tracks: HashMap<String, CachedEntry<ContextTracksCacheEntry>>,
     #[serde(default)]
     pub artist_pages: HashMap<String, CachedEntry<ArtistPageData>>,
@@ -82,6 +84,7 @@ pub const FOLLOWED_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 6
 pub const TOP_TRACKS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const TOP_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const RECENTLY_PLAYED_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
+pub const WHATS_NEW_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const ARTIST_PAGE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub const ARTIST_ALBUMS_REFRESH_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const ALBUM_TRACKS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -181,6 +184,17 @@ impl CacheData {
     pub fn set_recently_played(&mut self, tracks: Vec<Track>) {
         self.clear_cooldown("recently_played");
         self.recently_played = Some(CachedEntry::new(tracks));
+    }
+
+    pub fn get_whats_new(&self) -> Option<Vec<Album>> {
+        self.whats_new
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(WHATS_NEW_CACHE_TTL))
+    }
+
+    pub fn set_whats_new(&mut self, albums: Vec<Album>) {
+        self.clear_cooldown("whats_new");
+        self.whats_new = Some(CachedEntry::new(albums));
     }
 
     pub fn get_context_tracks(
@@ -856,6 +870,7 @@ mod tests {
                 image_url: None,
                 thumb_url: None,
                 release_year: "2024".to_string(),
+                release_date: None,
                 track_count,
             }],
             top_tracks: Vec::new(),

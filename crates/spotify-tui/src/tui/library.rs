@@ -1,4 +1,4 @@
-use echo_core::app::{ActiveView, AppMode, AppState};
+use echo_core::app::{ActiveView, AppMode, AppState, displayed_track_number};
 use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     DURATION_COLUMN_WIDTH, format_duration_text, format_time, padded_library_list,
@@ -17,7 +17,7 @@ use ratatui::{
     },
 };
 
-pub use crate::tui::artist::{render_artist_list, render_artist_page};
+pub use crate::tui::artist::{render_artist_list, render_artist_page, render_whats_new};
 
 const ECHO_LOGO: [&str; 6] = [
     "███████╗ ██████╗██╗  ██╗ ██████╗               ██████╗ ███████╗",
@@ -227,7 +227,13 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
         let items: Vec<ListItem> =
-            vec!["📈 Top Tracks", "🕒 Recently Played", "👤 Followed Artists", "⭐ Top Artists"]
+            vec![
+                "📈 Top Tracks",
+                "🕒 Recently Played",
+                "👤 Followed Artists",
+                "⭐ Top Artists",
+                "🆕 What's New",
+            ]
                 .into_iter()
                 .enumerate()
                 .map(|(i, name)| {
@@ -580,27 +586,6 @@ fn draw_thumb_placeholder(buf: &mut Buffer, area: Rect, style: Style, symbol: &s
         let center_x = area.x + area.width / 2;
         let center_y = area.y + area.height / 2;
         buf[(center_x, center_y)].set_symbol(symbol);
-    }
-}
-
-fn displayed_track_number(index: usize, selected: usize, base: isize, relative: bool) -> isize {
-    if relative && index != selected {
-        index.abs_diff(selected) as isize
-    } else {
-        index as isize + base
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::displayed_track_number;
-
-    #[test]
-    fn relative_numbers_keep_current_absolute_and_show_distance_elsewhere() {
-        assert_eq!(displayed_track_number(4, 4, 1, true), 5);
-        assert_eq!(displayed_track_number(1, 4, 1, true), 3);
-        assert_eq!(displayed_track_number(7, 4, 1, true), 3);
-        assert_eq!(displayed_track_number(1, 4, 1, false), 2);
     }
 }
 

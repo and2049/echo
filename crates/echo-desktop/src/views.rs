@@ -136,6 +136,12 @@ pub(crate) struct DraggedPlaylist {
     pub name: SharedString,
 }
 
+/// Drag payload for a track row being reordered within an owned playlist.
+pub(crate) struct DraggedTrack {
+    pub from: usize,
+    pub name: SharedString,
+}
+
 /// The chip that follows the cursor while a playlist is dragged.
 pub(crate) struct DragPreview {
     name: SharedString,
@@ -429,6 +435,12 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     "icons/mic.svg",
                     tr(&app.state, "desktop.top_artists"),
                     echo_core::intent::open_top_artists,
+                ))
+                .child(browse_link(
+                    "whats-new",
+                    "icons/sparkles.svg",
+                    tr(&app.state, "desktop.whats_new"),
+                    echo_core::intent::open_whats_new,
                 ))
         })
         .child(
@@ -772,6 +784,7 @@ pub fn main_area(
         // Artists tab still covers followed artists.
         ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
         ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
+        ActiveView::WhatsNew => whats_new(app, cx).into_any_element(),
             _ => library_placeholder(app),
         }
     };
@@ -1235,6 +1248,19 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                         .active_tracklist_context
                         .as_ref()
                         .is_some_and(|context| context.id == "LIKED_SONGS");
+                    // Rows are drag-reorderable only where a reorder can be applied: a
+                    // playlist the user can modify, shown in original order.
+                    let reorderable = this.state.ui.track_sort
+                        == echo_core::app::TrackSort::Original
+                        && this
+                            .state
+                            .data
+                            .active_tracklist_context
+                            .as_ref()
+                            .is_some_and(|context| {
+                                context.can_modify_playlist(this.state.data.user_id.as_ref())
+                            });
+                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
 
                     range
                         .map(|ix| {
@@ -1242,9 +1268,42 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
+                            let drag_name = SharedString::from(track.name.clone());
 
                             pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 row.gap_3()
+                                .when(reorderable, |row| {
+                                    let border = muted.opacity(0.4);
+                                    row.on_drag(
+                                        DraggedTrack { from: ix, name: drag_name },
+                                        move |drag, _offset, _window, cx| {
+                                            let name = drag.name.clone();
+                                            cx.new(|_| DragPreview {
+                                                name,
+                                                fg,
+                                                bg: panel_bg,
+                                                border,
+                                            })
+                                        },
+                                    )
+                                    .drag_over::<DraggedTrack>(move |style, _, _, _| {
+                                        style.bg(accent.opacity(0.2))
+                                    })
+                                    .on_drop(cx.listener(
+                                        move |this: &mut EchoApp, drag: &DraggedTrack, _window, cx| {
+                                            if let Some(event) =
+                                                echo_core::intent::move_track_in_playlist(
+                                                    &mut this.state,
+                                                    drag.from,
+                                                    ix,
+                                                )
+                                            {
+                                                this.dispatch(event);
+                                            }
+                                            cx.notify();
+                                        },
+                                    ))
+                                })
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     // Shift-click selects from the previously focused row to
                                     // this one — the desktop's version of `v` plus motion.
@@ -1276,13 +1335,15 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         cx.notify();
                                     }),
                                 )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(32.0))
-                                        .text_color(muted)
-                                        .child(SharedString::from(format!("{}", ix + 1))),
-                                )
+                                .when_some(row_number(&this.state, ix, selected), |row, number| {
+                                    row.child(
+                                        div()
+                                            .flex_none()
+                                            .w(px(32.0))
+                                            .text_color(muted)
+                                            .child(number),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .flex_grow(2.0)
@@ -1364,7 +1425,14 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                     )
                                 })
                                 .when(!in_liked_songs, |row| {
-                                    row.child(liked_cell(is_liked, secondary))
+                                    row.child(liked_cell(
+                                        "tracks",
+                                        ix,
+                                        track.id.clone(),
+                                        is_liked,
+                                        secondary,
+                                        cx,
+                                    ))
                                 })
                                 .child(
                                     div()
@@ -1471,13 +1539,15 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         cx.notify();
                                     }),
                                 )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(32.0))
-                                        .text_color(muted)
-                                        .child(SharedString::from(format!("{}", ix + 1))),
-                                )
+                                .when_some(row_number(&this.state, ix, selected), |row, number| {
+                                    row.child(
+                                        div()
+                                            .flex_none()
+                                            .w(px(32.0))
+                                            .text_color(muted)
+                                            .child(number),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .flex_grow(2.0)
@@ -1498,7 +1568,14 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .text_color(muted)
                                         .child(SharedString::from(track.artist.clone())),
                                 )
-                                .child(liked_cell(is_liked, secondary))
+                                .child(liked_cell(
+                                    "queue",
+                                    ix,
+                                    track.id.clone(),
+                                    is_liked,
+                                    secondary,
+                                    cx,
+                                ))
                                 .child(
                                     div()
                                         .flex_none()
@@ -1517,25 +1594,120 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
         })
 }
 
+/// "Playing from {}" label for the playback bar, resolving the playing context id to a
+/// name from whatever state already holds it (loaded track list, library lists, artist
+/// page, What's New). Falls back to a generic "a playlist"/"an album" when the id is not
+/// loaded anywhere; `None` when nothing tracks the context at all.
+pub(crate) fn playing_context_label(state: &echo_core::app::AppState) -> Option<String> {
+    let context = state.playback.playing_context.as_ref()?;
+    let from_tracklist = state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .filter(|c| c.id == context.context_id)
+        .map(|c| c.title.clone());
+    let name = if context.is_album {
+        from_tracklist
+            .or_else(|| {
+                state
+                    .data
+                    .saved_albums
+                    .iter()
+                    .find(|album| album.id == context.context_id)
+                    .map(|album| album.name.clone())
+            })
+            .or_else(|| {
+                state.data.artist_page_data.as_ref().and_then(|data| {
+                    data.albums
+                        .iter()
+                        .find(|album| album.id == context.context_id)
+                        .map(|album| album.name.clone())
+                })
+            })
+            .or_else(|| {
+                state
+                    .data
+                    .whats_new
+                    .iter()
+                    .find(|album| album.id == context.context_id)
+                    .map(|album| album.name.clone())
+            })
+            .unwrap_or_else(|| tr(state, "desktop.playing_from_album").to_string())
+    } else {
+        state
+            .data
+            .playlists
+            .iter()
+            .find(|playlist| playlist.id == context.context_id)
+            .map(|playlist| playlist.name.clone())
+            .or_else(|| {
+                state
+                    .data
+                    .local_playlists
+                    .playlists
+                    .iter()
+                    .find(|playlist| playlist.id == context.context_id)
+                    .map(|playlist| playlist.name.clone())
+            })
+            .or_else(|| from_tracklist)
+            .unwrap_or_else(|| tr(state, "desktop.playing_from_playlist").to_string())
+    };
+    Some(tr(state, "desktop.playing_from").replace("{}", &name))
+}
+
+/// Index-column text for a list row, honoring `track_index_base` (negative hides the
+/// column — the caller omits the div) and `relative_line_numbers`, exactly as the TUI does.
+fn row_number(state: &echo_core::app::AppState, ix: usize, selected: usize) -> Option<SharedString> {
+    let config = &state.ui.library_config;
+    if config.track_index_base < 0 {
+        return None;
+    }
+    Some(SharedString::from(
+        echo_core::app::displayed_track_number(
+            ix,
+            selected,
+            config.track_index_base,
+            config.relative_line_numbers,
+        )
+        .to_string(),
+    ))
+}
+
 /// A fixed-width heart slot ahead of the duration column: filled when the track is in
-/// Liked Songs, empty otherwise so durations stay aligned across rows.
-fn liked_cell(liked: bool, color: Hsla) -> Div {
-    let cell = div()
+/// Liked Songs, faint otherwise so durations stay aligned across rows. Clicking toggles
+/// the like (un-liking through the confirm prompt), same as `l` on the row.
+fn liked_cell(
+    section: &'static str,
+    ix: usize,
+    track_id: String,
+    liked: bool,
+    color: Hsla,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("liked-{section}-{ix}")))
         .flex_none()
         .w(px(14.0))
         .flex()
         .items_center()
-        .justify_center();
-    if liked {
-        cell.child(
+        .justify_center()
+        .cursor_pointer()
+        .when(!liked, |el| el.opacity(0.25).hover(|style| style.opacity(0.7)))
+        .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
+            cx.stop_propagation();
+            if let Some(event) =
+                echo_core::intent::toggle_like_track(&mut this.state, track_id.clone())
+            {
+                this.dispatch(event);
+            }
+            cx.notify();
+        }))
+        .child(
             svg()
                 .path("icons/heart.svg")
                 .size(px(12.0))
                 .text_color(color),
         )
-    } else {
-        cell
-    }
 }
 
 /// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
@@ -1749,7 +1921,14 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                             .text_color(muted)
                                             .child(SharedString::from(track.album)),
                                     )
-                                    .child(liked_cell(is_liked, secondary))
+                                    .child(liked_cell(
+                                        "search",
+                                        ix,
+                                        track.id.clone(),
+                                        is_liked,
+                                        secondary,
+                                        cx,
+                                    ))
                                     .child(
                                         div()
                                             .flex_none()
@@ -2002,13 +2181,18 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                                 cx.notify();
                                             },
                                         ))
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .w(px(24.0))
-                                                .text_xs()
-                                                .text_color(muted)
-                                                .child(SharedString::from(format!("{}", ix + 1))),
+                                        .when_some(
+                                            row_number(&this.state, ix, selected),
+                                            |row, number| {
+                                                row.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .w(px(24.0))
+                                                        .text_xs()
+                                                        .text_color(muted)
+                                                        .child(number),
+                                                )
+                                            },
                                         )
                                         .child(thumb)
                                         .child(
@@ -2031,6 +2215,156 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 }),
             )
             .track_scroll(&app.artist_list_scroll)
+            .flex_grow(1.0)
+            .into_any_element()
+        })
+}
+
+/// What's New: recent releases from followed artists, reached through the sidebar
+/// browse link. Renders live from state, filling in as the background scan reports.
+fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let count = app.state.data.whats_new.len();
+    let progress = app.state.data.whats_new_progress;
+    let scanning = progress.is_some();
+
+    div()
+        .flex_grow(1.0)
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .py_3()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .flex_grow(1.0)
+                        .text_lg()
+                        .text_color(fg)
+                        .child(tr(&app.state, "desktop.whats_new")),
+                )
+                .when_some(progress, |el, (done, total)| {
+                    el.child(
+                        div().flex_none().text_xs().text_color(muted).child(
+                            SharedString::from(
+                                tr(&app.state, "desktop.whats_new_checking")
+                                    .replace("{done}", &done.to_string())
+                                    .replace("{total}", &total.to_string()),
+                            ),
+                        ),
+                    )
+                }),
+        )
+        .child(if count == 0 {
+            div()
+                .flex_grow(1.0)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(muted)
+                .child(if scanning {
+                    tr(&app.state, "desktop.loading")
+                } else {
+                    tr(&app.state, "desktop.whats_new_empty")
+                })
+                .into_any_element()
+        } else {
+            uniform_list(
+                "whats-new-rows",
+                count,
+                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                    let theme = &this.state.ui.active_theme;
+                    let fg = theme.text.gpui(WINDOW_FG());
+                    let muted = theme.text_muted.gpui(WINDOW_FG());
+                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let selected = this.state.ui.selected_whats_new_index;
+                    let visual = visual_range_in(&this.state, ActiveView::WhatsNew);
+
+                    let rows: Vec<AnyElement> = range
+                        .map(|ix| {
+                            let Some(album) = this.state.data.whats_new.get(ix).cloned() else {
+                                return div().id(ix).into_any_element();
+                            };
+                            let thumb = thumb_element(
+                                this,
+                                album.thumb_url.as_deref().or(album.image_url.as_deref()),
+                                26.0,
+                                false,
+                                muted,
+                            );
+                            let released = album
+                                .release_date
+                                .clone()
+                                .unwrap_or_else(|| album.release_year.clone());
+                            pill_row(
+                                ix,
+                                LIST_PILL,
+                                row_selected(ix, selected, visual),
+                                selected_bg,
+                                muted,
+                                |row| {
+                                    row.gap_3()
+                                        .on_click(cx.listener(
+                                            move |this: &mut EchoApp, _event, _window, cx| {
+                                                if let Some(event) =
+                                                    echo_core::intent::open_whats_new_album(
+                                                        &mut this.state,
+                                                        ix,
+                                                    )
+                                                {
+                                                    this.dispatch(event);
+                                                }
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child(thumb)
+                                        .child(
+                                            div()
+                                                .flex_grow(2.0)
+                                                .flex_basis(px(0.0))
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_color(fg)
+                                                .child(SharedString::from(album.name)),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_grow(1.5)
+                                                .flex_basis(px(0.0))
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_sm()
+                                                .text_color(muted)
+                                                .child(SharedString::from(album.artists)),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(released)),
+                                        )
+                                },
+                            )
+                            .into_any_element()
+                        })
+                        .collect();
+
+                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                    rows
+                }),
+            )
+            .track_scroll(&app.whats_new_scroll)
             .flex_grow(1.0)
             .into_any_element()
         })
@@ -2234,13 +2568,18 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                 cx.notify();
                                             },
                                         ))
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .w(px(24.0))
-                                                .text_xs()
-                                                .text_color(muted)
-                                                .child(SharedString::from(format!("{}", ix + 1))),
+                                        .when_some(
+                                            row_number(&this.state, ix, selected),
+                                            |row, number| {
+                                                row.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .w(px(24.0))
+                                                        .text_xs()
+                                                        .text_color(muted)
+                                                        .child(number),
+                                                )
+                                            },
                                         )
                                         .child(thumb)
                                         .child(
@@ -2252,7 +2591,14 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                 .text_color(title_color)
                                                 .child(SharedString::from(track.name.clone())),
                                         )
-                                        .child(liked_cell(is_liked, secondary))
+                                        .child(liked_cell(
+                                            "popular",
+                                            ix,
+                                            track.id.clone(),
+                                            is_liked,
+                                            secondary,
+                                            cx,
+                                        ))
                                         .child(
                                             div()
                                                 .flex_none()
@@ -2627,23 +2973,25 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
         "desktop.help.nav",
         &[
             ("j / k / ↓ / ↑", "desktop.help.move"),
-            ("gg / G", "desktop.help.first_last"),
-            ("ctrl-b / ctrl-f", "desktop.help.page"),
+            ("gg / G / home / end", "desktop.help.first_last"),
+            ("ctrl-b / ctrl-f / pgup / pgdn", "desktop.help.page"),
             ("ctrl-u / ctrl-d", "desktop.help.half_page"),
             ("enter / z", "desktop.help.open"),
             ("h / esc", "desktop.help.back"),
+            ("← / →", "desktop.help.pane_focus"),
             ("backspace", "desktop.help.to_sidebar"),
             ("tab", "desktop.help.tabs"),
             ("gc", "desktop.help.jump_playing"),
             ("1-9", "desktop.help.count"),
+            ("y", "desktop.help.confirm"),
         ],
     ),
     (
         "desktop.help.playback",
         &[
             ("space", "desktop.help.play_pause"),
-            ("[ / ]", "desktop.help.prev_next"),
-            (", / .", "desktop.help.seek"),
+            ("[ / ] / ctrl-← / ctrl-→", "desktop.help.prev_next"),
+            (", / . / shift-← / shift-→", "desktop.help.seek"),
             ("0", "desktop.help.seek_start"),
             ("- / =", "desktop.help.volume"),
             ("shift-M", "desktop.help.mute"),
@@ -2656,9 +3004,11 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
     (
         "desktop.help.library",
         &[
+            ("l", "desktop.help.like"),
             ("a", "desktop.help.add_playlist"),
             ("shift-A", "desktop.help.track_actions"),
             ("q / shift-Q", "desktop.help.queue"),
+            ("shift-J / shift-K", "desktop.help.move_track"),
             ("dd", "desktop.help.delete"),
             ("v", "desktop.help.select_range"),
             ("m", "desktop.help.pin"),
@@ -2673,6 +3023,7 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
             ("/", "desktop.help.filter"),
             ("n / shift-N", "desktop.help.next_match"),
             (":", "desktop.help.command_bar"),
+            ("f", "desktop.help.search_command"),
             ("t", "desktop.help.themes"),
             ("ctrl-,", "desktop.help.settings"),
             ("?", "desktop.help.this_help"),

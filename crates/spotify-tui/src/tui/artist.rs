@@ -202,6 +202,102 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     frame.render_stateful_widget(table, albums_area, &mut table_state);
 }
 
+pub fn render_whats_new(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let is_active = state.ui.active_view == ActiveView::WhatsNew;
+    let title = match state.data.whats_new_progress {
+        Some((done, total)) => format!("  What's New ({done}/{total})  "),
+        None => "  What's New  ".to_string(),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .style(state.ui.active_theme.base_style())
+        .border_style(if is_active {
+            state.ui.active_theme.secondary_style()
+        } else {
+            state.ui.active_theme.primary_style()
+        });
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    if state.data.whats_new.is_empty() {
+        let message = if state.data.whats_new_progress.is_some() {
+            "  Checking followed artists..."
+        } else {
+            "  No recent releases from followed artists."
+        };
+        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
+        frame.render_widget(p, inner_area);
+        return;
+    }
+
+    let header_style = if is_active {
+        state.ui
+            .active_theme
+            .secondary_style()
+            .add_modifier(Modifier::BOLD)
+    } else {
+        state.ui
+            .active_theme
+            .primary_style()
+            .add_modifier(Modifier::BOLD)
+    };
+
+    let name_width = inner_area.width.saturating_mul(45) / 100;
+    let artist_width = inner_area.width.saturating_mul(35) / 100;
+    let rows: Vec<Row> = state.data
+        .whats_new
+        .iter()
+        .enumerate()
+        .map(|(i, album)| {
+            let style = if i == state.ui.selected_whats_new_index && is_active {
+                state.ui.active_theme.selected_style()
+            } else {
+                state.ui.active_theme.base_style()
+            };
+            let released = album
+                .release_date
+                .clone()
+                .unwrap_or_else(|| album.release_year.clone());
+            Row::new(vec![
+                Cell::from(truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&album.name),
+                    name_width.saturating_sub(1),
+                )),
+                Cell::from(truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&album.artists),
+                    artist_width.saturating_sub(1),
+                )),
+                Cell::from(released),
+            ])
+            .style(style)
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(45),
+            Constraint::Percentage(35),
+            Constraint::Length(10),
+        ],
+    )
+    .header(
+        Row::new(vec!["Album", "Artist", "Released"])
+            .style(header_style)
+            .height(1),
+    )
+    .column_spacing(1)
+    .row_highlight_style(state.ui.active_theme.selected_style())
+    .highlight_symbol(" ")
+    .highlight_spacing(HighlightSpacing::Always);
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(state.ui.selected_whats_new_index));
+    frame.render_stateful_widget(table, inner_area, &mut table_state);
+}
+
 fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, artist_name: &str) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
