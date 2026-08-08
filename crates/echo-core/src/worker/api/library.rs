@@ -4,6 +4,15 @@ use anyhow::Result;
 use rspotify::model::Id;
 use rspotify::prelude::*;
 
+/// rspotify's wire enum for our persisted range preference, kept out of the core models.
+fn time_range(range: crate::models::TopItemsRange) -> rspotify::model::TimeRange {
+    match range {
+        crate::models::TopItemsRange::Short => rspotify::model::TimeRange::ShortTerm,
+        crate::models::TopItemsRange::Medium => rspotify::model::TimeRange::MediumTerm,
+        crate::models::TopItemsRange::Long => rspotify::model::TimeRange::LongTerm,
+    }
+}
+
 impl SpotifyWorker {
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
         let page = match self.client.current_user_playlists_manual(None, None).await {
@@ -214,33 +223,42 @@ impl SpotifyWorker {
         Ok((out, metadata))
     }
 
-    pub async fn fetch_top_tracks(&self) -> Result<Vec<Track>> {
+    pub async fn fetch_top_tracks(&self, range: crate::models::TopItemsRange) -> Result<Vec<Track>> {
         use futures_util::StreamExt;
-        let mut stream = Box::pin(self.client.current_user_top_tracks(None));
+        let mut stream = Box::pin(self.client.current_user_top_tracks(Some(time_range(range))));
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            if let Ok(track) = item {
-                if track.is_local {
-                    continue;
-                }
-                let artists = super::parse::track_artists(&track.artists);
-                out.push(Track {
-                    id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
-                    source: TrackSource::Spotify,
-                    local_path: None,
-                    name: track.name,
-                    artist: super::parse::joined_artist_names(&artists),
-                    album: track.album.name,
-                    added_at: None,
-                    duration_ms: track.duration.num_milliseconds() as u32,
-                    image_url: track.album.images.first().map(|img| img.url.clone()),
-                    album_id: track.album.id.map(|id| id.id().to_string()),
-                    artist_id: artists.first().and_then(|a| a.id.clone()),
-                    artists,
-                });
+            if let Ok(track) = item
+                && let Some(track) = super::parse::track_from_full(track)
+            {
+                out.push(track);
             }
         }
         Ok(out)
+    }
+
+    pub async fn fetch_top_artists(
+        &self,
+        range: crate::models::TopItemsRange,
+    ) -> Result<Vec<crate::models::Artist>> {
+        use rspotify::prelude::OAuthClient;
+        // One bounded request rather than the paginator: 50 top artists is the ceiling
+        // anyone scrolls, and it keeps this to a single call.
+        let page = self
+            .client
+            .current_user_top_artists_manual(Some(time_range(range)), Some(50), Some(0))
+            .await?;
+        Ok(page
+            .items
+            .into_iter()
+            .map(|artist| crate::models::Artist {
+                id: artist.id.id().to_string(),
+                name: artist.name,
+                // Spotify removed the followers field from the dev-mode API.
+                followers: 0,
+                image_url: artist.images.first().map(|img| img.url.clone()),
+            })
+            .collect())
     }
 
     pub async fn fetch_recently_played(&self) -> Result<Vec<Track>> {

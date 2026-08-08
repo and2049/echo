@@ -191,10 +191,15 @@ impl SpotifyWebApi {
     }
 
     pub async fn get_json(&self, url: &str) -> Result<serde_json::Value> {
+        let body = self.request(reqwest::Method::GET, url).await?;
+        Ok(serde_json::from_str(&body)?)
+    }
+
+    async fn request(&self, method: reqwest::Method, url: &str) -> Result<String> {
         let mut refreshed_session = false;
 
         for attempt in 0..=2 {
-            match self.get_json_once(url).await {
+            match self.request_once(method.clone(), url).await {
                 Ok(value) => return Ok(value),
                 Err(SpotifyWebError::Unauthorized(message)) if !refreshed_session => {
                     append_api_log(&format!("401 retry url={url} err={message}"));
@@ -222,14 +227,15 @@ impl SpotifyWebApi {
         anyhow::bail!("Spotify Web API request failed after retries: {url}")
     }
 
-    async fn get_json_once(
+    async fn request_once(
         &self,
+        method: reqwest::Method,
         url: &str,
-    ) -> std::result::Result<serde_json::Value, SpotifyWebError> {
+    ) -> std::result::Result<String, SpotifyWebError> {
         let access_token = self.session.bearer_token().await?;
         let response = self
             .client
-            .get(url)
+            .request(method, url)
             .bearer_auth(access_token)
             .send()
             .await?;
@@ -259,7 +265,7 @@ impl SpotifyWebApi {
             )));
         }
 
-        Ok(serde_json::from_str(&body)?)
+        Ok(body)
     }
 }
 

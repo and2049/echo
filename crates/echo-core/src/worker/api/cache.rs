@@ -2,12 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::config::{ARTIST_ALBUMS_REFRESH_TTL, artist_album_metadata_complete};
-use crate::models::{Album, Artist, Track};
+use crate::models::{Album, Artist, TopItemsRange, Track};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum CacheKey {
     ArtistAlbums(String),
-    TopTracks,
+    ArtistTopTracks(String),
+    TopTracks(TopItemsRange),
+    TopArtists(TopItemsRange),
     RecentlyPlayed,
     FollowedArtists,
 }
@@ -46,22 +48,35 @@ impl<T: Clone> Timed<T> {
 
 #[derive(Default)]
 pub struct SpotifyApiCache {
-    top_tracks: Option<Timed<Vec<Track>>>,
+    top_tracks: HashMap<TopItemsRange, Timed<Vec<Track>>>,
+    top_artists: HashMap<TopItemsRange, Timed<Vec<Artist>>>,
     recently_played: Option<Timed<Vec<Track>>>,
     followed_artists: Option<Timed<Vec<Artist>>>,
     artist_albums: HashMap<String, Timed<Vec<Album>>>,
+    artist_top_tracks: HashMap<String, Timed<Vec<Track>>>,
     inflight: HashSet<CacheKey>,
     cooldowns: HashMap<CacheKey, Instant>,
 }
 
 impl SpotifyApiCache {
-    pub fn top_tracks(&self) -> Option<Vec<Track>> {
-        self.top_tracks.as_ref().and_then(Timed::get)
+    pub fn top_tracks(&self, range: TopItemsRange) -> Option<Vec<Track>> {
+        self.top_tracks.get(&range).and_then(Timed::get)
     }
 
-    pub fn set_top_tracks(&mut self, tracks: Vec<Track>) {
-        self.clear_cooldown(&CacheKey::TopTracks);
-        self.top_tracks = Some(Timed::new(tracks, Duration::from_secs(6 * 60 * 60)));
+    pub fn set_top_tracks(&mut self, range: TopItemsRange, tracks: Vec<Track>) {
+        self.clear_cooldown(&CacheKey::TopTracks(range));
+        self.top_tracks
+            .insert(range, Timed::new(tracks, Duration::from_secs(6 * 60 * 60)));
+    }
+
+    pub fn top_artists(&self, range: TopItemsRange) -> Option<Vec<Artist>> {
+        self.top_artists.get(&range).and_then(Timed::get)
+    }
+
+    pub fn set_top_artists(&mut self, range: TopItemsRange, artists: Vec<Artist>) {
+        self.clear_cooldown(&CacheKey::TopArtists(range));
+        self.top_artists
+            .insert(range, Timed::new(artists, Duration::from_secs(6 * 60 * 60)));
     }
 
     pub fn recently_played(&self) -> Option<Vec<Track>> {
@@ -99,6 +114,18 @@ impl SpotifyApiCache {
         self.artist_albums.insert(
             artist_id,
             Timed::new(albums, Duration::from_secs(24 * 60 * 60)),
+        );
+    }
+
+    pub fn artist_top_tracks(&self, artist_id: &str) -> Option<Vec<Track>> {
+        self.artist_top_tracks.get(artist_id).and_then(Timed::get)
+    }
+
+    pub fn set_artist_top_tracks(&mut self, artist_id: String, tracks: Vec<Track>) {
+        self.clear_cooldown(&CacheKey::ArtistTopTracks(artist_id.clone()));
+        self.artist_top_tracks.insert(
+            artist_id,
+            Timed::new(tracks, Duration::from_secs(24 * 60 * 60)),
         );
     }
 
@@ -145,15 +172,21 @@ mod tests {
     #[test]
     fn no_cooldown_allows_begin() {
         let mut cache = SpotifyApiCache::default();
-        assert_eq!(cache.begin(CacheKey::TopTracks), FetchGate::Start);
+        assert_eq!(
+            cache.begin(CacheKey::TopTracks(TopItemsRange::Medium)),
+            FetchGate::Start
+        );
     }
 
     #[test]
     fn active_cooldown_blocks_begin() {
         let mut cache = SpotifyApiCache::default();
-        cache.rate_limited(CacheKey::TopTracks, Duration::from_secs(50));
+        cache.rate_limited(
+            CacheKey::TopTracks(TopItemsRange::Medium),
+            Duration::from_secs(50),
+        );
 
-        match cache.begin(CacheKey::TopTracks) {
+        match cache.begin(CacheKey::TopTracks(TopItemsRange::Medium)) {
             FetchGate::CoolingDown(remaining) => {
                 assert!(remaining <= Duration::from_secs(50));
                 assert!(remaining > Duration::from_secs(45));
@@ -165,11 +198,15 @@ mod tests {
     #[test]
     fn expired_cooldown_allows_begin() {
         let mut cache = SpotifyApiCache::default();
-        cache
-            .cooldowns
-            .insert(CacheKey::TopTracks, Instant::now() - Duration::from_secs(1));
+        cache.cooldowns.insert(
+            CacheKey::TopTracks(TopItemsRange::Medium),
+            Instant::now() - Duration::from_secs(1),
+        );
 
-        assert_eq!(cache.begin(CacheKey::TopTracks), FetchGate::Start);
+        assert_eq!(
+            cache.begin(CacheKey::TopTracks(TopItemsRange::Medium)),
+            FetchGate::Start
+        );
     }
 
     #[test]

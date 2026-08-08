@@ -227,7 +227,7 @@ pub fn render_library_list(frame: &mut Frame, state: &mut AppState, library_area
         repair_wide_grapheme_trailing_styles(frame.buffer_mut(), library_list_area);
     } else if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
         let items: Vec<ListItem> =
-            vec!["📈 Top Tracks", "🕒 Recently Played", "👤 Followed Artists"]
+            vec!["📈 Top Tracks", "🕒 Recently Played", "👤 Followed Artists", "⭐ Top Artists"]
                 .into_iter()
                 .enumerate()
                 .map(|(i, name)| {

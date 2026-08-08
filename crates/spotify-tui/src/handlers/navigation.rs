@@ -124,7 +124,7 @@ fn selected_list_len(state: &AppState) -> usize {
         ActiveView::Library => match state.ui.active_library_tab {
             LibraryTab::Playlists => state.data.library_view.len(),
             LibraryTab::Albums => state.data.saved_albums.len(),
-            LibraryTab::Browse => 3,
+            LibraryTab::Browse => 4,
             // Desktop-only tab; unreachable in the TUI.
             LibraryTab::Artists => state.data.followed_artists.len(),
         },
@@ -133,10 +133,11 @@ fn selected_list_len(state: &AppState) -> usize {
             SearchTab::Tracks => state.data.search_results.tracks.len(),
             SearchTab::Albums => state.data.search_results.albums.len(),
             SearchTab::Artists => state.data.search_results.artists.len(),
+            SearchTab::Playlists => state.data.search_results.playlists.len(),
         },
         ActiveView::Queue => state.data.queue.len(),
         ActiveView::Devices => state.data.devices.len(),
-        ActiveView::ArtistList => state.data.followed_artists.len(),
+        ActiveView::ArtistList => state.artist_list().len(),
         ActiveView::ArtistPage => state
             .data
             .artist_page_data

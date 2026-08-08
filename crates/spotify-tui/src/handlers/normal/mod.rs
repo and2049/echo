@@ -260,7 +260,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.ui.selected_search_index,
                 );
             } else if state.ui.active_view == ActiveView::ArtistList {
-                return echo_core::intent::open_followed_artist(
+                return echo_core::intent::open_artist_at(
                     state,
                     state.ui.selected_artist_index,
                 );
@@ -583,7 +583,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.ui.active_search_tab = match state.ui.active_search_tab {
                     echo_core::app::SearchTab::Tracks => echo_core::app::SearchTab::Albums,
                     echo_core::app::SearchTab::Albums => echo_core::app::SearchTab::Artists,
-                    echo_core::app::SearchTab::Artists => echo_core::app::SearchTab::Tracks,
+                    echo_core::app::SearchTab::Artists => echo_core::app::SearchTab::Playlists,
+                    echo_core::app::SearchTab::Playlists => echo_core::app::SearchTab::Tracks,
                 };
                 state.ui.selected_search_index = 0;
             }
@@ -618,6 +619,7 @@ fn search_results_len(state: &AppState) -> usize {
         echo_core::app::SearchTab::Tracks => state.data.search_results.tracks.len(),
         echo_core::app::SearchTab::Albums => state.data.search_results.albums.len(),
         echo_core::app::SearchTab::Artists => state.data.search_results.artists.len(),
+        echo_core::app::SearchTab::Playlists => state.data.search_results.playlists.len(),
     }
 }
 
@@ -625,6 +627,7 @@ fn search_has_results(state: &AppState) -> bool {
     !state.data.search_results.tracks.is_empty()
         || !state.data.search_results.albums.is_empty()
         || !state.data.search_results.artists.is_empty()
+        || !state.data.search_results.playlists.is_empty()
 }
 
 #[cfg(test)]

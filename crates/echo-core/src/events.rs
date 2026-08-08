@@ -57,7 +57,12 @@ pub enum AppEvent {
     FetchLyrics(String, String, String, u32),
     ForcePlaybackSync,
     CancelArtistPageLoad,
-    FetchTopTracks,
+    FetchTopTracks {
+        range: crate::models::TopItemsRange,
+    },
+    FetchTopArtists {
+        range: crate::models::TopItemsRange,
+    },
     FetchRecentlyPlayed,
     FetchFollowedArtists,
     LoadArtistPage {
@@ -142,6 +147,7 @@ pub enum WorkerEvent {
     DevicesLoaded(Vec<crate::models::Device>),
     LyricsLoaded(Option<crate::models::Lyrics>),
     TopTracksLoaded(Vec<Track>),
+    TopArtistsLoaded(Vec<crate::models::Artist>),
     RecentlyPlayedLoaded(Vec<Track>),
     FollowedArtistsLoaded(Vec<crate::models::Artist>),
     ArtistPageOpened {
@@ -166,5 +172,13 @@ pub enum WorkerEvent {
     ArtistImageResolved {
         artist_id: String,
         image_url: String,
+    },
+    ArtistTopTracksLoaded {
+        artist_id: String,
+        tracks: Vec<Track>,
+    },
+    ArtistTopTracksLoadFailed {
+        artist_id: String,
+        message: String,
     },
 }

@@ -1,8 +1,4 @@
-use echo_core::{
-    app::{ActiveView, AppState},
-    events::AppEvent,
-    models::BrowseNode,
-};
+use echo_core::{app::AppState, events::AppEvent, models::BrowseNode};
 
 pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
     None
@@ -10,31 +6,26 @@ pub fn load_event_if_needed(_state: &AppState) -> Option<AppEvent> {
 
 pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
     match state.ui.active_browse_node {
-        BrowseNode::TopTracks => return echo_core::intent::open_top_tracks(state),
-        BrowseNode::RecentlyPlayed => return echo_core::intent::open_recently_played(state),
-        BrowseNode::FollowedArtists => {
-            if state.data.followed_artists.is_empty() {
-                return Some(AppEvent::FetchFollowedArtists);
-            }
-            state.push_view_history();
-            state.ui.active_view = ActiveView::ArtistList;
-            state.ui.selected_artist_index = 0;
-        }
+        BrowseNode::TopTracks => echo_core::intent::open_top_tracks(state),
+        BrowseNode::RecentlyPlayed => echo_core::intent::open_recently_played(state),
+        BrowseNode::FollowedArtists => echo_core::intent::open_artist_list(state),
+        BrowseNode::TopArtists => echo_core::intent::open_top_artists(state),
     }
-    None
 }
 
 pub fn select_node_from_library_index(state: &mut AppState) {
     state.ui.active_browse_node = match state.ui.selected_playlist_index {
         0 => BrowseNode::TopTracks,
         1 => BrowseNode::RecentlyPlayed,
-        _ => BrowseNode::FollowedArtists,
+        2 => BrowseNode::FollowedArtists,
+        _ => BrowseNode::TopArtists,
     };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use echo_core::app::ActiveView;
 
     #[test]
     fn top_tracks_selection_does_not_request_fetch() {
@@ -51,8 +42,33 @@ mod tests {
 
         assert!(matches!(
             enter_active_node(&mut state),
-            Some(AppEvent::FetchTopTracks)
+            Some(AppEvent::FetchTopTracks { .. })
         ));
+    }
+
+    #[test]
+    fn browse_index_three_maps_to_top_artists() {
+        let mut state = AppState::new();
+        state.ui.selected_playlist_index = 3;
+
+        select_node_from_library_index(&mut state);
+
+        assert_eq!(state.ui.active_browse_node, BrowseNode::TopArtists);
+    }
+
+    #[test]
+    fn entering_empty_top_artists_opens_list_and_requests_fetch() {
+        let mut state = AppState::new();
+        state.ui.active_browse_node = BrowseNode::TopArtists;
+
+        let event = enter_active_node(&mut state);
+
+        assert!(matches!(event, Some(AppEvent::FetchTopArtists { .. })));
+        assert_eq!(state.ui.active_view, ActiveView::ArtistList);
+        assert_eq!(
+            state.ui.artist_list_source,
+            echo_core::app::ArtistListSource::Top
+        );
     }
 
     #[test]

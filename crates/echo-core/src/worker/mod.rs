@@ -175,6 +175,7 @@ fn merged_search_results(
     results.tracks.extend(local.tracks);
     results.albums.extend(local.albums);
     results.artists.extend(local.artists);
+    results.playlists.extend(local.playlists);
     results
 }
 
@@ -359,6 +360,7 @@ mod tests {
             }],
             albums: Vec::new(),
             artists: Vec::new(),
+            playlists: Vec::new(),
         };
         let local = crate::models::SearchResults {
             tracks: vec![crate::models::SearchTrack {
@@ -375,6 +377,7 @@ mod tests {
             }],
             albums: Vec::new(),
             artists: Vec::new(),
+            playlists: Vec::new(),
         };
 
         let merged = merged_search_results(Some(spotify), local);
@@ -1056,6 +1059,9 @@ impl Worker {
                                         PlaybackTarget::SpotifyTrack { track_id } => {
                                             sp.play_track("LIKED_SONGS", track_id, false).await
                                         }
+                                        PlaybackTarget::SpotifyTracks { track_ids, selected_index } => {
+                                            sp.play_uris(track_ids, *selected_index).await
+                                        }
                                         PlaybackTarget::LocalTrack { .. } | PlaybackTarget::LocalContext { .. } => unreachable!(),
                                     };
                                     match play_result {
@@ -1708,8 +1714,11 @@ impl Worker {
                             AppEvent::CancelArtistPageLoad => {
                                 artist_page::cancel_pending_artist_page(&self.artist_page_generation);
                             }
-                            AppEvent::FetchTopTracks => {
-                                browse::spawn_top_tracks(api_client.clone(), self.tx.clone());
+                            AppEvent::FetchTopTracks { range } => {
+                                browse::spawn_top_tracks(api_client.clone(), self.tx.clone(), range);
+                            }
+                            AppEvent::FetchTopArtists { range } => {
+                                browse::spawn_top_artists(api_client.clone(), self.tx.clone(), range);
                             }
                             AppEvent::FetchRecentlyPlayed => {
                                 browse::spawn_recently_played(api_client.clone(), self.tx.clone());
@@ -1722,6 +1731,9 @@ impl Worker {
                                 artist_name,
                                 artist_image_url,
                             } => {
+                                // Warm the followed-artists list so the header's "Following"
+                                // badge can resolve; 24h-cached, so usually a no-op.
+                                browse::spawn_followed_artists(api_client.clone(), self.tx.clone());
                                 artist_page::spawn_load_artist_page(
                                     api_client.as_ref(),
                                     self.tx.clone(),

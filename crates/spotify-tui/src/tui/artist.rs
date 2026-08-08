@@ -13,9 +13,13 @@ use ratatui::{
 };
 
 pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
+    let title = match state.ui.artist_list_source {
+        echo_core::app::ArtistListSource::Followed => "  Followed Artists  ",
+        echo_core::app::ArtistListSource::Top => "  Top Artists  ",
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title("  Followed Artists  ")
+        .title(title)
         .style(state.ui.active_theme.base_style())
         .border_style(if state.ui.active_view == ActiveView::ArtistList {
             state.ui.active_theme.secondary_style()
@@ -26,8 +30,8 @@ pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let items: Vec<ListItem> = state.data
-        .followed_artists
+    let items: Vec<ListItem> = state
+        .artist_list()
         .iter()
         .enumerate()
         .map(|(i, artist)| {

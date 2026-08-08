@@ -25,6 +25,9 @@ pub fn handle_force_context_refresh(state: &AppState, app_tx: &mpsc::UnboundedSe
 }
 
 pub fn handle_api_request_failed(state: &mut AppState, label: String, message: String) {
+    // A failed browse fetch must drop any pending open, or an unrelated later load
+    // could consume it and navigate unexpectedly.
+    state.ui.pending_browse_open = None;
     let text = if message.starts_with("rate limited") {
         format!("{label} {message}")
     } else {

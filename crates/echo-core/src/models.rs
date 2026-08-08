@@ -24,6 +24,12 @@ pub enum PlaybackTarget {
     SpotifyTrack {
         track_id: String,
     },
+    /// An ad-hoc list of Spotify tracks (artist top tracks): the whole list is sent as uris
+    /// and playback starts at `selected_index`, so up-next is the rest of the list.
+    SpotifyTracks {
+        track_ids: Vec<String>,
+        selected_index: usize,
+    },
     LocalTrack {
         track_id: String,
         path: PathBuf,
@@ -73,11 +79,25 @@ pub enum LibraryNode {
     Folder(crate::config::Folder),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum BrowseNode {
     TopTracks,
     RecentlyPlayed,
     FollowedArtists,
+    TopArtists,
+}
+
+/// The `time_range` window for the `/me/top/*` endpoints.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TopItemsRange {
+    /// Last ~4 weeks.
+    Short,
+    /// Last ~6 months (Spotify's default).
+    #[default]
+    Medium,
+    /// All time.
+    Long,
 }
 
 /// One credited artist on a track. `artist` on [`Track`] keeps the joined display string;
@@ -398,6 +418,8 @@ pub struct SearchResults {
     pub tracks: Vec<SearchTrack>,
     pub albums: Vec<SearchAlbum>,
     pub artists: Vec<Artist>,
+    #[serde(default)]
+    pub playlists: Vec<Playlist>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -934,6 +956,10 @@ pub struct ArtistPageData {
     #[serde(default)]
     pub image_url: Option<String>,
     pub albums: Vec<Album>,
+    /// Session-only: never written to the persistent artist-page cache (whose single
+    /// `fetched_at` tracks album freshness), so persisted entries deserialize it empty.
+    #[serde(default, skip_serializing)]
+    pub top_tracks: Vec<Track>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

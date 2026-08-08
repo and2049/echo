@@ -170,6 +170,8 @@ pub(crate) struct EchoApp {
     pub(crate) queue_scroll: UniformListScrollHandle,
     pub(crate) search_scroll: UniformListScrollHandle,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
+    pub(crate) artist_top_tracks_scroll: UniformListScrollHandle,
+    pub(crate) artist_list_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
     /// The modal pickers' lists. Plain scroll handles rather than uniform-list ones: their rows
     /// are laid out by content, not at a fixed height. Without these the lists overflow their
@@ -332,6 +334,8 @@ impl EchoApp {
             queue_scroll: UniformListScrollHandle::new(),
             search_scroll: UniformListScrollHandle::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
+            artist_top_tracks_scroll: UniformListScrollHandle::new(),
+            artist_list_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
@@ -384,19 +388,33 @@ impl EchoApp {
                 echo_core::app::SearchTab::Tracks => self.state.data.search_results.tracks.len(),
                 echo_core::app::SearchTab::Albums => self.state.data.search_results.albums.len(),
                 echo_core::app::SearchTab::Artists => self.state.data.search_results.artists.len(),
+                echo_core::app::SearchTab::Playlists => {
+                    self.state.data.search_results.playlists.len()
+                }
             },
+            ActiveView::ArtistList => self.state.artist_list().len(),
+            // Combined index space: Popular rows first, then the album rows.
             ActiveView::ArtistPage => self
                 .state
                 .data
                 .artist_page_data
                 .as_ref()
-                .map_or(0, |data| data.albums.len()),
+                .map_or(0, |data| data.top_tracks.len() + data.albums.len()),
             _ => match self.state.ui.active_library_tab {
                 LibraryTab::Albums => self.state.data.saved_albums.len(),
                 LibraryTab::Artists => self.state.data.followed_artists.len(),
                 _ => self.state.data.library_view.len(),
             },
         }
+    }
+
+    /// Rows the artist page's Popular section occupies at the head of its combined index space.
+    pub(crate) fn artist_page_top_len(&self) -> usize {
+        self.state
+            .data
+            .artist_page_data
+            .as_ref()
+            .map_or(0, |data| data.top_tracks.len())
     }
 
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -435,10 +453,22 @@ impl EchoApp {
                     self.state.ui.selected_search_index = index;
                     self.search_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
                 }
+                ActiveView::ArtistList => {
+                    self.state.ui.selected_artist_index = index;
+                    self.artist_list_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
+                }
                 ActiveView::ArtistPage => {
                     self.state.ui.artist_page_album_index = index;
-                    self.artist_albums_scroll
-                        .scroll_to_item(index, ScrollStrategy::Nearest);
+                    // The combined index spans two lists; scroll whichever owns the row.
+                    let top_len = self.artist_page_top_len();
+                    if index < top_len {
+                        self.artist_top_tracks_scroll
+                            .scroll_to_item(index, ScrollStrategy::Nearest);
+                    } else {
+                        self.artist_albums_scroll
+                            .scroll_to_item(index - top_len, ScrollStrategy::Nearest);
+                    }
                 }
                 _ => {
                     self.state.ui.selected_playlist_index = index;
@@ -469,6 +499,7 @@ impl EchoApp {
                 ActiveView::TrackList => self.state.ui.selected_track_index,
                 ActiveView::Queue => self.state.ui.selected_queue_index,
                 ActiveView::SearchResults => self.state.ui.selected_search_index,
+                ActiveView::ArtistList => self.state.ui.selected_artist_index,
                 ActiveView::ArtistPage => self.state.ui.artist_page_album_index,
                 _ => self.state.ui.selected_playlist_index,
             }
@@ -543,9 +574,13 @@ impl EchoApp {
                     let index = self.state.ui.selected_search_index;
                     echo_core::intent::activate_search_result(&mut self.state, index)
                 }
+                ActiveView::ArtistList => {
+                    let index = self.state.ui.selected_artist_index;
+                    echo_core::intent::open_artist_at(&mut self.state, index)
+                }
                 ActiveView::ArtistPage => {
                     let index = self.state.ui.artist_page_album_index;
-                    echo_core::intent::open_artist_album(&mut self.state, index)
+                    echo_core::intent::activate_artist_page_row(&mut self.state, index)
                 }
                 _ => {
                     let index = self.state.ui.selected_playlist_index;
@@ -1290,7 +1325,8 @@ impl EchoApp {
                 self.state.ui.active_search_tab = match self.state.ui.active_search_tab {
                     SearchTab::Tracks => SearchTab::Albums,
                     SearchTab::Albums => SearchTab::Artists,
-                    SearchTab::Artists => SearchTab::Tracks,
+                    SearchTab::Artists => SearchTab::Playlists,
+                    SearchTab::Playlists => SearchTab::Tracks,
                 };
                 self.state.ui.selected_search_index = 0;
             }
