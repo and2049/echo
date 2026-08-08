@@ -1,6 +1,6 @@
-primary = "#84aadb"
-secondary = "#a7bbd4"
-background = "#296095"
+primary = "#a6c8f5"
+secondary = "#d4e0ee"
+background = "#3a70a3"
 surface = "#3a72a8" # menus, modals, popovers
 text = "#e0dee4"
 text_muted = "#869dcf"
