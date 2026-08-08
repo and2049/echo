@@ -190,6 +190,7 @@ mod tests {
                 image_url: None,
                 album_id: None,
                 artist_id: None,
+                artists: Vec::new(),
             })
             .collect();
         state.ui.selected_track_index = 12;
@@ -220,6 +221,7 @@ mod tests {
             image_url: None,
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         }];
         execute(&mut state, NavigationCommand::PageDown);
         assert_eq!(state.ui.selected_queue_index, 0);
@@ -243,6 +245,7 @@ mod tests {
                 image_url: None,
                 album_id: None,
                 artist_id: None,
+                artists: Vec::new(),
             })
             .collect();
         state.playback.playing_track_id = Some("two".to_string());

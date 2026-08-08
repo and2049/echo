@@ -378,6 +378,7 @@ fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppE
                 image_url: t.image_url.clone(),
                 album_id: t.album_id.clone(),
                 artist_id: t.artist_id.clone(),
+                artists: Vec::new(),
             })
             .collect();
         let selected_index = tracks
@@ -1246,6 +1247,7 @@ mod tests {
             image_url: None,
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         }
     }
 
@@ -1723,6 +1725,7 @@ mod tests {
             duration_ms: 1000,
             image_url: None,
             album_id: None,
+            artists: Vec::new(),
         }
     }
 
@@ -1739,6 +1742,7 @@ mod tests {
             duration_ms: 1000,
             image_url: None,
             album_id: None,
+            artists: Vec::new(),
         }
     }
 }

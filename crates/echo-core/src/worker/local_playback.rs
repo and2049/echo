@@ -572,6 +572,7 @@ mod tests {
             image_url: None,
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         }
     }
 

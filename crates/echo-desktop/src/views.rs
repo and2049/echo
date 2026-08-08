@@ -11,7 +11,7 @@
 //! which applies here.
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
-use echo_core::models::LibraryNode;
+use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::ThumbState;
 use gpui::{
     AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent, SharedString, Stateful, Window,
@@ -1164,6 +1164,14 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let selected = this.state.ui.selected_track_index;
                     let visual = visual_range_in(&this.state, ActiveView::TrackList);
                     let playing_id = this.state.playback.playing_track_id.clone();
+                    // On an album page every row shares the album in the header, so the
+                    // column carries no information.
+                    let in_album = this
+                        .state
+                        .data
+                        .active_tracklist_context
+                        .as_ref()
+                        .is_some_and(|context| context.is_album());
 
                     range
                         .map(|ix| {
@@ -1221,26 +1229,76 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .text_color(title_color)
                                         .child(SharedString::from(track.name.clone())),
                                 )
-                                .child(
-                                    div()
+                                .child({
+                                    let base = div()
                                         .flex_grow(1.5)
                                         .flex_basis(px(0.0))
                                         .overflow_hidden()
-                                        .text_ellipsis()
                                         .whitespace_nowrap()
-                                        .text_color(muted)
-                                        .child(SharedString::from(track.artist.clone())),
-                                )
-                                .child(
-                                    div()
-                                        .flex_grow(1.5)
-                                        .flex_basis(px(0.0))
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .whitespace_nowrap()
-                                        .text_color(muted)
-                                        .child(SharedString::from(track.album.clone())),
-                                )
+                                        .text_color(muted);
+                                    if track.artists.is_empty() {
+                                        // Local files and pre-credit caches carry only the
+                                        // joined string: one span, go-to-artist fallback.
+                                        base.id(("track-artist", ix))
+                                            .text_ellipsis()
+                                            .cursor_pointer()
+                                            .hover(|style| style.underline())
+                                            .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
+                                                cx.stop_propagation();
+                                                if let Some(ctx) = this.state.data.tracks.get(ix).map(ActionMenuContext::from) {
+                                                    this.go_to(ctx, ActionMenuAction::GoToArtist, cx);
+                                                }
+                                            }))
+                                            .child(SharedString::from(track.artist.clone()))
+                                            .into_any_element()
+                                    } else {
+                                        let mut cell = base.flex().flex_row().items_center();
+                                        for (k, credit) in track.artists.iter().enumerate() {
+                                            if k > 0 {
+                                                cell = cell.child(div().flex_none().child(SharedString::from(", ")));
+                                            }
+                                            let name = SharedString::from(credit.name.clone());
+                                            cell = cell.child(match credit.id.clone() {
+                                                Some(id) => {
+                                                    let artist_name = credit.name.clone();
+                                                    div()
+                                                        .id(SharedString::from(format!("track-artist-{ix}-{k}")))
+                                                        .cursor_pointer()
+                                                        .hover(|style| style.underline())
+                                                        .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
+                                                            cx.stop_propagation();
+                                                            this.open_artist(id.clone(), artist_name.clone(), cx);
+                                                        }))
+                                                        .child(name)
+                                                        .into_any_element()
+                                                }
+                                                None => div().child(name).into_any_element(),
+                                            });
+                                        }
+                                        cell.into_any_element()
+                                    }
+                                })
+                                .when(!in_album, |row| {
+                                    row.child(
+                                        div()
+                                            .id(("track-album", ix))
+                                            .flex_grow(1.5)
+                                            .flex_basis(px(0.0))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_color(muted)
+                                            .cursor_pointer()
+                                            .hover(|style| style.underline())
+                                            .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
+                                                cx.stop_propagation();
+                                                if let Some(ctx) = this.state.data.tracks.get(ix).map(ActionMenuContext::from) {
+                                                    this.go_to(ctx, ActionMenuAction::GoToAlbum, cx);
+                                                }
+                                            }))
+                                            .child(SharedString::from(track.album.clone())),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .flex_none()

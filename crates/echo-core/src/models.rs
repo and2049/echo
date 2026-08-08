@@ -80,6 +80,14 @@ pub enum BrowseNode {
     FollowedArtists,
 }
 
+/// One credited artist on a track. `artist` on [`Track`] keeps the joined display string;
+/// this carries the per-artist ids needed to navigate to an individual artist's page.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TrackArtist {
+    pub id: Option<String>,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
@@ -98,6 +106,8 @@ pub struct Track {
     pub album_id: Option<String>,
     #[serde(default)]
     pub artist_id: Option<String>,
+    #[serde(default)]
+    pub artists: Vec<TrackArtist>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -303,6 +313,14 @@ impl ActionMenuContext {
 
 impl From<&Track> for ActionMenuContext {
     fn from(track: &Track) -> Self {
+        // "Go to artist" targets the first credited artist, so carry that artist's own name
+        // rather than the joined "A, B, C" display string. Tracks without structured artist
+        // data (local files, old caches) keep the joined string — local go-to-artist filters
+        // the library by exactly that value.
+        let (artist_id, artist_name) = match track.artists.first() {
+            Some(first) => (first.id.clone(), first.name.clone()),
+            None => (track.artist_id.clone(), track.artist.clone()),
+        };
         Self {
             track_id: track.id.clone(),
             source: track.source,
@@ -310,8 +328,8 @@ impl From<&Track> for ActionMenuContext {
             local_path: track.local_path.clone(),
             album_id: track.album_id.clone(),
             album_name: track.album.clone(),
-            artist_id: track.artist_id.clone(),
-            artist_name: track.artist.clone(),
+            artist_id,
+            artist_name,
         }
     }
 }
@@ -345,6 +363,7 @@ impl From<&SearchTrack> for Track {
             image_url: track.image_url.clone(),
             album_id: track.album_id.clone(),
             artist_id: track.artist_id.clone(),
+            artists: Vec::new(),
         }
     }
 }
@@ -497,6 +516,7 @@ impl LocalTrack {
             image_url: self.artwork_url(),
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         }
     }
 
@@ -578,6 +598,7 @@ impl LocalPlaylists {
                     image_url: image_url.clone(),
                     album_id: album_id.clone(),
                     artist_id: artist_id.clone(),
+                    artists: Vec::new(),
                 }),
             })
             .collect()
@@ -739,6 +760,7 @@ mod tests {
             image_url: None,
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         };
         let context = TrackListContext::local_library();
 

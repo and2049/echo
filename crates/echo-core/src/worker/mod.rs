@@ -947,6 +947,7 @@ impl Worker {
                                         image_url: image_url.clone(),
                                         album_id: album_id.clone(),
                                         artist_id: None,
+                                        artists: Vec::new(),
                                     };
                                     if let Some(ref mut sp) = spotify_opt {
                                         let _ = sp.toggle_playback(false).await;

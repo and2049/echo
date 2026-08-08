@@ -972,6 +972,7 @@ mod tests {
             image_url: None,
             album_id: None,
             artist_id: None,
+            artists: Vec::new(),
         };
         state.data.tracks = vec![track("b", "Beta", 2), track("a", "Alpha", 3)];
         state.data.original_tracks = state.data.tracks.clone();
@@ -1023,6 +1024,7 @@ mod tests {
                 image_url: None,
                 album_id: None,
                 artist_id: None,
+                artists: Vec::new(),
             }],
             TrackListContext::generated("one", "One"),
         );
