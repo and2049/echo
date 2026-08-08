@@ -1198,6 +1198,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let selected = this.state.ui.selected_track_index;
                     let visual = visual_range_in(&this.state, ActiveView::TrackList);
                     let playing_id = this.state.playback.playing_track_id.clone();
+                    let secondary = theme.secondary.gpui(WINDOW_FG());
                     // On an album page every row shares the album in the header, so the
                     // column carries no information.
                     let in_album = this
@@ -1206,10 +1207,18 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                         .active_tracklist_context
                         .as_ref()
                         .is_some_and(|context| context.is_album());
+                    // Inside Liked Songs every track is liked, so the hearts say nothing.
+                    let in_liked_songs = this
+                        .state
+                        .data
+                        .active_tracklist_context
+                        .as_ref()
+                        .is_some_and(|context| context.id == "LIKED_SONGS");
 
                     range
                         .map(|ix| {
                             let track = &this.state.data.tracks[ix];
+                            let is_liked = this.state.data.liked_tracks.contains(&track.id);
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
 
@@ -1333,6 +1342,9 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                             .child(SharedString::from(track.album.clone())),
                                     )
                                 })
+                                .when(!in_liked_songs, |row| {
+                                    row.child(liked_cell(is_liked, secondary))
+                                })
                                 .child(
                                     div()
                                         .flex_none()
@@ -1398,12 +1410,14 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let secondary = theme.secondary.gpui(WINDOW_FG());
                     let selected = this.state.ui.selected_queue_index;
                     let visual = visual_range_in(&this.state, ActiveView::Queue);
 
                     range
                         .map(|ix| {
                             let track = &this.state.data.queue[ix];
+                            let is_liked = this.state.data.liked_tracks.contains(&track.id);
 
                             pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
                                 row.gap_3()
@@ -1463,6 +1477,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .text_color(muted)
                                         .child(SharedString::from(track.artist.clone())),
                                 )
+                                .child(liked_cell(is_liked, secondary))
                                 .child(
                                     div()
                                         .flex_none()
@@ -1479,6 +1494,27 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
             .flex_grow(1.0)
             .into_any_element()
         })
+}
+
+/// A fixed-width heart slot ahead of the duration column: filled when the track is in
+/// Liked Songs, empty otherwise so durations stay aligned across rows.
+fn liked_cell(liked: bool, color: Hsla) -> Div {
+    let cell = div()
+        .flex_none()
+        .w(px(14.0))
+        .flex()
+        .items_center()
+        .justify_center();
+    if liked {
+        cell.child(
+            svg()
+                .path("icons/heart.svg")
+                .size(px(12.0))
+                .text_color(color),
+        )
+    } else {
+        cell
+    }
 }
 
 /// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
@@ -1658,6 +1694,10 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                 SearchTab::Tracks => {
                                     let track =
                                         this.state.data.search_results.tracks[ix].clone();
+                                    let is_liked =
+                                        this.state.data.liked_tracks.contains(&track.id);
+                                    let secondary =
+                                        this.state.ui.active_theme.secondary.gpui(WINDOW_FG());
                                     row.child(
                                         div()
                                             .flex_grow(2.0)
@@ -1688,6 +1728,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                             .text_color(muted)
                                             .child(SharedString::from(track.album)),
                                     )
+                                    .child(liked_cell(is_liked, secondary))
                                     .child(
                                         div()
                                             .flex_none()
@@ -2140,6 +2181,10 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 };
                                 let is_playing =
                                     playing_id.as_deref() == Some(track.id.as_str());
+                                let is_liked =
+                                    this.state.data.liked_tracks.contains(&track.id);
+                                let secondary =
+                                    this.state.ui.active_theme.secondary.gpui(WINDOW_FG());
                                 let title_color = if is_playing { accent } else { fg };
                                 let thumb = thumb_element(
                                     this,
@@ -2186,6 +2231,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                 .text_color(title_color)
                                                 .child(SharedString::from(track.name.clone())),
                                         )
+                                        .child(liked_cell(is_liked, secondary))
                                         .child(
                                             div()
                                                 .flex_none()
