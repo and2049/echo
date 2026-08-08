@@ -72,6 +72,7 @@ mod tests {
             album_id: None,
             duration_ms: 60000,
             image_url: None,
+            artists: Vec::new(),
         }];
 
         assert!(enter_active_node(&mut state).is_none());
@@ -101,6 +102,7 @@ mod tests {
             duration_ms: 1000,
             image_url: None,
             album_id: None,
+            artists: Vec::new(),
         }];
 
         assert!(enter_active_node(&mut state).is_none());

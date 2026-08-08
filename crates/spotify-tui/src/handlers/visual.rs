@@ -88,6 +88,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                             image_url: t.image_url.clone(),
                                             album_id: t.album_id.clone(),
                                             artist_id: t.artist_id.clone(),
+                                            artists: Vec::new(),
                                         })
                                         .collect()
                                 } else {

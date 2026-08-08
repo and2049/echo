@@ -520,27 +520,20 @@ impl SpotifyWorker {
                     if track.is_local {
                         continue;
                     }
-                    let artists = track.artists;
-                    let artist_id = artists
-                        .first()
-                        .and_then(|a| a.id.as_ref())
-                        .map(|id| id.id().to_string());
+                    let artists = super::parse::track_artists(&track.artists);
                     out.push(Track {
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         source: TrackSource::Spotify,
                         local_path: None,
                         name: track.name,
-                        artist: artists
-                            .into_iter()
-                            .map(|a| a.name)
-                            .collect::<Vec<_>>()
-                            .join(", "),
+                        artist: super::parse::joined_artist_names(&artists),
                         album: track.album.name,
                         added_at: None,
                         duration_ms: track.duration.num_milliseconds() as u32,
                         image_url: track.album.images.first().map(|img| img.url.clone()),
                         album_id: track.album.id.map(|id| id.id().to_string()),
-                        artist_id,
+                        artist_id: artists.first().and_then(|a| a.id.clone()),
+                        artists,
                     });
                 }
                 rspotify::model::PlayableItem::Unknown(val) => {
@@ -565,16 +558,9 @@ impl SpotifyWorker {
                         .and_then(|v| v.as_str())
                         .unwrap_or("Unknown")
                         .to_string();
-                    let artist = val
-                        .get("artists")
-                        .and_then(|a| a.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|a| a.get("name").and_then(|n| n.as_str()))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        })
-                        .unwrap_or_default();
+                    let artists = super::parse::track_artists_json(
+                        val.get("artists").and_then(|a| a.as_array()),
+                    );
                     let duration_ms =
                         val.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                     let image_url = val
@@ -598,26 +584,19 @@ impl SpotifyWorker {
                         .unwrap_or_default()
                         .to_string();
 
-                    let artist_id = val
-                        .get("artists")
-                        .and_then(|a| a.as_array())
-                        .and_then(|a| a.first())
-                        .and_then(|a| a.get("id"))
-                        .and_then(|i| i.as_str())
-                        .map(|s| s.to_string());
-
                     out.push(Track {
                         id,
                         source: TrackSource::Spotify,
                         local_path: None,
                         name,
-                        artist,
+                        artist: super::parse::joined_artist_names(&artists),
                         album,
                         added_at: None,
                         duration_ms,
                         image_url,
                         album_id,
-                        artist_id,
+                        artist_id: artists.first().and_then(|a| a.id.clone()),
+                        artists,
                     });
                 }
                 _ => {}

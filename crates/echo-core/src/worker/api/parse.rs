@@ -1,4 +1,45 @@
-use crate::models::{Album, Artist, Track, TrackSource};
+use crate::models::{Album, Artist, Track, TrackArtist, TrackSource};
+
+/// Structured artist credits from a raw API `artists` array.
+pub(crate) fn track_artists_json(artists: Option<&Vec<serde_json::Value>>) -> Vec<TrackArtist> {
+    artists
+        .map(|artists| {
+            artists
+                .iter()
+                .filter_map(|artist| {
+                    Some(TrackArtist {
+                        id: artist
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string),
+                        name: artist.get("name")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Structured artist credits from rspotify's artist list.
+pub(crate) fn track_artists(artists: &[rspotify::model::SimplifiedArtist]) -> Vec<TrackArtist> {
+    use rspotify::prelude::Id;
+    artists
+        .iter()
+        .map(|artist| TrackArtist {
+            id: artist.id.as_ref().map(|id| id.id().to_string()),
+            name: artist.name.clone(),
+        })
+        .collect()
+}
+
+/// The joined display string for a track's artists.
+pub(crate) fn joined_artist_names(artists: &[TrackArtist]) -> String {
+    artists
+        .iter()
+        .map(|artist| artist.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     if track
@@ -10,32 +51,20 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     }
     let id = track.get("id")?.as_str()?.to_string();
     let album = track.get("album");
-    let artists = track.get("artists").and_then(|v| v.as_array());
+    let artists = track_artists_json(track.get("artists").and_then(|v| v.as_array()));
     Some(Track {
         id,
         source: TrackSource::Spotify,
         local_path: None,
         name: track.get("name")?.as_str()?.to_string(),
-        artist: artists
-            .map(|artists| {
-                artists
-                    .iter()
-                    .filter_map(|artist| artist.get("name").and_then(|v| v.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
-            .unwrap_or_default(),
+        artist: joined_artist_names(&artists),
         album: album
             .and_then(|v| v.get("name"))
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
         added_at: None,
-        artist_id: artists
-            .and_then(|a| a.first())
-            .and_then(|a| a.get("id"))
-            .and_then(|v| v.as_str())
-            .map(|v| v.to_string()),
+        artist_id: artists.first().and_then(|artist| artist.id.clone()),
         duration_ms: track
             .get("duration_ms")
             .and_then(|v| v.as_u64())
@@ -51,6 +80,7 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
             .and_then(|v| v.get("id"))
             .and_then(|v| v.as_str())
             .map(|v| v.to_string()),
+        artists,
     })
 }
 

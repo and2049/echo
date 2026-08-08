@@ -808,10 +808,31 @@ impl EchoApp {
             return Some(ActionMenuContext::from(track));
         }
 
+        self.playing_track_context()
+    }
+
+    /// Menu context for the currently playing track: `action_target`'s fallback and the
+    /// playback bar's click-to-navigate target.
+    pub(crate) fn playing_track_context(&self) -> Option<echo_core::models::ActionMenuContext> {
         let playback = &self.state.playback;
         let track_id = playback.playing_track_id.clone()?;
-        Some(ActionMenuContext {
-            album_name: data
+        // Playback state only carries the joined "A, B, C" artist string; when the playing
+        // track is in the current list or queue, prefer its structured data so go-to-artist
+        // gets the first artist's own name.
+        if let Some(track) = self
+            .state
+            .data
+            .tracks
+            .iter()
+            .chain(self.state.data.queue.iter())
+            .find(|track| track.id == track_id)
+        {
+            return Some(echo_core::models::ActionMenuContext::from(track));
+        }
+        Some(echo_core::models::ActionMenuContext {
+            album_name: self
+                .state
+                .data
                 .local_library
                 .tracks
                 .iter()
@@ -828,6 +849,37 @@ impl EchoApp {
             artist_id: playback.playing_track_artist_id.clone(),
             artist_name: playback.playing_track_artist.clone(),
         })
+    }
+
+    /// Opens an artist page directly by id — the per-artist click path in track rows.
+    pub(crate) fn open_artist(
+        &mut self,
+        artist_id: String,
+        artist_name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.state
+            .begin_artist_page_load(artist_id.clone(), artist_name.clone(), None);
+        self.dispatch(AppEvent::LoadArtistPage {
+            artist_id,
+            artist_name: Some(artist_name),
+            artist_image_url: None,
+        });
+        cx.notify();
+    }
+
+    /// Runs one go-to action (album/artist) for a track context — the click-to-navigate path
+    /// shared by track-row cells and the playback bar.
+    pub(crate) fn go_to(
+        &mut self,
+        ctx: echo_core::models::ActionMenuContext,
+        action: echo_core::models::ActionMenuAction,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(event) = echo_core::action_menu::run(&mut self.state, ctx, action) {
+            self.dispatch(event);
+        }
+        cx.notify();
     }
 
     /// `shift-a` — the track action menu, centered because there is no click to anchor it to.
@@ -1616,6 +1668,7 @@ impl EchoApp {
             playback.playing_track_title.clone().into()
         };
         let artist: SharedString = playback.playing_track_artist.clone().into();
+        let has_track = playback.playing_track_id.is_some();
 
         let progress_ms = playback.display_progress_ms();
         let fraction = if playback.duration_ms > 0 {
@@ -1774,20 +1827,56 @@ impl EchoApp {
                                     .overflow_hidden()
                                     .child(
                                         div()
+                                            .id("playing-title")
                                             .text_color(fg)
                                             .text_sm()
                                             .whitespace_nowrap()
                                             .text_ellipsis()
                                             .overflow_hidden()
+                                            .when(has_track, |el| {
+                                                el.cursor_pointer()
+                                                    .hover(|style| style.underline())
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            if let Some(ctx) =
+                                                                this.playing_track_context()
+                                                            {
+                                                                this.go_to(
+                                                                    ctx,
+                                                                    echo_core::models::ActionMenuAction::GoToAlbum,
+                                                                    cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    ))
+                                            })
                                             .child(title),
                                     )
                                     .child(
                                         div()
+                                            .id("playing-artist")
                                             .text_color(muted)
                                             .text_xs()
                                             .whitespace_nowrap()
                                             .text_ellipsis()
                                             .overflow_hidden()
+                                            .when(has_track, |el| {
+                                                el.cursor_pointer()
+                                                    .hover(|style| style.underline())
+                                                    .on_click(cx.listener(
+                                                        |this, _event, _window, cx| {
+                                                            if let Some(ctx) =
+                                                                this.playing_track_context()
+                                                            {
+                                                                this.go_to(
+                                                                    ctx,
+                                                                    echo_core::models::ActionMenuAction::GoToArtist,
+                                                                    cx,
+                                                                );
+                                                            }
+                                                        },
+                                                    ))
+                                            })
                                             .child(artist),
                                     ),
                             ),

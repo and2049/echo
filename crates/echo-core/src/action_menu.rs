@@ -291,6 +291,7 @@ mod tests {
             image_url: None,
             album_id: Some("album-1".to_string()),
             artist_id: Some("artist-1".to_string()),
+            artists: Vec::new(),
         }
     }
 
