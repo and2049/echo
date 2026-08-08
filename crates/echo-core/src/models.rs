@@ -70,6 +70,8 @@ pub struct Album {
     pub thumb_url: Option<String>,
     pub release_year: String,
     #[serde(default)]
+    pub release_date: Option<String>,
+    #[serde(default)]
     pub track_count: Option<u32>,
 }
 
@@ -85,6 +87,7 @@ pub enum BrowseNode {
     RecentlyPlayed,
     FollowedArtists,
     TopArtists,
+    WhatsNew,
 }
 
 /// The `time_range` window for the `/me/top/*` endpoints.

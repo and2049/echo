@@ -38,6 +38,7 @@ pub fn apply_worker_event(
             misc::handle_audio_output_unavailable(state, message)
         }
         WorkerEvent::AudioOutputRecovered => misc::handle_audio_output_recovered(state),
+        WorkerEvent::SleepTimerExpired => misc::handle_sleep_timer_expired(state),
         WorkerEvent::PlaylistsLoaded(playlists) => library::handle_playlists_loaded(state, playlists),
         WorkerEvent::AlbumsLoaded(albums) => library::handle_albums_loaded(state, albums),
         WorkerEvent::LocalLibraryLoaded { library, report } => {
@@ -85,6 +86,9 @@ pub fn apply_worker_event(
         WorkerEvent::TopArtistsLoaded(artists) => data::handle_top_artists_loaded(state, artists),
         WorkerEvent::RecentlyPlayedLoaded(tracks) => data::handle_recently_played_loaded(state, tracks),
         WorkerEvent::FollowedArtistsLoaded(artists) => data::handle_followed_artists_loaded(state, artists),
+        WorkerEvent::WhatsNewLoaded { albums, done, total } => {
+            data::handle_whats_new_loaded(state, albums, done, total)
+        }
         WorkerEvent::ArtistPageOpened { artist_id, artist_name, artist_image_url } => {
             artist::handle_page_opened(state, worker_tx, artist_id, artist_name, artist_image_url)
         }

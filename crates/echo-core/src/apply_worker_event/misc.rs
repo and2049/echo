@@ -51,6 +51,18 @@ pub fn handle_audio_output_recovered(state: &mut AppState) {
     state.ui.audio_output_error = None;
 }
 
+pub fn handle_sleep_timer_expired(state: &mut AppState) {
+    state.playback.is_playing = false;
+    set_timed_status(
+        state,
+        crate::i18n::t(
+            "messages.sleep_timer_expired",
+            &state.ui.library_config.language,
+        ),
+        5,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

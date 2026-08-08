@@ -23,6 +23,7 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 - **Local Music Support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
 - **Responsive Playback Controls**: Full control over playback, queue, shuffle, repeat, and volume.
 - **Search**: Fast global search for Spotify catalog items and scanned local tracks.
+- **What's New**: A feed of recent albums and singles from the artists you follow, built from cached artist data and refreshed at most every 6 hours.
 
 ## Setup
 
@@ -153,6 +154,7 @@ echo is heavily keyboard-driven.
 - `v`: Enter Visual mode for multi-selection
 - `d` (double press): Delete playlist/folder, or remove a track from your custom playlist
 - `x`: Cut playlist (to move into a folder)
+- `J` / `K` (Shift + j / k, desktop): Move the selected track down / up within one of your own playlists (drag-and-drop works too); requires the original sort order
 - `R` (Shift + r): Force refresh
 
 The track action menu adapts to the source. Spotify tracks support link copying, liking, and album library actions. Local tracks support copying their absolute path and revealing the file in the platform file manager. Both sources retain album/artist navigation, playlist insertion, and queue actions where applicable.
@@ -170,6 +172,7 @@ While in Command Mode (`:`), you can use the following:
 - `:sort <alpha|creator>`: Sort the playlist library.
 - `:sort <original|title|artist|album|duration|added|reverse>`: Sort the active track list entirely in memory.
 - `:seek <seconds|+seconds|-seconds>`: Seek to an absolute position or by a relative offset.
+- `:sleep <30m|1h|off>`: Pause playback after a delay (sleep timer).
 - `:mute`: Mute playback or restore the previous volume.
 - `:open [spotify-url-or-uri]`: Open a Spotify track, album, artist, or playlist. With no argument, read it from the clipboard.
 - `:relative <on|off|toggle>`: Configure Vim-style relative line numbers in track lists.

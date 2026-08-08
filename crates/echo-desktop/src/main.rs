@@ -84,7 +84,10 @@ actions!(
         MarkDelete,
         ToggleSettings,
         ToggleHelp,
-        EnterVisual
+        EnterVisual,
+        MoveTrackUp,
+        MoveTrackDown,
+        ToggleLike
     ]
 );
 
@@ -172,6 +175,7 @@ pub(crate) struct EchoApp {
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) artist_top_tracks_scroll: UniformListScrollHandle,
     pub(crate) artist_list_scroll: UniformListScrollHandle,
+    pub(crate) whats_new_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
     /// The modal pickers' lists. Plain scroll handles rather than uniform-list ones: their rows
     /// are laid out by content, not at a fixed height. Without these the lists overflow their
@@ -336,6 +340,7 @@ impl EchoApp {
             artist_albums_scroll: UniformListScrollHandle::new(),
             artist_top_tracks_scroll: UniformListScrollHandle::new(),
             artist_list_scroll: UniformListScrollHandle::new(),
+            whats_new_scroll: UniformListScrollHandle::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
@@ -393,6 +398,7 @@ impl EchoApp {
                 }
             },
             ActiveView::ArtistList => self.state.artist_list().len(),
+            ActiveView::WhatsNew => self.state.data.whats_new.len(),
             // Combined index space: Popular rows first, then the album rows.
             ActiveView::ArtistPage => self
                 .state
@@ -458,6 +464,11 @@ impl EchoApp {
                     self.artist_list_scroll
                         .scroll_to_item(index, ScrollStrategy::Nearest);
                 }
+                ActiveView::WhatsNew => {
+                    self.state.ui.selected_whats_new_index = index;
+                    self.whats_new_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
+                }
                 ActiveView::ArtistPage => {
                     self.state.ui.artist_page_album_index = index;
                     // The combined index spans two lists; scroll whichever owns the row.
@@ -501,10 +512,43 @@ impl EchoApp {
                 ActiveView::SearchResults => self.state.ui.selected_search_index,
                 ActiveView::ArtistList => self.state.ui.selected_artist_index,
                 ActiveView::ArtistPage => self.state.ui.artist_page_album_index,
+                ActiveView::WhatsNew => self.state.ui.selected_whats_new_index,
                 _ => self.state.ui.selected_playlist_index,
             }
         };
         self.set_selection(current.saturating_add_signed(delta).min(len - 1), cx);
+    }
+
+    /// `l`, matching the TUI and README: like/unlike the focused track. On library rows it
+    /// acts as Enter (the TUI's `l`-opens behavior); un-liking stages the confirm prompt.
+    fn toggle_like(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_open() {
+            return;
+        }
+        if self.state.ui.active_view == ActiveView::Library {
+            self.activate_selection(cx);
+            return;
+        }
+        if let Some(event) = echo_core::intent::toggle_like_selected(&mut self.state) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    /// `shift-j`/`shift-k`: move the selected track within an owned playlist. The intent
+    /// enforces the writable-context and original-order guards.
+    fn move_selected_track(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.overlay_open() || self.state.ui.active_view != ActiveView::TrackList {
+            return;
+        }
+        let from = self.state.ui.selected_track_index;
+        let to = from.saturating_add_signed(delta);
+        if let Some(event) = echo_core::intent::move_track_in_playlist(&mut self.state, from, to) {
+            self.dispatch(event);
+            self.tracks_scroll
+                .scroll_to_item(self.state.ui.selected_track_index, ScrollStrategy::Nearest);
+        }
+        cx.notify();
     }
 
     fn select_last(&mut self, cx: &mut Context<Self>) {
@@ -581,6 +625,10 @@ impl EchoApp {
                 ActiveView::ArtistPage => {
                     let index = self.state.ui.artist_page_album_index;
                     echo_core::intent::activate_artist_page_row(&mut self.state, index)
+                }
+                ActiveView::WhatsNew => {
+                    let index = self.state.ui.selected_whats_new_index;
+                    echo_core::intent::open_whats_new_album(&mut self.state, index)
                 }
                 _ => {
                     let index = self.state.ui.selected_playlist_index;
@@ -1802,6 +1850,13 @@ impl EchoApp {
             })
             .filter(|(current, _)| !current.is_empty());
 
+        // Inline lyrics keep the top-row center slot; "Playing from X" fills it otherwise.
+        let playing_from = if inline_lyrics.is_none() && has_track {
+            views::playing_context_label(&self.state)
+        } else {
+            None
+        };
+
         let seek_bounds = self.seek_bounds.clone();
         let volume_bounds = self.volume_bounds.clone();
 
@@ -1946,6 +2001,18 @@ impl EchoApp {
                                             .child(SharedString::from(next)),
                                     )
                                 })
+                            })
+                            .when_some(playing_from, |el, label| {
+                                el.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .whitespace_nowrap()
+                                        .max_w_full()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
+                                        .child(SharedString::from(label)),
+                                )
                             }),
                     )
                     .child(
@@ -2275,6 +2342,20 @@ impl Render for EchoApp {
                 .child(SharedString::from(message))
                 .into_any_element()
         });
+        // The audio-device failure banner is persistent (no expiry) and separate from the
+        // status line, so transient statuses can't hide it. Core clears it on recovery.
+        let audio_banner = self.state.ui.audio_output_error.clone().map(|message| {
+            let error = self.state.ui.active_theme.error.gpui(WINDOW_FG());
+            div()
+                .flex_none()
+                .px_4()
+                .py_1()
+                .text_xs()
+                .bg(error.opacity(0.15))
+                .text_color(error)
+                .child(SharedString::from(message))
+                .into_any_element()
+        });
         let lyrics_modal = self
             .state
             .ui
@@ -2388,6 +2469,15 @@ impl Render for EchoApp {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &EnterVisual, _window, cx| this.toggle_visual(cx)))
+            .on_action(cx.listener(|this, _: &MoveTrackUp, _window, cx| {
+                let count = this.take_count();
+                this.move_selected_track(-count, cx)
+            }))
+            .on_action(cx.listener(|this, _: &MoveTrackDown, _window, cx| {
+                let count = this.take_count();
+                this.move_selected_track(count, cx)
+            }))
+            .on_action(cx.listener(|this, _: &ToggleLike, _window, cx| this.toggle_like(cx)))
             .on_action(cx.listener(|this, _: &FocusLibrary, _window, cx| this.focus_library(cx)))
             .on_action(cx.listener(|this, _: &FocusTracks, _window, cx| this.focus_tracks(cx)))
             .on_action(cx.listener(|this, _: &NextTrack, _window, cx| this.play_next(cx)))
@@ -2507,6 +2597,7 @@ impl Render for EchoApp {
             )
             .when_some(status_line, |el, line| el.child(line))
             .when_some(command_bar, |el, bar| el.child(bar))
+            .when_some(audio_banner, |el, banner| el.child(banner))
             .child(self.render_playback_bar(cx))
             .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
@@ -2561,7 +2652,9 @@ fn main() {
             KeyBinding::new("y", ConfirmPrompt, LIST_KEYS),
             KeyBinding::new("left", FocusLibrary, LIST_KEYS),
             KeyBinding::new("right", FocusTracks, LIST_KEYS),
-            KeyBinding::new("l", FocusTracks, LIST_KEYS),
+            // `l` matches the TUI/README: like the focused track (Enter on library rows);
+            // `right` keeps pane focus for arrow navigation.
+            KeyBinding::new("l", ToggleLike, LIST_KEYS),
             // Vim motions, matching the TUI's navigation handler.
             KeyBinding::new("g g", SelectFirst, LIST_KEYS),
             KeyBinding::new("shift-g", SelectLast, LIST_KEYS),
@@ -2622,6 +2715,8 @@ fn main() {
             KeyBinding::new("ctrl-,", ToggleSettings, None),
             KeyBinding::new("?", ToggleHelp, LIST_KEYS),
             KeyBinding::new("v", EnterVisual, LIST_KEYS),
+            KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),
+            KeyBinding::new("shift-j", MoveTrackDown, LIST_KEYS),
         ]);
         cx.on_window_closed(|cx, _window_id| {
             if cx.windows().is_empty() {

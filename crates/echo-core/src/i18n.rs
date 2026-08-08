@@ -17,7 +17,7 @@ pub fn init() {
     map.insert("zh-CN", zh);
     map.insert("zh-TW", zh_tw);
 
-    TRANSLATIONS.set(map).unwrap();
+    let _ = TRANSLATIONS.set(map);
 }
 
 pub fn t(key: &str, lang: &str) -> String {

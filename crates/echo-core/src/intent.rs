@@ -509,6 +509,33 @@ pub fn open_top_artists(state: &mut AppState) -> Option<AppEvent> {
     })
 }
 
+/// Opens the What's New feed (recent releases from followed artists), fetching in the
+/// background when empty — same fill-in-place behavior as [`open_artist_list`].
+pub fn open_whats_new(state: &mut AppState) -> Option<AppEvent> {
+    state.push_view_history();
+    state.ui.active_view = ActiveView::WhatsNew;
+    state.ui.selected_whats_new_index = 0;
+    state
+        .data
+        .whats_new
+        .is_empty()
+        .then_some(AppEvent::FetchWhatsNew)
+}
+
+/// Opens album `index` of the What's New feed as a track list.
+pub fn open_whats_new_album(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    state.ui.selected_whats_new_index = index;
+    let album = state.data.whats_new.get(index)?;
+    let context = TrackListContext::album(
+        album.id.clone(),
+        album.name.clone(),
+        album.artists.clone(),
+        album.image_url.clone(),
+    );
+    state.begin_tracklist_load(context.clone());
+    Some(AppEvent::LoadContextTracks(context))
+}
+
 /// Enters the artist page for followed artist `index` (sidebar Artists tab).
 pub fn open_followed_artist(state: &mut AppState, index: usize) -> Option<AppEvent> {
     state.ui.selected_artist_index = index;
@@ -786,11 +813,12 @@ pub fn adjust_volume(state: &mut AppState, delta: i32) -> AppEvent {
 }
 
 /// Ctrl-L: toggle the inline lyric line in the playback bar, persisted like the TUI does.
+/// `library_config` must be kept in sync too: later whole-section saves (window bounds on
+/// close, sidebar width) write it back verbatim and would otherwise revert the toggle.
 pub fn toggle_condensed_lyrics(state: &mut AppState) {
     state.ui.condensed_lyrics_enabled = !state.ui.condensed_lyrics_enabled;
-    let mut app_config = crate::config::AppConfig::load();
-    app_config.library.condensed_lyrics_enabled = state.ui.condensed_lyrics_enabled;
-    let _ = app_config.save();
+    state.ui.library_config.condensed_lyrics_enabled = state.ui.condensed_lyrics_enabled;
+    state.save_library_config();
 }
 
 /// `R`: refresh whatever the active view shows (artist albums or the library lists).
@@ -1095,6 +1123,97 @@ pub fn add_visual_selection_to_playlist(state: &mut AppState) {
 }
 
 /// `d` twice in visual mode — stage the delete prompt covering the whole range.
+/// Likes `track_id`, or — when it is already liked — stages the remove-confirmation prompt
+/// the frontends render. The like is applied optimistically (set + persisted cache) and the
+/// returned event syncs Spotify; un-liking goes through the prompt's confirm flow instead.
+pub fn toggle_like_track(state: &mut AppState, track_id: String) -> Option<AppEvent> {
+    if state.data.liked_tracks.contains(&track_id) {
+        state.ui.liked_track_remove_prompt = Some(track_id);
+        return None;
+    }
+    state.data.liked_tracks.insert(track_id.clone());
+    let mut cache = crate::config::AppConfig::load_cache();
+    cache.liked_tracks = state.data.liked_tracks.clone();
+    let _ = crate::config::AppConfig::save_cache(&cache);
+    state.ui.status_message = Some(crate::i18n::t(
+        "messages.added_to_liked",
+        &state.ui.library_config.language,
+    ));
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    Some(AppEvent::ToggleTrackLike(track_id, true))
+}
+
+/// `l`: like/unlike whatever row is focused — the track list, the queue, or the search
+/// results' Tracks tab. Other views have no track to like.
+pub fn toggle_like_selected(state: &mut AppState) -> Option<AppEvent> {
+    let track_id = match state.ui.active_view {
+        ActiveView::TrackList => state
+            .data
+            .tracks
+            .get(state.ui.selected_track_index)
+            .map(|track| track.id.clone()),
+        ActiveView::Queue => state
+            .data
+            .queue
+            .get(state.ui.selected_queue_index)
+            .map(|track| track.id.clone()),
+        ActiveView::SearchResults
+            if state.ui.active_search_tab == crate::app::SearchTab::Tracks =>
+        {
+            state
+                .data
+                .search_results
+                .tracks
+                .get(state.ui.selected_search_index)
+                .map(|track| track.id.clone())
+        }
+        _ => None,
+    }?;
+    toggle_like_track(state, track_id)
+}
+
+/// Moves track `from` to position `to` of the current track list, when it is a playlist the
+/// user can modify shown in original order (a sorted projection has no meaningful positions
+/// to reorder). Applies the move optimistically to both `tracks` and `original_tracks`;
+/// the worker syncs the server (or local-playlist file) and rolls back via a context
+/// refresh on failure.
+pub fn move_track_in_playlist(state: &mut AppState, from: usize, to: usize) -> Option<AppEvent> {
+    if state.ui.active_view != ActiveView::TrackList {
+        return None;
+    }
+    let context = state.data.active_tracklist_context.clone()?;
+    if !context.can_modify_playlist(state.data.user_id.as_ref()) {
+        return None;
+    }
+    if state.ui.track_sort != crate::app::TrackSort::Original {
+        state.ui.status_message = Some(crate::i18n::t(
+            "messages.reorder_requires_original",
+            &state.ui.library_config.language,
+        ));
+        state.ui.status_message_expiry =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        return None;
+    }
+    let len = state.data.tracks.len();
+    if from >= len || from == to {
+        return None;
+    }
+    let to = to.min(len - 1);
+    let track = state.data.tracks.remove(from);
+    let track_id = track.id.clone();
+    state.data.tracks.insert(to, track);
+    let original = state.data.original_tracks.remove(from);
+    state.data.original_tracks.insert(to, original);
+    state.ui.selected_track_index = to;
+    Some(AppEvent::MoveTrack {
+        playlist_id: context.id,
+        track_id,
+        from,
+        to,
+    })
+}
+
 pub fn delete_visual_selection(state: &mut AppState) {
     let armed = state.ui.pending_d_press;
     match state.ui.active_view {
@@ -1441,6 +1560,7 @@ mod tests {
                     image_url: None,
                     thumb_url: None,
                     release_year: "2024".to_string(),
+                    release_date: None,
                     track_count: None,
                 })
                 .collect();
@@ -1993,6 +2113,62 @@ mod tests {
                 track_id: "queue:a".to_string()
             }
         );
+    }
+
+    fn owned_playlist_state(ids: &[&str]) -> AppState {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.user_id = Some("owner-id".to_string());
+        state.data.active_tracklist_context = Some(TrackListContext::playlist(
+            "playlist-1".to_string(),
+            "Playlist".to_string(),
+            "owner".to_string(),
+            "owner-id".to_string(),
+            None,
+        ));
+        state.data.tracks = ids.iter().map(|id| track(id)).collect();
+        state.data.original_tracks = state.data.tracks.clone();
+        state
+    }
+
+    #[test]
+    fn move_track_reorders_optimistically_and_reports_the_move() {
+        let mut state = owned_playlist_state(&["a", "b", "c"]);
+
+        let event = move_track_in_playlist(&mut state, 0, 2);
+
+        let order: Vec<&str> = state.data.tracks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(order, vec!["b", "c", "a"]);
+        let original: Vec<&str> = state
+            .data
+            .original_tracks
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
+        assert_eq!(original, vec!["b", "c", "a"]);
+        assert_eq!(state.ui.selected_track_index, 2);
+        assert!(matches!(
+            event,
+            Some(AppEvent::MoveTrack { from: 0, to: 2, ref track_id, .. }) if track_id == "a"
+        ));
+    }
+
+    #[test]
+    fn move_track_refuses_sorted_views_and_foreign_playlists() {
+        crate::i18n::init();
+        let mut state = owned_playlist_state(&["a", "b"]);
+        state.ui.track_sort = crate::app::TrackSort::Title;
+        assert!(move_track_in_playlist(&mut state, 0, 1).is_none());
+        assert_eq!(state.data.tracks[0].id, "a");
+
+        let mut state = owned_playlist_state(&["a", "b"]);
+        state.data.user_id = Some("someone-else".to_string());
+        assert!(move_track_in_playlist(&mut state, 0, 1).is_none());
+        assert_eq!(state.data.tracks[0].id, "a");
+
+        let mut state = owned_playlist_state(&["a", "b"]);
+        assert!(move_track_in_playlist(&mut state, 0, 0).is_none());
+        assert!(move_track_in_playlist(&mut state, 5, 0).is_none());
     }
 
     #[test]

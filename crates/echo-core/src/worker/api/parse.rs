@@ -143,6 +143,7 @@ pub(crate) fn album(album: &serde_json::Value) -> Option<Album> {
             .and_then(|v| v.as_str())
             .map(|v| v.to_string()),
         release_year: release_date.split('-').next().unwrap_or("").to_string(),
+        release_date: (!release_date.is_empty()).then(|| release_date.to_string()),
         track_count: album
             .get("total_tracks")
             .and_then(|v| v.as_u64())

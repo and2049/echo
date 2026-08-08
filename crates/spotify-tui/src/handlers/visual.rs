@@ -169,6 +169,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     }
                 }
             }
+            ActiveView::WhatsNew => {
+                if state.ui.selected_whats_new_index + 1 < state.data.whats_new.len() {
+                    state.ui.selected_whats_new_index += 1;
+                }
+            }
         },
         KeyCode::Char('k') | KeyCode::Up => match state.ui.active_view {
             ActiveView::TrackList => {
@@ -204,6 +209,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             ActiveView::ArtistPage => {
                 if state.ui.artist_page_album_index > 0 {
                     state.ui.artist_page_album_index -= 1;
+                }
+            }
+            ActiveView::WhatsNew => {
+                if state.ui.selected_whats_new_index > 0 {
+                    state.ui.selected_whats_new_index -= 1;
                 }
             }
         },

@@ -103,6 +103,24 @@ pub fn handle_followed_artists_loaded(state: &mut AppState, artists: Vec<crate::
     state.data.followed_artists = artists;
 }
 
+pub fn handle_whats_new_loaded(
+    state: &mut AppState,
+    albums: Vec<crate::models::Album>,
+    done: usize,
+    total: usize,
+) {
+    // The What's New view renders live from state (like the artist list), so no
+    // navigation; each event carries the full merged list so far.
+    state.data.whats_new = albums;
+    state.data.whats_new_progress = (done < total).then_some((done, total));
+    if state.ui.active_view == app::ActiveView::WhatsNew {
+        state.ui.selected_whats_new_index = state
+            .ui
+            .selected_whats_new_index
+            .min(state.data.whats_new.len().saturating_sub(1));
+    }
+}
+
 pub fn handle_top_artists_loaded(state: &mut AppState, artists: Vec<crate::models::Artist>) {
     // The artist-list view renders live from state, so no navigation is needed here;
     // clamping keeps the cursor valid when a range switch shrank the list.

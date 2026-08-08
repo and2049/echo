@@ -296,9 +296,23 @@ async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>
     }
 }
 
+/// Maps a "move `from` → `to`" (post-move index) onto Spotify's `insert_before`, which is
+/// measured against the list before the item is removed — moving down needs `to + 1`.
+pub(crate) fn reorder_insert_before(from: usize, to: usize) -> usize {
+    if to > from { to + 1 } else { to }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reorder_insert_before_maps_post_move_indices() {
+        assert_eq!(reorder_insert_before(0, 2), 3);
+        assert_eq!(reorder_insert_before(2, 0), 0);
+        assert_eq!(reorder_insert_before(3, 4), 5);
+        assert_eq!(reorder_insert_before(4, 3), 3);
+    }
 
     #[test]
     fn resolves_local_queue_tracks_from_library_ids() {
@@ -566,6 +580,7 @@ impl Worker {
         let sync_inflight = Arc::new(AtomicBool::new(false));
         let mut current_track_id: Option<String> = None;
         let mut active_playback_source: Option<ActivePlaybackSource> = None;
+        let mut sleep_deadline: Option<tokio::time::Instant> = None;
         let mut local_playback = LocalPlaybackEngine::default();
         let (local_scan_tx, mut local_scan_rx) = mpsc::channel::<(PathBuf, LocalScanResult)>(4);
         let (local_watch_tx, mut local_watch_rx) = mpsc::channel::<PathBuf>(32);
@@ -665,6 +680,24 @@ impl Worker {
                     sync_interval.reset_after(sync_dur);
                 }
                 _ = interval.tick() => {
+                    if let Some(deadline) = sleep_deadline
+                        && tokio::time::Instant::now() >= deadline
+                    {
+                        sleep_deadline = None;
+                        if active_playback_source == Some(ActivePlaybackSource::Local) {
+                            if let Ok(snapshot) = local_playback.toggle_playback(false) {
+                                is_playing.store(false, std::sync::atomic::Ordering::SeqCst);
+                                emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
+                            }
+                        } else if let Some(ref mut sp) = spotify_opt
+                            && sp.toggle_playback(false).await.is_ok()
+                        {
+                            is_playing.store(false, std::sync::atomic::Ordering::SeqCst);
+                            let _ = self.media_tx.send(media::MediaUpdate::Playback(false, 0)).await;
+                            let _ = self.tx.send(WorkerEvent::PlaybackControlState { is_playing: false }).await;
+                        }
+                        let _ = self.tx.send(WorkerEvent::SleepTimerExpired).await;
+                    }
                     if active_playback_source == Some(ActivePlaybackSource::Local) {
                         match local_playback.tick() {
                             Ok(Some(LocalPlaybackTick::Snapshot(snapshot))) => {
@@ -1198,6 +1231,9 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::SetSleepTimer { duration } => {
+                                sleep_deadline = duration.map(|d| tokio::time::Instant::now() + d);
+                            }
                             AppEvent::ToggleShuffle(is_shuffled) => {
                                 if active_playback_source == Some(ActivePlaybackSource::Local) {
                                     emit_local_snapshot(&self.tx, &self.media_tx, local_playback.set_shuffle(is_shuffled), false).await;
@@ -1479,6 +1515,52 @@ impl Worker {
                                     }
                                 }
                             }
+                            AppEvent::MoveTrack { playlist_id, track_id, from, to } => {
+                                if playlist_id.starts_with("local-playlist:") {
+                                    let mut local_playlists = AppConfig::load_local_playlists();
+                                    if let Some(playlist) = local_playlists.playlists.iter_mut().find(|playlist| playlist.id == playlist_id) {
+                                        // Entries whose local file vanished are filtered out of the
+                                        // view, so the entry is located by id rather than by `from`.
+                                        if let Some(pos) = playlist.entries.iter().position(|entry| entry.track_id() == track_id) {
+                                            let entry = playlist.entries.remove(pos);
+                                            let insert_at = to.min(playlist.entries.len());
+                                            playlist.entries.insert(insert_at, entry);
+                                            playlist.updated_unix_secs = current_unix_secs();
+                                            let _ = AppConfig::save_local_playlists(&local_playlists);
+                                            let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
+                                        }
+                                    }
+                                } else if let Some(ref sp) = spotify_opt {
+                                    use rspotify::prelude::OAuthClient;
+                                    use rspotify::model::PlaylistId;
+
+                                    if let Ok(pid) = PlaylistId::from_id(&playlist_id) {
+                                        let res = sp.client.playlist_reorder_items(
+                                            pid,
+                                            Some(from as i32),
+                                            Some(reorder_insert_before(from, to) as i32),
+                                            Some(1),
+                                            None,
+                                        ).await;
+                                        match res {
+                                            Ok(_) => {
+                                                // The optimistic reorder already matches the server;
+                                                // just drop the stale cached snapshot.
+                                                invalidate_playlist_context_cache(&playlist_id);
+                                            }
+                                            Err(e) => {
+                                                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-reorder-err.log"), format!("Reorder error: {:?}", e));
+                                                let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                    label: "Reorder".to_string(),
+                                                    message: errors::api_request_error_message(&e.into()),
+                                                }).await;
+                                                invalidate_playlist_context_cache(&playlist_id);
+                                                let _ = self.tx.send(WorkerEvent::ForceContextRefresh).await;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             AppEvent::CreatePlaylist(name) => {
                                 if let Some(ref sp) = spotify_opt {
                                     let client = sp.client.clone();
@@ -1725,6 +1807,9 @@ impl Worker {
                             }
                             AppEvent::FetchFollowedArtists => {
                                 browse::spawn_followed_artists(api_client.clone(), self.tx.clone());
+                            }
+                            AppEvent::FetchWhatsNew => {
+                                browse::spawn_whats_new(api_client.clone(), self.tx.clone());
                             }
                             AppEvent::LoadArtistPage {
                                 artist_id,

@@ -10,6 +10,7 @@ pub fn enter_active_node(state: &mut AppState) -> Option<AppEvent> {
         BrowseNode::RecentlyPlayed => echo_core::intent::open_recently_played(state),
         BrowseNode::FollowedArtists => echo_core::intent::open_artist_list(state),
         BrowseNode::TopArtists => echo_core::intent::open_top_artists(state),
+        BrowseNode::WhatsNew => echo_core::intent::open_whats_new(state),
     }
 }
 
@@ -18,7 +19,8 @@ pub fn select_node_from_library_index(state: &mut AppState) {
         0 => BrowseNode::TopTracks,
         1 => BrowseNode::RecentlyPlayed,
         2 => BrowseNode::FollowedArtists,
-        _ => BrowseNode::TopArtists,
+        3 => BrowseNode::TopArtists,
+        _ => BrowseNode::WhatsNew,
     };
 }
 

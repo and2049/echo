@@ -47,7 +47,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('j') | KeyCode::Down => match state.ui.active_view {
             ActiveView::Library => {
                 if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
-                    if state.ui.selected_playlist_index < 2 {
+                    if state.ui.selected_playlist_index < 4 {
                         state.ui.selected_playlist_index += 1;
                     }
                     browse::select_node_from_library_index(state);
@@ -105,6 +105,14 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.ui.selected_device_index += 1;
                 }
             }
+            ActiveView::WhatsNew => {
+                if !state.data.whats_new.is_empty()
+                    && state.ui.selected_whats_new_index
+                        < state.data.whats_new.len().saturating_sub(1)
+                {
+                    state.ui.selected_whats_new_index += 1;
+                }
+            }
         },
         KeyCode::Char('k') | KeyCode::Up => match state.ui.active_view {
             ActiveView::Library => {
@@ -148,6 +156,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.ui.selected_device_index -= 1;
                 }
             }
+            ActiveView::WhatsNew => {
+                if state.ui.selected_whats_new_index > 0 {
+                    state.ui.selected_whats_new_index -= 1;
+                }
+            }
         },
         KeyCode::Char('l') | KeyCode::Char('L')
             if key
@@ -165,65 +178,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state,
                     &KeyEvent::new(KeyCode::Enter, key.modifiers),
                 );
-            } else if state.ui.active_view == ActiveView::TrackList {
-                if state.ui.selected_track_index < state.data.tracks.len() {
-                    let track = &state.data.tracks[state.ui.selected_track_index];
-                    let track_id = track.id.clone();
-                    if state.data.liked_tracks.contains(&track_id) {
-                        state.ui.liked_track_remove_prompt = Some(track_id);
-                    } else {
-                        state.data.liked_tracks.insert(track_id.clone());
-                        state.ui.status_message = Some(echo_core::i18n::t(
-                            "messages.added_to_liked",
-                            &state.ui.library_config.language,
-                        ));
-                        state.ui.status_message_expiry =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                        return Some(AppEvent::ToggleTrackLike(track_id, true));
-                    }
-                }
-            } else if state.ui.active_view == ActiveView::Queue {
-                if state.ui.selected_queue_index < state.data.queue.len() {
-                    let track = &state.data.queue[state.ui.selected_queue_index];
-                    let track_id = track.id.clone();
-                    if state.data.liked_tracks.contains(&track_id) {
-                        state.ui.liked_track_remove_prompt = Some(track_id);
-                    } else {
-                        state.data.liked_tracks.insert(track_id.clone());
-                        state.ui.status_message = Some(echo_core::i18n::t(
-                            "messages.added_to_liked",
-                            &state.ui.library_config.language,
-                        ));
-                        state.ui.status_message_expiry =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                        return Some(AppEvent::ToggleTrackLike(track_id, true));
-                    }
-                }
-            } else if state.ui.active_view == ActiveView::SearchResults
-                && state.ui.active_search_tab == echo_core::app::SearchTab::Tracks
-            {
-                let i = state.ui.selected_search_index;
-                if let Some(track) = state.data.search_results.tracks.get(i) {
-                    let track_id = track.id.clone();
-                    if state.data.liked_tracks.contains(&track_id) {
-                        state.ui.liked_track_remove_prompt = Some(track_id);
-                    } else {
-                        state.data.liked_tracks.insert(track_id.clone());
-
-                        let mut cache = echo_core::config::AppConfig::load_cache();
-                        cache.liked_tracks = state.data.liked_tracks.clone();
-                        let _ = echo_core::config::AppConfig::save_cache(&cache);
-
-                        state.ui.status_message = Some(echo_core::i18n::t(
-                            "messages.added_to_liked",
-                            &state.ui.library_config.language,
-                        ));
-                        state.ui.status_message_expiry =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                        return Some(AppEvent::ToggleTrackLike(track_id, true));
-                    }
-                }
             }
+            return echo_core::intent::toggle_like_selected(state);
         }
         KeyCode::Char('L') => {
             if key
@@ -268,6 +224,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 return echo_core::intent::open_artist_album(
                     state,
                     state.ui.artist_page_album_index,
+                );
+            } else if state.ui.active_view == ActiveView::WhatsNew {
+                return echo_core::intent::open_whats_new_album(
+                    state,
+                    state.ui.selected_whats_new_index,
                 );
             }
         }
@@ -508,6 +469,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 ActiveView::Devices => state.ui.selected_device_index,
                 ActiveView::ArtistList => state.ui.selected_artist_index,
                 ActiveView::ArtistPage => state.ui.artist_page_album_index,
+                ActiveView::WhatsNew => state.ui.selected_whats_new_index,
             };
             state.ui.visual_selection_start = Some(current_idx);
             state.ui.status_message = Some(echo_core::i18n::t(

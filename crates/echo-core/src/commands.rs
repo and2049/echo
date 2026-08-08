@@ -38,6 +38,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
     ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
     ("seek <s|+s|-s>", "Seek to, or by, a number of seconds"),
+    ("sleep <30m|1h|off>", "Pause playback after a delay"),
     ("mute", "Mute, or restore the previous volume"),
     ("open [url|uri]", "Open a Spotify link, or read the clipboard"),
     ("relative <on|off|toggle>", "Vim-style relative line numbers"),
@@ -95,6 +96,11 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                     .collect()
             }
             "range" => ["short", "medium", "long"]
+                .into_iter()
+                .filter(|o| o.starts_with(arg_str))
+                .map(String::from)
+                .collect(),
+            "sleep" => ["15m", "30m", "45m", "1h", "90m", "off"]
                 .into_iter()
                 .filter(|o| o.starts_with(arg_str))
                 .map(String::from)
@@ -179,6 +185,22 @@ fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
         .strip_prefix(command_name)
         .map(str::trim)
         .unwrap_or_default()
+}
+
+/// `:sleep` argument: `off` clears the timer (`Some(None)`), `<n>m`/`<n>h`/bare minutes set
+/// it; anything else is invalid (`None`).
+fn parse_sleep_arg(arg: &str) -> Option<Option<std::time::Duration>> {
+    let arg = arg.trim();
+    if arg.eq_ignore_ascii_case("off") {
+        return Some(None);
+    }
+    let (number, unit_secs) = match arg.chars().last() {
+        Some('m') | Some('M') => (&arg[..arg.len() - 1], 60u64),
+        Some('h') | Some('H') => (&arg[..arg.len() - 1], 3600u64),
+        _ => (arg, 60u64),
+    };
+    let minutes: u64 = number.parse().ok().filter(|n| *n > 0)?;
+    Some(Some(std::time::Duration::from_secs(minutes * unit_secs)))
 }
 
 fn set_status(state: &mut AppState, message: impl Into<String>) {
@@ -320,6 +342,18 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 state.playback.volume = volume;
                 state.save_volume();
                 return Some(AppEvent::SetVolume(volume as u8));
+            }
+            "sleep" => {
+                let arg = command_remainder(cmd, "sleep");
+                let Some(duration) = parse_sleep_arg(arg) else {
+                    set_status(state, "Usage: sleep <30m|1h|off>");
+                    return None;
+                };
+                match duration {
+                    Some(_) => set_status(state, format!("Sleep timer: {arg}")),
+                    None => set_status(state, "Sleep timer off"),
+                }
+                return Some(AppEvent::SetSleepTimer { duration });
             }
             "open" => {
                 let value = {
@@ -779,6 +813,19 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sleep_arg_parses_minutes_hours_and_off() {
+        use std::time::Duration;
+        assert_eq!(parse_sleep_arg("30m"), Some(Some(Duration::from_secs(30 * 60))));
+        assert_eq!(parse_sleep_arg("2h"), Some(Some(Duration::from_secs(2 * 3600))));
+        assert_eq!(parse_sleep_arg("45"), Some(Some(Duration::from_secs(45 * 60))));
+        assert_eq!(parse_sleep_arg("off"), Some(None));
+        assert_eq!(parse_sleep_arg("OFF"), Some(None));
+        assert_eq!(parse_sleep_arg(""), None);
+        assert_eq!(parse_sleep_arg("0m"), None);
+        assert_eq!(parse_sleep_arg("soon"), None);
+    }
 
     fn submit_command(state: &mut AppState, command: &str) -> Option<AppEvent> {
         state.ui.command_buffer = command.to_string();

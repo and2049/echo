@@ -44,6 +44,18 @@ pub enum AppEvent {
     FetchQueue,
     AddTracksToPlaylist(String, Vec<Track>),
     RemoveTracksFromPlaylist(String, Vec<String>),
+    /// Arm (or with `None`, clear) the sleep timer that pauses playback when it fires.
+    SetSleepTimer {
+        duration: Option<std::time::Duration>,
+    },
+    /// Reorder one track of an owned playlist. `from`/`to` are positions in the original
+    /// (unsorted) track order; `track_id` locates local-playlist entries robustly.
+    MoveTrack {
+        playlist_id: String,
+        track_id: String,
+        from: usize,
+        to: usize,
+    },
     CreatePlaylist(String),
     CreateLocalPlaylist(String),
     RenamePlaylist(String, String),
@@ -65,6 +77,7 @@ pub enum AppEvent {
     },
     FetchRecentlyPlayed,
     FetchFollowedArtists,
+    FetchWhatsNew,
     LoadArtistPage {
         artist_id: String,
         artist_name: Option<String>,
@@ -103,6 +116,8 @@ pub enum WorkerEvent {
         message: String,
     },
     AudioOutputRecovered,
+    /// The sleep timer fired and playback was paused worker-side.
+    SleepTimerExpired,
     AudioVisualizationReady(
         std::sync::Arc<parking_lot::Mutex<[f32; 32]>>,
         std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -150,6 +165,13 @@ pub enum WorkerEvent {
     TopArtistsLoaded(Vec<crate::models::Artist>),
     RecentlyPlayedLoaded(Vec<Track>),
     FollowedArtistsLoaded(Vec<crate::models::Artist>),
+    /// Cumulative snapshot of the What's New scan: the full merged album list so far,
+    /// plus scan progress. `done == total` marks the final emission.
+    WhatsNewLoaded {
+        albums: Vec<crate::models::Album>,
+        done: usize,
+        total: usize,
+    },
     ArtistPageOpened {
         artist_id: String,
         artist_name: String,

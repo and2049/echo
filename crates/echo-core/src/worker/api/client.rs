@@ -594,7 +594,15 @@ impl EchoSpotifyClient {
             }
             offset += ARTIST_ALBUMS_PAGE_LIMIT;
         }
-        albums.sort_by(|a, b| b.release_year.cmp(&a.release_year));
+        albums.sort_by(|a, b| {
+            let key = |album: &Album| {
+                album
+                    .release_date
+                    .clone()
+                    .unwrap_or_else(|| album.release_year.clone())
+            };
+            key(b).cmp(&key(a))
+        });
 
         Ok(albums)
     }
@@ -617,7 +625,15 @@ impl EchoSpotifyClient {
             }
             offset += ARTIST_ALBUMS_PAGE_LIMIT;
         }
-        albums.sort_by(|a, b| b.release_year.cmp(&a.release_year));
+        albums.sort_by(|a, b| {
+            let key = |album: &Album| {
+                album
+                    .release_date
+                    .clone()
+                    .unwrap_or_else(|| album.release_year.clone())
+            };
+            key(b).cmp(&key(a))
+        });
 
         Ok(albums)
     }
