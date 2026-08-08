@@ -25,6 +25,9 @@ pub fn spawn_load_artist_page(
     };
 
     tokio::spawn(async move {
+        // The Option survives for the top-tracks search below: querying the literal
+        // "Unknown Artist" placeholder would return garbage.
+        let real_artist_name = artist_name.clone();
         let known_artist_name = artist_name.unwrap_or_else(|| "Unknown Artist".to_string());
 
         // If we already know the image URL, send it immediately; otherwise
@@ -56,6 +59,39 @@ pub fn spawn_load_artist_page(
                 artist_image_url: resolved_image_url,
             })
             .await;
+
+        // Top tracks load in parallel with the albums below; stale responses are
+        // discarded by the reducers' pending-artist-id guard.
+        {
+            let api_clone = api.clone();
+            let tx_clone = tx.clone();
+            let id_clone = artist_id.clone();
+            tokio::spawn(async move {
+                match api_clone
+                    .artist_top_tracks(&id_clone, real_artist_name.as_deref())
+                    .await
+                {
+                    Ok(Some(tracks)) => {
+                        let _ = tx_clone
+                            .send(WorkerEvent::ArtistTopTracksLoaded {
+                                artist_id: id_clone,
+                                tracks,
+                            })
+                            .await;
+                    }
+                    // An identical fetch is already in flight; that task will emit.
+                    Ok(None) => {}
+                    Err(e) => {
+                        let _ = tx_clone
+                            .send(WorkerEvent::ArtistTopTracksLoadFailed {
+                                artist_id: id_clone,
+                                message: e.to_string(),
+                            })
+                            .await;
+                    }
+                }
+            });
+        }
         match api
             .artist_albums_with_policy(&artist_id, ArtistAlbumsCachePolicy::UseCache)
             .await

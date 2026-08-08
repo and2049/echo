@@ -50,6 +50,10 @@ pub struct CacheData {
     pub followed_artists: Option<CachedEntry<Vec<Artist>>>,
     #[serde(default)]
     pub top_tracks: Option<CachedEntry<Vec<Track>>>,
+    /// Only the default (medium) time range is persisted; other ranges live in the
+    /// session cache alone.
+    #[serde(default)]
+    pub top_artists: Option<CachedEntry<Vec<Artist>>>,
     #[serde(default)]
     pub recently_played: Option<CachedEntry<Vec<Track>>>,
     #[serde(default)]
@@ -76,6 +80,7 @@ pub struct ContextTracksCacheEntry {
 
 pub const FOLLOWED_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub const TOP_TRACKS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+pub const TOP_ARTISTS_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 pub const RECENTLY_PLAYED_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 pub const ARTIST_PAGE_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub const ARTIST_ALBUMS_REFRESH_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -154,6 +159,17 @@ impl CacheData {
     pub fn set_top_tracks(&mut self, tracks: Vec<Track>) {
         self.clear_cooldown("top_tracks");
         self.top_tracks = Some(CachedEntry::new(tracks));
+    }
+
+    pub fn get_top_artists(&self) -> Option<Vec<Artist>> {
+        self.top_artists
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(TOP_ARTISTS_CACHE_TTL))
+    }
+
+    pub fn set_top_artists(&mut self, artists: Vec<Artist>) {
+        self.clear_cooldown("top_artists");
+        self.top_artists = Some(CachedEntry::new(artists));
     }
 
     pub fn get_recently_played(&self) -> Option<Vec<Track>> {
@@ -374,6 +390,9 @@ pub struct LibraryConfig {
     pub sidebar_width: Option<f32>,
     #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
+    /// The `time_range` window used by the Top Tracks / Top Artists browse lists.
+    #[serde(default)]
+    pub top_items_range: crate::models::TopItemsRange,
 }
 
 /// A saved desktop window rectangle, in logical pixels.
@@ -433,6 +452,7 @@ impl Default for LibraryConfig {
             normalisation_pregain: default_normalisation_pregain(),
             sidebar_width: None,
             window_bounds: None,
+            top_items_range: crate::models::TopItemsRange::default(),
         }
     }
 }
@@ -838,6 +858,7 @@ mod tests {
                 release_year: "2024".to_string(),
                 track_count,
             }],
+            top_tracks: Vec::new(),
         });
         entry.fetched_at = now_epoch_secs().saturating_sub(age.as_secs());
         entry

@@ -18,6 +18,13 @@ pub struct UIState {
     pub active_library_tab: LibraryTab,
     pub active_search_tab: SearchTab,
     pub active_browse_node: BrowseNode,
+    /// Which list the [`ActiveView::ArtistList`] view renders.
+    pub artist_list_source: ArtistListSource,
+    /// A generated-tracklist browse node (Top Tracks / Recently Played) the user opened
+    /// while its data was still empty: the fetch was fired and the matching `*Loaded`
+    /// reducer completes the navigation. Never set by background fetches, so those
+    /// can't navigate. Artist lists don't need this — that view renders live from state.
+    pub pending_browse_open: Option<BrowseNode>,
     // Selection indices
     pub selected_playlist_index: usize,
     pub selected_artist_index: usize,
@@ -92,6 +99,8 @@ impl UIState {
             active_library_tab: LibraryTab::Playlists,
             active_search_tab: SearchTab::Tracks,
             active_browse_node: BrowseNode::TopTracks,
+            artist_list_source: ArtistListSource::Followed,
+            pending_browse_open: None,
             selected_playlist_index: 0,
             selected_artist_index: 0,
             selected_track_index: 0,
@@ -246,6 +255,7 @@ pub struct DataState {
     pub user_id: Option<String>,
     // Browse data
     pub top_tracks: Vec<Track>,
+    pub top_artists: Vec<crate::models::Artist>,
     pub recently_played: Vec<Track>,
     pub followed_artists: Vec<crate::models::Artist>,
     // Search
@@ -264,6 +274,7 @@ pub struct DataState {
     pub pending_artist_page_id: Option<String>,
     pub artist_page_loading: bool,
     pub artist_albums_loading: bool,
+    pub artist_top_tracks_loading: bool,
 }
 
 impl DataState {
@@ -277,6 +288,7 @@ impl DataState {
             liked_tracks: std::collections::HashSet::new(),
             user_id: None,
             top_tracks: Vec::new(),
+            top_artists: Vec::new(),
             recently_played: Vec::new(),
             followed_artists: Vec::new(),
             search_results: SearchResults::default(),
@@ -290,6 +302,7 @@ impl DataState {
             pending_artist_page_id: None,
             artist_page_loading: false,
             artist_albums_loading: false,
+            artist_top_tracks_loading: false,
         }
     }
 }
@@ -297,6 +310,14 @@ impl DataState {
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
+
+/// Which artist list [`ActiveView::ArtistList`] shows: the followed-artists library
+/// or the `/me/top/artists` ranking.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum ArtistListSource {
+    Followed,
+    Top,
+}
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ActiveView {
@@ -318,6 +339,7 @@ pub struct NavigationSnapshot {
     selected_queue_index: usize,
     selected_artist_index: usize,
     artist_page_album_index: usize,
+    artist_list_source: ArtistListSource,
     active_library_tab: LibraryTab,
     active_search_tab: SearchTab,
     tracks: Vec<Track>,
@@ -333,6 +355,7 @@ pub enum SearchTab {
     Tracks,
     Albums,
     Artists,
+    Playlists,
 }
 
 #[derive(PartialEq, Debug)]
@@ -485,6 +508,7 @@ impl AppState {
             selected_queue_index: self.ui.selected_queue_index,
             selected_artist_index: self.ui.selected_artist_index,
             artist_page_album_index: self.ui.artist_page_album_index,
+            artist_list_source: self.ui.artist_list_source,
             active_library_tab: self.ui.active_library_tab,
             active_search_tab: self.ui.active_search_tab,
             tracks: self.data.tracks.clone(),
@@ -511,6 +535,7 @@ impl AppState {
         self.ui.selected_queue_index = snapshot.selected_queue_index;
         self.ui.selected_artist_index = snapshot.selected_artist_index;
         self.ui.artist_page_album_index = snapshot.artist_page_album_index;
+        self.ui.artist_list_source = snapshot.artist_list_source;
         self.ui.active_library_tab = snapshot.active_library_tab;
         self.ui.active_search_tab = snapshot.active_search_tab;
         self.data.tracks = snapshot.tracks;
@@ -753,6 +778,15 @@ impl AppState {
         self.clear_pending_artist_page();
     }
 
+    /// The list the artist-list view currently shows; every len/render/activate site
+    /// resolves rows through this so the source can't drift between them.
+    pub fn artist_list(&self) -> &[crate::models::Artist] {
+        match self.ui.artist_list_source {
+            ArtistListSource::Followed => &self.data.followed_artists,
+            ArtistListSource::Top => &self.data.top_artists,
+        }
+    }
+
     pub fn begin_artist_page_load(
         &mut self,
         artist_id: String,
@@ -773,11 +807,13 @@ impl AppState {
             artist_name,
             image_url,
             albums: Vec::new(),
+            top_tracks: Vec::new(),
         });
         self.data.pending_artist_page_id = Some(artist_id);
         self.ui.artist_page_album_index = 0;
         self.data.artist_page_loading = true;
         self.data.artist_albums_loading = true;
+        self.data.artist_top_tracks_loading = true;
         self.ui.active_view = ActiveView::ArtistPage;
         self.clear_header_image();
     }
@@ -786,6 +822,7 @@ impl AppState {
         self.data.pending_artist_page_id = None;
         self.data.artist_page_loading = false;
         self.data.artist_albums_loading = false;
+        self.data.artist_top_tracks_loading = false;
     }
 
     fn clear_header_image(&mut self) {

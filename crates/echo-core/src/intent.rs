@@ -211,6 +211,7 @@ fn note_playing_context(state: &mut AppState, target: &PlaybackTarget) {
             is_album: *is_album,
         }),
         PlaybackTarget::SpotifyTrack { .. }
+        | PlaybackTarget::SpotifyTracks { .. }
         | PlaybackTarget::LocalTrack { .. }
         | PlaybackTarget::LocalContext { .. } => None,
     };
@@ -414,6 +415,20 @@ pub fn activate_search_result(state: &mut AppState, index: usize) -> Option<AppE
             }
             open_artist(state, artist)
         }
+        SearchTab::Playlists => {
+            // Foreign playlists load like library ones — the worker fetches any id
+            // (same path the `:open <uri>` command uses).
+            let playlist = state.data.search_results.playlists.get(index)?.clone();
+            let context = TrackListContext::playlist(
+                playlist.id,
+                playlist.name,
+                playlist.owner,
+                playlist.owner_id,
+                playlist.image_url,
+            );
+            state.begin_tracklist_load(context.clone());
+            Some(AppEvent::LoadContextTracks(context))
+        }
     }
 }
 
@@ -468,10 +483,12 @@ fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppE
 
 // Artist pages.
 
-/// Opens the followed-artists list, fetching it first when empty.
+/// Opens the followed-artists list, fetching it in the background when empty. The
+/// artist-list view renders live from state, so a cold open fills in place.
 pub fn open_artist_list(state: &mut AppState) -> Option<AppEvent> {
     state.push_view_history();
     state.ui.active_view = ActiveView::ArtistList;
+    state.ui.artist_list_source = crate::app::ArtistListSource::Followed;
     state.ui.selected_artist_index = 0;
     state
         .data
@@ -480,10 +497,30 @@ pub fn open_artist_list(state: &mut AppState) -> Option<AppEvent> {
         .then_some(AppEvent::FetchFollowedArtists)
 }
 
-/// Enters the artist page for followed artist `index`.
+/// Opens the user's top artists as an artist list, fetching in the background when
+/// empty — same fill-in-place behavior as [`open_artist_list`].
+pub fn open_top_artists(state: &mut AppState) -> Option<AppEvent> {
+    state.push_view_history();
+    state.ui.active_view = ActiveView::ArtistList;
+    state.ui.artist_list_source = crate::app::ArtistListSource::Top;
+    state.ui.selected_artist_index = 0;
+    state.data.top_artists.is_empty().then_some(AppEvent::FetchTopArtists {
+        range: state.ui.library_config.top_items_range,
+    })
+}
+
+/// Enters the artist page for followed artist `index` (sidebar Artists tab).
 pub fn open_followed_artist(state: &mut AppState, index: usize) -> Option<AppEvent> {
     state.ui.selected_artist_index = index;
     let artist = state.data.followed_artists.get(index)?.clone();
+    open_artist(state, artist)
+}
+
+/// Enters the artist page for row `index` of the artist-list view, whichever list
+/// ([`crate::app::ArtistListSource`]) it is showing.
+pub fn open_artist_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    state.ui.selected_artist_index = index;
+    let artist = state.artist_list().get(index)?.clone();
     open_artist(state, artist)
 }
 
@@ -506,8 +543,15 @@ fn open_artist(state: &mut AppState, artist: Artist) -> Option<AppEvent> {
 /// Opens album `index` of the current artist page as a track list.
 pub fn open_artist_album(state: &mut AppState, index: usize) -> Option<AppEvent> {
     state.ui.artist_page_album_index = index;
+    open_album_from_artist_page(state, index)
+}
+
+/// The album-opening body shared by [`open_artist_album`] (TUI, album-relative cursor) and
+/// [`activate_artist_page_row`] (desktop, combined cursor): deliberately does not touch the
+/// cursor, so each caller's own index space survives the history snapshot.
+fn open_album_from_artist_page(state: &mut AppState, album_index: usize) -> Option<AppEvent> {
     let data = state.data.artist_page_data.clone()?;
-    let album = data.albums.get(index)?;
+    let album = data.albums.get(album_index)?;
     let context = TrackListContext::album(
         album.id.clone(),
         album.name.clone(),
@@ -517,6 +561,41 @@ pub fn open_artist_album(state: &mut AppState, index: usize) -> Option<AppEvent>
     state.begin_tracklist_load(context.clone());
     Some(AppEvent::LoadContextTracks(context))
 }
+
+/// Activates row `index` of the artist page in the desktop's combined index space:
+/// rows `0..top_tracks.len()` play a Popular track, the rest open the matching album.
+pub fn activate_artist_page_row(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    let top_len = state
+        .data
+        .artist_page_data
+        .as_ref()
+        .map_or(0, |data| data.top_tracks.len());
+    state.ui.artist_page_album_index = index;
+    if index < top_len {
+        play_artist_top_track(state, index)
+    } else {
+        open_album_from_artist_page(state, index - top_len)
+    }
+}
+
+/// Plays top track `index` of the current artist page. The whole Popular list is sent as
+/// the playback target, so up-next continues down it without leaving the page.
+pub fn play_artist_top_track(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    let data = state.data.artist_page_data.as_ref()?;
+    let track = data.top_tracks.get(index)?.clone();
+    let track_ids: Vec<String> = data
+        .top_tracks
+        .iter()
+        .map(|track| track.id.clone())
+        .collect();
+    let target = PlaybackTarget::SpotifyTracks {
+        track_ids,
+        selected_index: index,
+    };
+    note_playing_context(state, &target);
+    play_event_with_target(&track, target)
+}
+
 
 /// Backs out of an artist page to the artist list, cancelling any in-flight page load.
 pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
@@ -559,8 +638,12 @@ pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
 /// Opens the user's top tracks; fetches them first when none are cached yet.
 pub fn open_top_tracks(state: &mut AppState) -> Option<AppEvent> {
     if state.data.top_tracks.is_empty() {
-        return Some(AppEvent::FetchTopTracks);
+        state.ui.pending_browse_open = Some(crate::models::BrowseNode::TopTracks);
+        return Some(AppEvent::FetchTopTracks {
+            range: state.ui.library_config.top_items_range,
+        });
     }
+    state.ui.pending_browse_open = None;
     state.show_generated_tracks(
         state.data.top_tracks.clone(),
         TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
@@ -571,12 +654,46 @@ pub fn open_top_tracks(state: &mut AppState) -> Option<AppEvent> {
 /// Opens the recently-played list; fetches it first when none is cached yet.
 pub fn open_recently_played(state: &mut AppState) -> Option<AppEvent> {
     if state.data.recently_played.is_empty() {
+        state.ui.pending_browse_open = Some(crate::models::BrowseNode::RecentlyPlayed);
         return Some(AppEvent::FetchRecentlyPlayed);
     }
+    state.ui.pending_browse_open = None;
     state.show_generated_tracks(
         state.data.recently_played.clone(),
         TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
     );
+    None
+}
+
+/// Switches the Top Tracks / Top Artists time window, persists it, and refetches
+/// whichever top list is currently on screen so it updates in place (the reducers
+/// refresh an open list without re-navigating).
+pub fn set_top_items_range(
+    state: &mut AppState,
+    range: crate::models::TopItemsRange,
+) -> Option<AppEvent> {
+    if state.ui.library_config.top_items_range == range {
+        return None;
+    }
+    state.ui.library_config.top_items_range = range;
+    state.save_library_config();
+    state.data.top_tracks.clear();
+    state.data.top_artists.clear();
+
+    let top_tracks_open = state.ui.active_view == ActiveView::TrackList
+        && state
+            .data
+            .active_tracklist_context
+            .as_ref()
+            .is_some_and(|context| context.id == "TOP_TRACKS");
+    if top_tracks_open {
+        return Some(AppEvent::FetchTopTracks { range });
+    }
+    if state.ui.active_view == ActiveView::ArtistList
+        && state.ui.artist_list_source == crate::app::ArtistListSource::Top
+    {
+        return Some(AppEvent::FetchTopArtists { range });
+    }
     None
 }
 
@@ -1309,6 +1426,168 @@ mod tests {
             artist_id: None,
             artists: Vec::new(),
         }
+    }
+
+    fn artist_page_with(top_ids: &[&str], album_count: usize) -> AppState {
+        let mut state = AppState::new();
+        state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
+        if let Some(data) = state.data.artist_page_data.as_mut() {
+            data.top_tracks = top_ids.iter().map(|id| track(id)).collect();
+            data.albums = (0..album_count)
+                .map(|i| crate::models::Album {
+                    id: format!("album-{i}"),
+                    name: format!("Album {i}"),
+                    artists: "Artist".to_string(),
+                    image_url: None,
+                    thumb_url: None,
+                    release_year: "2024".to_string(),
+                    track_count: None,
+                })
+                .collect();
+        }
+        state
+    }
+
+    #[test]
+    fn artist_page_row_inside_popular_plays_that_top_track() {
+        let mut state = artist_page_with(&["t0", "t1", "t2"], 2);
+
+        let event = activate_artist_page_row(&mut state, 1);
+
+        assert_eq!(state.ui.artist_page_album_index, 1);
+        match event {
+            Some(AppEvent::PlayTrack {
+                target:
+                    PlaybackTarget::SpotifyTracks {
+                        track_ids,
+                        selected_index,
+                    },
+                track_id,
+                ..
+            }) => {
+                assert_eq!(track_ids, vec!["t0", "t1", "t2"]);
+                assert_eq!(selected_index, 1);
+                assert_eq!(track_id, "t1");
+            }
+            _ => panic!("expected a SpotifyTracks play event"),
+        }
+    }
+
+    #[test]
+    fn artist_page_row_at_popular_boundary_opens_the_first_album() {
+        let mut state = artist_page_with(&["t0", "t1", "t2"], 2);
+
+        let event = activate_artist_page_row(&mut state, 3);
+
+        assert_eq!(state.ui.artist_page_album_index, 3);
+        match event {
+            Some(AppEvent::LoadContextTracks(context)) => assert_eq!(context.id, "album-0"),
+            _ => panic!("expected LoadContextTracks for the first album"),
+        }
+    }
+
+    #[test]
+    fn playlist_search_result_opens_a_playlist_context() {
+        let mut state = AppState::new();
+        state.ui.active_search_tab = SearchTab::Playlists;
+        state.data.search_results.playlists.push(crate::models::Playlist {
+            id: "pl".to_string(),
+            name: "Mix".to_string(),
+            owner: "Owner".to_string(),
+            owner_id: "owner-id".to_string(),
+            image_url: Some("cover".to_string()),
+            thumb_url: None,
+        });
+
+        let event = activate_search_result(&mut state, 0);
+
+        match event {
+            Some(AppEvent::LoadContextTracks(context)) => {
+                assert_eq!(context.id, "pl");
+                assert_eq!(context.kind, crate::models::TrackListContextKind::Playlist);
+                assert_eq!(context.subtitle, "Owner");
+                assert_eq!(context.owner_id.as_deref(), Some("owner-id"));
+                assert_eq!(context.image_url.as_deref(), Some("cover"));
+            }
+            _ => panic!("expected a playlist LoadContextTracks"),
+        }
+    }
+
+    #[test]
+    fn open_top_artists_opens_the_list_and_fetches_when_empty() {
+        let mut state = AppState::new();
+
+        let event = open_top_artists(&mut state);
+
+        assert!(matches!(event, Some(AppEvent::FetchTopArtists { .. })));
+        assert_eq!(state.ui.active_view, ActiveView::ArtistList);
+        assert_eq!(
+            state.ui.artist_list_source,
+            crate::app::ArtistListSource::Top
+        );
+
+        state.data.top_artists.push(crate::models::Artist {
+            id: "a".to_string(),
+            name: "A".to_string(),
+            followers: 0,
+            image_url: None,
+        });
+        assert!(open_top_artists(&mut state).is_none());
+    }
+
+    #[test]
+    fn open_artist_at_reads_the_active_list_source() {
+        let mut state = AppState::new();
+        state.data.followed_artists.push(crate::models::Artist {
+            id: "followed".to_string(),
+            name: "Followed".to_string(),
+            followers: 0,
+            image_url: None,
+        });
+        state.data.top_artists.push(crate::models::Artist {
+            id: "top".to_string(),
+            name: "Top".to_string(),
+            followers: 0,
+            image_url: None,
+        });
+
+        state.ui.artist_list_source = crate::app::ArtistListSource::Top;
+        let event = open_artist_at(&mut state, 0);
+        match event {
+            Some(AppEvent::LoadArtistPage { artist_id, .. }) => assert_eq!(artist_id, "top"),
+            _ => panic!("expected LoadArtistPage for the top-artists row"),
+        }
+    }
+
+    #[test]
+    fn switching_range_refetches_an_open_top_tracks_list_in_place() {
+        let mut state = AppState::new();
+        state.data.top_tracks = vec![track("t")];
+        open_top_tracks(&mut state);
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+        let history_depth = state.ui.view_history.len();
+
+        let event =
+            set_top_items_range(&mut state, crate::models::TopItemsRange::Short);
+
+        assert!(matches!(
+            event,
+            Some(AppEvent::FetchTopTracks {
+                range: crate::models::TopItemsRange::Short
+            })
+        ));
+        assert!(state.data.top_tracks.is_empty());
+        assert_eq!(state.ui.pending_browse_open, None);
+        assert_eq!(state.ui.view_history.len(), history_depth);
+    }
+
+    #[test]
+    fn switching_to_the_same_range_is_inert() {
+        let mut state = AppState::new();
+
+        assert!(
+            set_top_items_range(&mut state, crate::models::TopItemsRange::Medium).is_none()
+        );
     }
 
     fn tracklist_with(ids: &[&str]) -> AppState {

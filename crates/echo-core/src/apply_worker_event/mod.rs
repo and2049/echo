@@ -82,6 +82,7 @@ pub fn apply_worker_event(
         WorkerEvent::DevicesLoaded(devices) => data::handle_devices_loaded(state, devices),
         WorkerEvent::TracksQueued(count) => data::handle_tracks_queued(state, count),
         WorkerEvent::TopTracksLoaded(tracks) => data::handle_top_tracks_loaded(state, tracks),
+        WorkerEvent::TopArtistsLoaded(artists) => data::handle_top_artists_loaded(state, artists),
         WorkerEvent::RecentlyPlayedLoaded(tracks) => data::handle_recently_played_loaded(state, tracks),
         WorkerEvent::FollowedArtistsLoaded(artists) => data::handle_followed_artists_loaded(state, artists),
         WorkerEvent::ArtistPageOpened { artist_id, artist_name, artist_image_url } => {
@@ -98,6 +99,12 @@ pub fn apply_worker_event(
         }
         WorkerEvent::ArtistImageResolved { artist_id, image_url } => {
             artist::handle_image_resolved(state, worker_tx, artist_id, image_url)
+        }
+        WorkerEvent::ArtistTopTracksLoaded { artist_id, tracks } => {
+            artist::handle_top_tracks_loaded(state, artist_id, tracks)
+        }
+        WorkerEvent::ArtistTopTracksLoadFailed { artist_id, message } => {
+            artist::handle_top_tracks_load_failed(state, artist_id, message)
         }
     }
 }

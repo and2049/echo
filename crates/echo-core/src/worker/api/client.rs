@@ -51,24 +51,29 @@ impl EchoSpotifyClient {
         }
     }
 
-    pub async fn top_tracks(&self) -> Result<Option<Vec<Track>>> {
-        if let Some(tracks) = self.cache.lock().await.top_tracks() {
+    pub async fn top_tracks(
+        &self,
+        range: crate::models::TopItemsRange,
+    ) -> Result<Option<Vec<Track>>> {
+        // Only the default range is persisted; the others live in the session cache.
+        let persist = range == crate::models::TopItemsRange::Medium;
+        if let Some(tracks) = self.cache.lock().await.top_tracks(range) {
             log_api("top_tracks route=cache");
             return Ok(Some(tracks));
         }
-        if let Some(tracks) = AppConfig::load_cache().get_top_tracks() {
+        if persist && let Some(tracks) = AppConfig::load_cache().get_top_tracks() {
             log_api("top_tracks route=persistent_cache");
-            self.cache.lock().await.set_top_tracks(tracks.clone());
+            self.cache.lock().await.set_top_tracks(range, tracks.clone());
             return Ok(Some(tracks));
         }
 
-        let key = CacheKey::TopTracks;
+        let key = CacheKey::TopTracks(range);
         if !self.begin_fetch(key.clone(), "Top tracks").await? {
             return Ok(None);
         }
 
         let result = async {
-            match self.third_party_worker().fetch_top_tracks().await {
+            match self.third_party_worker().fetch_top_tracks(range).await {
                 Ok(tracks) => {
                     log_api("top_tracks route=third_party");
                     Ok(tracks)
@@ -78,7 +83,7 @@ impl EchoSpotifyClient {
                     if is_probable_rate_limit(&err) {
                         Err(err)
                     } else {
-                        self.first_party_top_tracks().await
+                        self.first_party_top_tracks(range).await
                     }
                 }
             }
@@ -87,9 +92,50 @@ impl EchoSpotifyClient {
 
         self.finish_fetch(&key, &result).await;
         let tracks = result?;
-        self.cache.lock().await.set_top_tracks(tracks.clone());
-        update_persistent_cache(|cache| cache.set_top_tracks(tracks.clone()));
+        self.cache.lock().await.set_top_tracks(range, tracks.clone());
+        if persist {
+            update_persistent_cache(|cache| cache.set_top_tracks(tracks.clone()));
+        }
         Ok(Some(tracks))
+    }
+
+    /// The user's top artists. Third-party only: the first-party route's shared client
+    /// id is quota-throttled, and this list is decorative enough to fail soft.
+    pub async fn top_artists(
+        &self,
+        range: crate::models::TopItemsRange,
+    ) -> Result<Option<Vec<Artist>>> {
+        let persist = range == crate::models::TopItemsRange::Medium;
+        if let Some(artists) = self.cache.lock().await.top_artists(range) {
+            log_api("top_artists route=cache");
+            return Ok(Some(artists));
+        }
+        if persist && let Some(artists) = AppConfig::load_cache().get_top_artists() {
+            log_api("top_artists route=persistent_cache");
+            self.cache
+                .lock()
+                .await
+                .set_top_artists(range, artists.clone());
+            return Ok(Some(artists));
+        }
+
+        let key = CacheKey::TopArtists(range);
+        if !self.begin_fetch(key.clone(), "Top artists").await? {
+            return Ok(None);
+        }
+
+        let result = self.third_party_worker().fetch_top_artists(range).await;
+        self.finish_fetch(&key, &result).await;
+        let artists = result?;
+        log_api("top_artists route=third_party");
+        self.cache
+            .lock()
+            .await
+            .set_top_artists(range, artists.clone());
+        if persist {
+            update_persistent_cache(|cache| cache.set_top_artists(artists.clone()));
+        }
+        Ok(Some(artists))
     }
 
     pub async fn recently_played(&self) -> Result<Option<Vec<Track>>> {
@@ -180,6 +226,62 @@ impl EchoSpotifyClient {
             .set_followed_artists(artists.clone());
         update_persistent_cache(|cache| cache.set_followed_artists(artists.clone()));
         Ok(Some(artists))
+    }
+
+    /// An artist's top tracks, approximated by a third-party track search filtered to
+    /// the artist's own credits: the real `/artists/{id}/top-tracks` endpoint is gone
+    /// from the dev-mode API and the first-party route is quota-throttled. Session-
+    /// cached, never persisted (see `ArtistPageData`).
+    pub async fn artist_top_tracks(
+        &self,
+        artist_id: &str,
+        artist_name: Option<&str>,
+    ) -> Result<Option<Vec<Track>>> {
+        if let Some(tracks) = self.cache.lock().await.artist_top_tracks(artist_id) {
+            log_api(&format!("artist_top_tracks route=cache artist={artist_id}"));
+            return Ok(Some(tracks));
+        }
+
+        let key = CacheKey::ArtistTopTracks(artist_id.to_string());
+        if !self.begin_fetch(key.clone(), "Artist top tracks").await? {
+            return Ok(None);
+        }
+
+        let result = async {
+            let name = match artist_name {
+                Some(name) => name.to_string(),
+                // A page opened by bare id (pasted URI) has no name yet; searching
+                // for the "Unknown Artist" placeholder would return garbage.
+                None => self.fetch_artist_name(artist_id).await?,
+            };
+            let tracks = self
+                .third_party_worker()
+                .search_artist_top_tracks(artist_id, &name)
+                .await?;
+            log_api(&format!(
+                "artist_top_tracks route=third_party_search artist={artist_id} count={}",
+                tracks.len()
+            ));
+            Ok(tracks)
+        }
+        .await;
+
+        self.finish_fetch(&key, &result).await;
+        let tracks = result?;
+        self.cache
+            .lock()
+            .await
+            .set_artist_top_tracks(artist_id.to_string(), tracks.clone());
+        Ok(Some(tracks))
+    }
+
+    async fn fetch_artist_name(&self, artist_id: &str) -> Result<String> {
+        let url = format!("https://api.spotify.com/v1/artists/{artist_id}");
+        let json = self.third_party_json(&url).await?;
+        json.get("name")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .context("Artist profile has no name")
     }
 
     pub async fn artist_albums_with_policy(
@@ -331,11 +433,19 @@ impl EchoSpotifyClient {
         Ok(value)
     }
 
-    async fn first_party_top_tracks(&self) -> Result<Vec<Track>> {
+    async fn first_party_top_tracks(
+        &self,
+        range: crate::models::TopItemsRange,
+    ) -> Result<Vec<Track>> {
+        let time_range = match range {
+            crate::models::TopItemsRange::Short => "short_term",
+            crate::models::TopItemsRange::Medium => "medium_term",
+            crate::models::TopItemsRange::Long => "long_term",
+        };
         let json = self
             .first_party_json(
                 ApiEndpoint::TopTracks,
-                "https://api.spotify.com/v1/me/top/tracks?limit=50",
+                &format!("https://api.spotify.com/v1/me/top/tracks?limit=50&time_range={time_range}"),
             )
             .await?;
         Ok(json
@@ -428,6 +538,7 @@ impl EchoSpotifyClient {
                     artist_name: "Unknown Artist".to_string(),
                     image_url: None,
                     albums: Vec::new(),
+                    top_tracks: Vec::new(),
                 });
             page.albums = albums.clone();
             cache.set_artist_page(artist_id.to_string(), page);
@@ -558,10 +669,13 @@ fn record_rate_limit_cooldown(key: &str, retry_after: Duration) -> Duration {
 
 fn persistent_cooldown_key(key: &CacheKey) -> String {
     match key {
-        CacheKey::TopTracks => "top_tracks".to_string(),
+        // Range-independent: rate limits are endpoint-scoped, not per time window.
+        CacheKey::TopTracks(_) => "top_tracks".to_string(),
+        CacheKey::TopArtists(_) => "top_artists".to_string(),
         CacheKey::RecentlyPlayed => "recently_played".to_string(),
         CacheKey::FollowedArtists => "followed_artists".to_string(),
         CacheKey::ArtistAlbums(artist_id) => format!("artist_albums:{artist_id}"),
+        CacheKey::ArtistTopTracks(artist_id) => format!("artist_top_tracks:{artist_id}"),
     }
 }
 

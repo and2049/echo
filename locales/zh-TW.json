@@ -61,6 +61,13 @@
   "desktop": {
     "top_tracks": "熱門曲目",
     "recently_played": "最近播放",
+    "popular": "熱門單曲",
+    "albums_section": "專輯",
+    "top_artists": "熱門藝人",
+    "range_short": "近4週",
+    "range_medium": "近6個月",
+    "range_long": "全部時間",
+    "following": "追蹤中",
     "search_placeholder": "搜尋 — ctrl-k",
     "loading": "載入中…",
     "loading_artist": "正在載入歌手…",

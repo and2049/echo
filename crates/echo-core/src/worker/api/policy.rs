@@ -14,12 +14,16 @@ pub enum ApiEndpoint {
     RecentlyPlayed,
     FollowedArtists,
     ArtistPage,
+    ArtistTopTracks,
 }
 
 impl ApiEndpoint {
     pub fn route(self) -> AuthRoute {
         match self {
-            Self::Library => AuthRoute::ThirdParty,
+            // Artist top tracks are approximated with a third-party search: the real
+            // endpoint is gone from the dev-mode API and the first-party route's shared
+            // client id is quota-throttled.
+            Self::Library | Self::ArtistTopTracks => AuthRoute::ThirdParty,
             Self::ArtistPage => AuthRoute::FirstParty,
             Self::TopTracks | Self::RecentlyPlayed | Self::FollowedArtists => {
                 AuthRoute::FirstPartyFallback
@@ -34,6 +38,7 @@ impl ApiEndpoint {
             Self::RecentlyPlayed => "recently_played",
             Self::FollowedArtists => "followed_artists",
             Self::ArtistPage => "artist_page",
+            Self::ArtistTopTracks => "artist_top_tracks",
         }
     }
 }

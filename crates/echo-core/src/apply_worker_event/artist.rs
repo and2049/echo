@@ -29,6 +29,7 @@ pub fn handle_page_opened(
             artist_name,
             image_url: artist_image_url.clone(),
             albums: Vec::new(),
+            top_tracks: Vec::new(),
         });
     } else if let Some(data) = state.data.artist_page_data.as_mut()
         && data.image_url.is_none()
@@ -39,6 +40,7 @@ pub fn handle_page_opened(
     state.ui.artist_page_album_index = 0;
     state.data.artist_page_loading = true;
     state.data.artist_albums_loading = true;
+    state.data.artist_top_tracks_loading = true;
     if let Some(url) = artist_image_url.as_ref() {
         image_tasks::spawn_header_for_url(
             url,
@@ -105,6 +107,31 @@ pub fn handle_albums_rate_limited(
     }
 }
 
+pub fn handle_top_tracks_loaded(
+    state: &mut AppState,
+    artist_id: String,
+    tracks: Vec<crate::models::Track>,
+) {
+    if let Some(data) = state.data.artist_page_data.as_mut()
+        && data.artist_id == artist_id
+    {
+        data.top_tracks = tracks;
+        state.data.artist_top_tracks_loading = false;
+    }
+}
+
+/// Log-only failure (already logged at the API layer): the Popular section simply
+/// stays hidden while the rest of the page remains usable.
+pub fn handle_top_tracks_load_failed(state: &mut AppState, artist_id: String, _message: String) {
+    if state
+        .data.artist_page_data
+        .as_ref()
+        .is_some_and(|data| data.artist_id == artist_id)
+    {
+        state.data.artist_top_tracks_loading = false;
+    }
+}
+
 pub fn handle_image_resolved(
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerEvent>,
@@ -164,6 +191,39 @@ mod tests {
                 .map(|data| data.albums.len()),
             Some(0)
         );
+    }
+
+    fn sample_track(id: &str) -> crate::models::Track {
+        crate::models::Track {
+            id: id.to_string(),
+            source: crate::models::TrackSource::Spotify,
+            local_path: None,
+            name: id.to_string(),
+            artist: String::new(),
+            album: String::new(),
+            added_at: None,
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+            artist_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_top_tracks_are_ignored() {
+        let mut state = AppState::new();
+        state.begin_artist_page_load("current".to_string(), "Current".to_string(), None);
+
+        handle_top_tracks_loaded(&mut state, "stale".to_string(), vec![sample_track("t")]);
+
+        assert!(
+            state
+                .data.artist_page_data
+                .as_ref()
+                .is_some_and(|data| data.top_tracks.is_empty())
+        );
+        assert!(state.data.artist_top_tracks_loading);
     }
 
     #[tokio::test]

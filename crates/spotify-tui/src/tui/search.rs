@@ -51,7 +51,18 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             echo_core::i18n::t("ui.artists", &state.ui.library_config.language)
         )
     };
-    let tab_title = format!("{} {} {}", t_title, a_title, ar_title);
+    let p_title = if state.ui.active_search_tab == SearchTab::Playlists {
+        format!(
+            "[{}]",
+            echo_core::i18n::t("ui.playlists", &state.ui.library_config.language)
+        )
+    } else {
+        format!(
+            " {} ",
+            echo_core::i18n::t("ui.playlists", &state.ui.library_config.language)
+        )
+    };
+    let tab_title = format!("{} {} {} {}", t_title, a_title, ar_title, p_title);
 
     let search_block = Block::default()
         .borders(Borders::ALL)
@@ -234,6 +245,46 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                 .row_highlight_style(state.ui.active_theme.selected_style())
                 .highlight_symbol(" ")
                 .highlight_spacing(HighlightSpacing::Always);
+            let mut ts = TableState::default();
+            ts.select(Some(sel));
+            frame.render_stateful_widget(table, inner, &mut ts);
+        }
+        SearchTab::Playlists => {
+            let header = Row::new(vec![
+                echo_core::i18n::t("ui.playlists", &state.ui.library_config.language),
+                "Owner".to_string(),
+            ])
+            .style(header_style)
+            .height(1);
+            let rows: Vec<Row> = state.data
+                .search_results
+                .playlists
+                .iter()
+                .enumerate()
+                .map(|(i, playlist)| {
+                    let style = if i == sel {
+                        state.ui.active_theme.selected_style()
+                    } else {
+                        state.ui.active_theme.base_style()
+                    };
+                    let w_name = (inner.width * 50 / 100).saturating_sub(1);
+                    let w_owner = (inner.width * 50 / 100).saturating_sub(1);
+                    Row::new(vec![
+                        Cell::from(truncate_to_width_with_ellipsis(&playlist.name, w_name)),
+                        Cell::from(truncate_to_width_with_ellipsis(&playlist.owner, w_owner)),
+                    ])
+                    .style(style)
+                })
+                .collect();
+            let table = Table::new(
+                rows,
+                [Constraint::Percentage(50), Constraint::Percentage(50)],
+            )
+            .column_spacing(1)
+            .header(header)
+            .row_highlight_style(state.ui.active_theme.selected_style())
+            .highlight_symbol(" ")
+            .highlight_spacing(HighlightSpacing::Always);
             let mut ts = TableState::default();
             ts.select(Some(sel));
             frame.render_stateful_widget(table, inner, &mut ts);

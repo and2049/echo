@@ -478,6 +478,39 @@ impl SpotifyWorker {
         Ok(())
     }
 
+    pub async fn play_uris(&mut self, track_ids: &[String], selected_index: usize) -> Result<()> {
+        let result = self.play_uris_inner(track_ids, selected_index).await;
+        match result {
+            Err(ref e) if is_device_not_found(e) => {
+                self.device_id = None;
+                self.play_uris_inner(track_ids, selected_index).await
+            }
+            other => other,
+        }
+    }
+
+    /// Plays an ad-hoc uris list (artist top tracks) starting at `selected_index`,
+    /// so up-next is the remainder of the list.
+    async fn play_uris_inner(&mut self, track_ids: &[String], selected_index: usize) -> Result<()> {
+        let target_device = self.get_device_id().await;
+
+        let uris = track_ids
+            .iter()
+            .map(|id| {
+                rspotify::model::TrackId::from_id(id.as_str())
+                    .map(rspotify::model::PlayableId::Track)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let offset = uris
+            .get(selected_index)
+            .map(|uri| rspotify::model::Offset::Uri(uri.uri()));
+
+        self.client
+            .start_uris_playback(uris, target_device.as_deref(), offset, None)
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_track_metadata(
         &self,
         track_id: &str,

@@ -84,6 +84,31 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     })
 }
 
+/// A [`Track`] from rspotify's full track model. `None` for local tracks and tracks
+/// without an id, mirroring [`track`].
+pub(crate) fn track_from_full(track: rspotify::model::FullTrack) -> Option<Track> {
+    use rspotify::prelude::Id;
+    if track.is_local {
+        return None;
+    }
+    let id = track.id.as_ref()?.id().to_string();
+    let artists = track_artists(&track.artists);
+    Some(Track {
+        id,
+        source: TrackSource::Spotify,
+        local_path: None,
+        name: track.name,
+        artist: joined_artist_names(&artists),
+        album: track.album.name,
+        added_at: None,
+        duration_ms: track.duration.num_milliseconds() as u32,
+        image_url: track.album.images.first().map(|img| img.url.clone()),
+        album_id: track.album.id.map(|id| id.id().to_string()),
+        artist_id: artists.first().and_then(|artist| artist.id.clone()),
+        artists,
+    })
+}
+
 pub(crate) fn album(album: &serde_json::Value) -> Option<Album> {
     let release_date = album
         .get("release_date")

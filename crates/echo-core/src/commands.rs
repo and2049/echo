@@ -41,6 +41,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("mute", "Mute, or restore the previous volume"),
     ("open [url|uri]", "Open a Spotify link, or read the clipboard"),
     ("relative <on|off|toggle>", "Vim-style relative line numbers"),
+    ("range <short|medium|long>", "Top tracks/artists time range"),
     ("redraw", "Clear and redraw (TUI only)"),
 ];
 
@@ -93,6 +94,11 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                     .filter(|o| o.starts_with(arg_str))
                     .collect()
             }
+            "range" => ["short", "medium", "long"]
+                .into_iter()
+                .filter(|o| o.starts_with(arg_str))
+                .map(String::from)
+                .collect(),
             _ => vec![],
         }
     } else {
@@ -295,6 +301,19 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 }
                 state.playback.set_optimistic_progress(target);
                 return Some(AppEvent::SeekTo(target));
+            }
+            "range" => {
+                let parsed = match args.next() {
+                    Some("short") => Some(crate::models::TopItemsRange::Short),
+                    Some("medium") => Some(crate::models::TopItemsRange::Medium),
+                    Some("long") => Some(crate::models::TopItemsRange::Long),
+                    _ => None,
+                };
+                let Some(range) = parsed else {
+                    set_status(state, "Usage: range <short|medium|long>");
+                    return None;
+                };
+                return crate::intent::set_top_items_range(state, range);
             }
             "mute" => {
                 let volume = state.playback.toggle_mute_target();

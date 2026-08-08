@@ -158,7 +158,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistList => {
-                if state.ui.selected_artist_index + 1 < state.data.followed_artists.len() {
+                if state.ui.selected_artist_index + 1 < state.artist_list().len() {
                     state.ui.selected_artist_index += 1;
                 }
             }
@@ -384,5 +384,6 @@ fn search_results_len(state: &AppState) -> usize {
         echo_core::app::SearchTab::Tracks => state.data.search_results.tracks.len(),
         echo_core::app::SearchTab::Albums => state.data.search_results.albums.len(),
         echo_core::app::SearchTab::Artists => state.data.search_results.artists.len(),
+        echo_core::app::SearchTab::Playlists => state.data.search_results.playlists.len(),
     }
 }

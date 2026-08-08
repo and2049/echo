@@ -4,18 +4,43 @@ use crate::events::WorkerEvent;
 
 use super::{api::client::EchoSpotifyClient, errors::api_request_error_message};
 
-pub fn spawn_top_tracks(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>) {
+pub fn spawn_top_tracks(
+    api_client: Option<EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    range: crate::models::TopItemsRange,
+) {
     let Some(api) = api_client else {
         return;
     };
     tokio::spawn(async move {
-        match api.top_tracks().await {
+        match api.top_tracks(range).await {
             Ok(Some(tracks)) => {
                 let _ = tx.send(WorkerEvent::TopTracksLoaded(tracks)).await;
             }
             Ok(None) => {}
             Err(e) => {
                 send_api_error(tx, "Top tracks", "top_tracks", e).await;
+            }
+        }
+    });
+}
+
+pub fn spawn_top_artists(
+    api_client: Option<EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    range: crate::models::TopItemsRange,
+) {
+    let Some(api) = api_client else {
+        return;
+    };
+    tokio::spawn(async move {
+        match api.top_artists(range).await {
+            Ok(Some(artists)) => {
+                let _ = tx.send(WorkerEvent::TopArtistsLoaded(artists)).await;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                send_api_error(tx, "Top artists", "top_artists", e).await;
             }
         }
     });

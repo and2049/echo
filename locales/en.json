@@ -61,6 +61,13 @@
   "desktop": {
     "top_tracks": "Top Tracks",
     "recently_played": "Recently Played",
+    "popular": "Popular",
+    "albums_section": "Albums",
+    "top_artists": "Top Artists",
+    "range_short": "4 weeks",
+    "range_medium": "6 months",
+    "range_long": "All time",
+    "following": "Following",
     "search_placeholder": "Search — ctrl-k",
     "loading": "Loading…",
     "loading_artist": "Loading artist…",

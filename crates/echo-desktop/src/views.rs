@@ -424,6 +424,12 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     tr(&app.state, "desktop.recently_played"),
                     echo_core::intent::open_recently_played,
                 ))
+                .child(browse_link(
+                    "top-artists",
+                    "icons/mic.svg",
+                    tr(&app.state, "desktop.top_artists"),
+                    echo_core::intent::open_top_artists,
+                ))
         })
         .child(
             uniform_list(
@@ -741,8 +747,9 @@ pub fn main_area(
         ActiveView::TrackList => track_list(app, cx).into_any_element(),
         ActiveView::Queue => queue_list(app, cx).into_any_element(),
         ActiveView::SearchResults => search_results(app, cx).into_any_element(),
-        // No `ArtistList` arm: the sidebar's Artists tab replaces the TUI's full-page
-        // artist list, so that view is never activated here.
+        // Reached via the "Top Artists" browse link (and back-navigation); the sidebar's
+        // Artists tab still covers followed artists.
+        ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
         ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
             _ => library_placeholder(app),
         }
@@ -1117,6 +1124,12 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
     let count = app.state.data.tracks.len();
     // No explicit loading flag in core: an empty list under an active context is "loading".
     let loading = count == 0;
+    let is_top_tracks = app
+        .state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .is_some_and(|context| context.id == "TOP_TRACKS");
 
     div()
         .flex_grow(1.0)
@@ -1160,6 +1173,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                 .child(SharedString::from(context_author)),
                         ),
                 )
+                .when(is_top_tracks, |el| el.child(range_switcher(app, cx)))
                 .child(sort_button(app, cx)),
         )
         .child(if loading {
@@ -1517,15 +1531,17 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
     let tab = app.state.ui.active_search_tab;
     let query = app.state.ui.search_context_query.clone();
     let results = &app.state.data.search_results;
-    let (n_tracks, n_albums, n_artists) = (
+    let (n_tracks, n_albums, n_artists, n_playlists) = (
         results.tracks.len(),
         results.albums.len(),
         results.artists.len(),
+        results.playlists.len(),
     );
     let count = match tab {
         SearchTab::Tracks => n_tracks,
         SearchTab::Albums => n_albums,
         SearchTab::Artists => n_artists,
+        SearchTab::Playlists => n_playlists,
     };
 
     let tab_button = |id: &'static str, label: String, target: SearchTab, active: bool| {
@@ -1590,6 +1606,12 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                             format!("{} ({n_artists})", tr(&app.state, "ui.artists")),
                             SearchTab::Artists,
                             tab == SearchTab::Artists,
+                        ))
+                        .child(tab_button(
+                            "search-playlists",
+                            format!("{} ({n_playlists})", tr(&app.state, "ui.playlists")),
+                            SearchTab::Playlists,
+                            tab == SearchTab::Playlists,
                         )),
                 ),
         )
@@ -1718,7 +1740,44 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                         true,
                                         muted,
                                     );
+                                    // No followers column: the count is gone from the
+                                    // dev-mode API, so it would always read 0.
+                                    row.child(thumb).child(
+                                        div()
+                                            .flex_grow(1.0)
+                                            .flex_basis(px(0.0))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_color(fg)
+                                            .child(SharedString::from(artist.name)),
+                                    )
+                                }
+                                SearchTab::Playlists => {
+                                    let playlist =
+                                        this.state.data.search_results.playlists[ix].clone();
+                                    let thumb_url = playlist
+                                        .thumb_url
+                                        .clone()
+                                        .or_else(|| playlist.image_url.clone());
+                                    let thumb = thumb_element(
+                                        this,
+                                        thumb_url.as_deref(),
+                                        26.0,
+                                        false,
+                                        muted,
+                                    );
                                     row.child(thumb)
+                                        .child(
+                                            div()
+                                                .flex_grow(2.0)
+                                                .flex_basis(px(0.0))
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_color(fg)
+                                                .child(SharedString::from(playlist.name)),
+                                        )
                                         .child(
                                             div()
                                                 .flex_grow(1.0)
@@ -1726,18 +1785,8 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                                 .overflow_hidden()
                                                 .text_ellipsis()
                                                 .whitespace_nowrap()
-                                                .text_color(fg)
-                                                .child(SharedString::from(artist.name)),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .text_xs()
                                                 .text_color(muted)
-                                                .child(SharedString::from(format!(
-                                                    "{} followers",
-                                                    artist.followers
-                                                ))),
+                                                .child(SharedString::from(playlist.owner)),
                                         )
                                 }
                                 }
@@ -1751,6 +1800,175 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                 }),
             )
             .track_scroll(&app.search_scroll)
+            .flex_grow(1.0)
+            .into_any_element()
+        })
+}
+
+/// The Top Tracks / Top Artists time-window selector: three small pills, the active one
+/// accent-bordered. Persisting the choice and refetching go through the shared intent.
+fn range_switcher(app: &EchoApp, cx: &mut Context<EchoApp>) -> Div {
+    use echo_core::models::TopItemsRange;
+    let theme = &app.state.ui.active_theme;
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let active = app.state.ui.library_config.top_items_range;
+
+    let mut row = div().flex().flex_row().items_center().gap_1();
+    for (range, key) in [
+        (TopItemsRange::Short, "desktop.range_short"),
+        (TopItemsRange::Medium, "desktop.range_medium"),
+        (TopItemsRange::Long, "desktop.range_long"),
+    ] {
+        let is_active = range == active;
+        row = row.child(
+            div()
+                .id(SharedString::from(format!("range-{key}")))
+                .px_2()
+                .py_1()
+                .rounded_full()
+                .border_1()
+                .text_xs()
+                .when(is_active, |el| el.border_color(accent).text_color(accent))
+                .when(!is_active, |el| {
+                    el.border_color(muted.opacity(0.4)).text_color(muted)
+                })
+                .hover(move |style| style.bg(muted.opacity(0.1)))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    if let Some(event) =
+                        echo_core::intent::set_top_items_range(&mut this.state, range)
+                    {
+                        this.dispatch(event);
+                    }
+                    cx.notify();
+                }))
+                .child(tr(&app.state, key)),
+        );
+    }
+    row
+}
+
+/// Full-page artist list: reached through the "Top Artists" browse link (the sidebar's
+/// Artists tab still covers followed artists) and by back-navigation.
+fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let is_top = app.state.ui.artist_list_source == echo_core::app::ArtistListSource::Top;
+    let title = if is_top {
+        tr(&app.state, "desktop.top_artists")
+    } else {
+        tr(&app.state, "ui.artists")
+    };
+    let count = app.state.artist_list().len();
+
+    div()
+        .flex_grow(1.0)
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .py_3()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .flex_grow(1.0)
+                        .text_lg()
+                        .text_color(fg)
+                        .child(title),
+                )
+                .when(is_top, |el| el.child(range_switcher(app, cx))),
+        )
+        .child(if count == 0 {
+            div()
+                .flex_grow(1.0)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(muted)
+                .child(tr(&app.state, "desktop.loading"))
+                .into_any_element()
+        } else {
+            uniform_list(
+                "artist-rows",
+                count,
+                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                    let theme = &this.state.ui.active_theme;
+                    let fg = theme.text.gpui(WINDOW_FG());
+                    let muted = theme.text_muted.gpui(WINDOW_FG());
+                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let selected = this.state.ui.selected_artist_index;
+                    let visual = visual_range_in(&this.state, ActiveView::ArtistList);
+
+                    let rows: Vec<AnyElement> = range
+                        .map(|ix| {
+                            let Some(artist) = this.state.artist_list().get(ix).cloned() else {
+                                return div().id(ix).into_any_element();
+                            };
+                            let thumb = thumb_element(
+                                this,
+                                artist.image_url.as_deref(),
+                                26.0,
+                                true,
+                                muted,
+                            );
+                            pill_row(
+                                ix,
+                                LIST_PILL,
+                                row_selected(ix, selected, visual),
+                                selected_bg,
+                                muted,
+                                |row| {
+                                    row.gap_3()
+                                        .on_click(cx.listener(
+                                            move |this: &mut EchoApp, _event, _window, cx| {
+                                                if let Some(event) =
+                                                    echo_core::intent::open_artist_at(
+                                                        &mut this.state,
+                                                        ix,
+                                                    )
+                                                {
+                                                    this.dispatch(event);
+                                                }
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .w(px(24.0))
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(format!("{}", ix + 1))),
+                                        )
+                                        .child(thumb)
+                                        .child(
+                                            div()
+                                                .flex_grow(1.0)
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_color(fg)
+                                                .child(SharedString::from(artist.name)),
+                                        )
+                                },
+                            )
+                            .into_any_element()
+                        })
+                        .collect();
+
+                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                    rows
+                }),
+            )
+            .track_scroll(&app.artist_list_scroll)
             .flex_grow(1.0)
             .into_any_element()
         })
@@ -1772,6 +1990,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
             .into_any_element();
     };
 
+    let accent = theme.primary.gpui(WINDOW_FG());
     let header_image = app
         .state
         .ui
@@ -1780,6 +1999,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
         .and_then(|artwork| app.images.get(&artwork));
     let count = data.albums.len();
     let loading = app.state.data.artist_albums_loading && count == 0;
+    let top_len = data.top_tracks.len();
+    let top_loading = app.state.data.artist_top_tracks_loading;
 
     div()
         .flex_grow(1.0)
@@ -1831,6 +2052,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                     div()
                         .flex()
                         .flex_col()
+                        .flex_grow(1.0)
                         .overflow_hidden()
                         .child(
                             div()
@@ -1844,8 +2066,161 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .text_color(muted)
                                 .child(SharedString::from(format!("{count} albums"))),
                         ),
+                )
+                // Passive badge: there is no reliable write route for follow/unfollow,
+                // so this only mirrors the (24h-cached) followed-artists list.
+                .when(
+                    app.state
+                        .data
+                        .followed_artists
+                        .iter()
+                        .any(|artist| artist.id == data.artist_id),
+                    |el| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .px_3()
+                                .py_1()
+                                .rounded_full()
+                                .border_1()
+                                .text_xs()
+                                .border_color(accent)
+                                .text_color(accent)
+                                .child(tr(&app.state, "desktop.following")),
+                        )
+                    },
                 ),
         )
+        .when(top_len > 0 || top_loading, |el| {
+            el.child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .pt_2()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(&app.state, "desktop.popular")),
+            )
+            .child(if top_len == 0 {
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_2()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(tr(&app.state, "desktop.loading"))
+                    .into_any_element()
+            } else {
+                uniform_list(
+                    "artist-top-track-rows",
+                    top_len,
+                    cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let accent = theme.primary.gpui(WINDOW_FG());
+                        let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                        // Combined index space: Popular rows come first, so `ix` compares
+                        // against the page cursor directly.
+                        let selected = this.state.ui.artist_page_album_index;
+                        let playing_id = this.state.playback.playing_track_id.clone();
+
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                let Some(track) = this
+                                    .state
+                                    .data
+                                    .artist_page_data
+                                    .as_ref()
+                                    .and_then(|data| data.top_tracks.get(ix))
+                                    .cloned()
+                                else {
+                                    return div().id(ix).into_any_element();
+                                };
+                                let is_playing =
+                                    playing_id.as_deref() == Some(track.id.as_str());
+                                let title_color = if is_playing { accent } else { fg };
+                                let thumb = thumb_element(
+                                    this,
+                                    track.image_url.as_deref(),
+                                    26.0,
+                                    false,
+                                    muted,
+                                );
+                                pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                                    row.gap_3()
+                                        .on_click(cx.listener(
+                                            move |this: &mut EchoApp,
+                                                  event: &gpui::ClickEvent,
+                                                  _window,
+                                                  cx| {
+                                                this.state.ui.artist_page_album_index = ix;
+                                                if event.click_count() >= 2
+                                                    && let Some(event) =
+                                                        echo_core::intent::play_artist_top_track(
+                                                            &mut this.state,
+                                                            ix,
+                                                        )
+                                                {
+                                                    this.dispatch(event);
+                                                }
+                                                cx.notify();
+                                            },
+                                        ))
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .w(px(24.0))
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(format!("{}", ix + 1))),
+                                        )
+                                        .child(thumb)
+                                        .child(
+                                            div()
+                                                .flex_grow(1.0)
+                                                .overflow_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_color(title_color)
+                                                .child(SharedString::from(track.name.clone())),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(format_time(
+                                                    track.duration_ms,
+                                                ))),
+                                        )
+                                })
+                                .into_any_element()
+                            })
+                            .collect();
+
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    }),
+                )
+                .track_scroll(&app.artist_top_tracks_scroll)
+                .flex_none()
+                .h(px(top_len.min(10) as f32 * LIST_PILL.row_height))
+                .max_h(relative(0.4))
+                .into_any_element()
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .pt_2()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(&app.state, "desktop.albums_section")),
+            )
+        })
         .child(if loading {
             div()
                 .flex_grow(1.0)
@@ -1864,7 +2239,9 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    // Album rows sit after the Popular rows in the page's combined index space.
                     let selected = this.state.ui.artist_page_album_index;
+                    let top_len = this.artist_page_top_len();
 
                     let rows: Vec<AnyElement> = range
                         .map(|ix| {
@@ -1886,13 +2263,14 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .track_count
                                 .map(|n| format!("{n} tracks"))
                                 .unwrap_or_default();
-                            pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                            pill_row(ix, LIST_PILL, ix + top_len == selected, selected_bg, muted, |row| {
                                 row.gap_3()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
-                                        if let Some(event) = echo_core::intent::open_artist_album(
+                                        let index = ix + this.artist_page_top_len();
+                                        if let Some(event) = echo_core::intent::activate_artist_page_row(
                                             &mut this.state,
-                                            ix,
+                                            index,
                                         ) {
                                             this.dispatch(event);
                                         }
