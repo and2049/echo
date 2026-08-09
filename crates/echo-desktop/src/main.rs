@@ -28,7 +28,7 @@ use gpui::{
     div, img, prelude::*, px, size, svg,
 };
 use gpui_platform::application;
-use theme::{ToGpui, WINDOW_BG, WINDOW_FG};
+use theme::{DesktopPalette, ToGpui, WINDOW_BG, WINDOW_FG};
 
 actions!(
     echo,
@@ -1405,6 +1405,7 @@ impl EchoApp {
     /// search key context so plain letters type instead of triggering list bindings.
     fn render_command_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
+        let palette = DesktopPalette::resolve(theme);
         let fg = theme.text.gpui(WINDOW_FG());
         let muted = theme.text_muted.gpui(WINDOW_FG());
         let accent = theme.primary.gpui(WINDOW_FG());
@@ -1440,7 +1441,7 @@ impl EchoApp {
             .px_4()
             .py_1()
             .border_t_1()
-            .border_color(muted.opacity(0.3))
+            .border_color(palette.border_soft)
             .when(is_command && !suggestions.is_empty(), |el| {
                 el.child(div().flex().flex_row().gap_2().overflow_hidden().children(
                     suggestions.into_iter().enumerate().map(|(index, suggestion)| {
@@ -1451,7 +1452,7 @@ impl EchoApp {
                             .text_xs()
                             .map(|el| {
                                 if selected {
-                                    el.bg(accent.opacity(0.25)).text_color(fg)
+                                    el.bg(palette.suggestion_selected).text_color(fg)
                                 } else {
                                     el.text_color(muted)
                                 }
@@ -1741,6 +1742,7 @@ impl EchoApp {
 
     fn render_playback_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
+        let palette = DesktopPalette::resolve(theme);
         let fg = theme.text.gpui(WINDOW_FG());
         let muted = theme.text_muted.gpui(WINDOW_FG());
         let accent = theme.primary.gpui(WINDOW_FG());
@@ -1768,6 +1770,15 @@ impl EchoApp {
             "icons/play.svg"
         };
 
+        // Toggle buttons hover with a wash of their own color: accent while on, muted while
+        // off — mirrored alongside each color pick so `icon_button` needs no blending.
+        let wash_for = |color: Hsla| {
+            if color == accent {
+                palette.accent_wash_icon
+            } else {
+                palette.wash_muted
+            }
+        };
         let shuffle_color = if playback.is_shuffled { accent } else { muted };
         let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
             "Track" => ("icons/repeat-one.svg", accent),
@@ -1868,7 +1879,7 @@ impl EchoApp {
             .h(px(108.0))
             .px_4()
             .border_t_1()
-            .border_color(muted.opacity(0.3))
+            .border_color(palette.border_soft)
             .child(
                 // Top row: song card, condensed lyric line, visualizer. Its contents come and go;
                 // its height doesn't, so nothing here can move the row below.
@@ -1898,7 +1909,7 @@ impl EchoApp {
                                     .w(px(36.0))
                                     .h(px(36.0))
                                     .rounded_md()
-                                    .bg(muted.opacity(0.15))
+                                    .bg(palette.wash_muted)
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -2087,6 +2098,7 @@ impl EchoApp {
                                 "previous",
                                 "icons/previous.svg",
                                 fg,
+                                palette.wash_fg,
                                 cx,
                                 |this, cx| this.play_previous(cx),
                             ))
@@ -2100,7 +2112,7 @@ impl EchoApp {
                                     .items_center()
                                     .justify_center()
                                     .rounded_full()
-                                    .hover(move |style| style.bg(fg.opacity(0.15)))
+                                    .hover(move |style| style.bg(palette.wash_fg))
                                     .on_click(cx.listener(|this, _event, _window, cx| {
                                         this.toggle_playback(cx)
                                     }))
@@ -2112,13 +2124,19 @@ impl EchoApp {
                                             .text_color(fg),
                                     ),
                             )
-                            .child(icon_button("next", "icons/next.svg", fg, cx, |this, cx| {
-                                this.play_next(cx)
-                            }))
+                            .child(icon_button(
+                                "next",
+                                "icons/next.svg",
+                                fg,
+                                palette.wash_fg,
+                                cx,
+                                |this, cx| this.play_next(cx),
+                            ))
                             .child(icon_button(
                                 "shuffle",
                                 "icons/shuffle.svg",
                                 shuffle_color,
+                                wash_for(shuffle_color),
                                 cx,
                                 |this, cx| this.toggle_shuffle(cx),
                             ))
@@ -2126,12 +2144,18 @@ impl EchoApp {
                                 "repeat",
                                 repeat_icon,
                                 repeat_color,
+                                wash_for(repeat_color),
                                 cx,
                                 |this, cx| this.cycle_repeat(cx),
                             ))
-                            .child(icon_button("lyrics", "icons/mic.svg", lyrics_color, cx, |this, cx| {
-                                this.toggle_lyrics(cx)
-                            })),
+                            .child(icon_button(
+                                "lyrics",
+                                "icons/mic.svg",
+                                lyrics_color,
+                                wash_for(lyrics_color),
+                                cx,
+                                |this, cx| this.toggle_lyrics(cx),
+                            )),
                     )
                     .child(
                         div()
@@ -2168,7 +2192,7 @@ impl EchoApp {
                                             .w_full()
                                             .h(px(6.0))
                                             .rounded_full()
-                                            .bg(muted.opacity(0.25))
+                                            .bg(palette.bar_track)
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, _cx| seek_bounds.set(bounds),
@@ -2203,13 +2227,23 @@ impl EchoApp {
                             .items_center()
                             .justify_end()
                             .gap_1()
-                            .child(icon_button("queue", "icons/playlist.svg", queue_color, cx, |this, cx| {
-                                this.toggle_queue(cx)
-                            }))
-                            .child(icon_button("devices", "icons/computer.svg", muted, cx, |this, cx| {
-                                this.open_devices(cx)
-                            }))
-                            .child(icon_button("mute", mute_icon, muted, cx, |this, cx| {
+                            .child(icon_button(
+                                "queue",
+                                "icons/playlist.svg",
+                                queue_color,
+                                wash_for(queue_color),
+                                cx,
+                                |this, cx| this.toggle_queue(cx),
+                            ))
+                            .child(icon_button(
+                                "devices",
+                                "icons/computer.svg",
+                                muted,
+                                palette.wash_muted,
+                                cx,
+                                |this, cx| this.open_devices(cx),
+                            ))
+                            .child(icon_button("mute", mute_icon, muted, palette.wash_muted, cx, |this, cx| {
                                 this.toggle_mute(cx)
                             }))
                             .child(
@@ -2231,7 +2265,7 @@ impl EchoApp {
                                             .w_full()
                                             .h(px(6.0))
                                             .rounded_full()
-                                            .bg(muted.opacity(0.25))
+                                            .bg(palette.bar_track)
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, _cx| volume_bounds.set(bounds),
@@ -2287,6 +2321,7 @@ pub(crate) fn icon_button(
     id: &'static str,
     icon: &'static str,
     color: Hsla,
+    hover_bg: Hsla,
     cx: &mut Context<EchoApp>,
     on_click: impl Fn(&mut EchoApp, &mut Context<EchoApp>) + 'static,
 ) -> impl IntoElement {
@@ -2299,7 +2334,7 @@ pub(crate) fn icon_button(
         .items_center()
         .justify_center()
         .rounded_full()
-        .hover(move |style| style.bg(color.opacity(0.15)))
+        .hover(move |style| style.bg(hover_bg))
         .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx)))
         .child(svg().path(icon).w(px(16.0)).h(px(16.0)).text_color(color))
 }
@@ -2346,12 +2381,13 @@ impl Render for EchoApp {
         // status line, so transient statuses can't hide it. Core clears it on recovery.
         let audio_banner = self.state.ui.audio_output_error.clone().map(|message| {
             let error = self.state.ui.active_theme.error.gpui(WINDOW_FG());
+            let banner_bg = DesktopPalette::resolve(&self.state.ui.active_theme).error_wash;
             div()
                 .flex_none()
                 .px_4()
                 .py_1()
                 .text_xs()
-                .bg(error.opacity(0.15))
+                .bg(banner_bg)
                 .text_color(error)
                 .child(SharedString::from(message))
                 .into_any_element()

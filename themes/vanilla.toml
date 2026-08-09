@@ -1,9 +1,82 @@
+# Accent: active tabs, the seek bar, links, the playing-track marker.
 primary = "#a47838"
+# Second accent: liked-track hearts, the condensed lyric line's neighbours.
 secondary = "#ac8341"
+# The window background.
 background = "#ecead9"
-surface = "#f7f5e9" # menus, modals, popovers
+# Elevated panels: menus, modals, popovers, the titlebar.
+surface = "#f7f5e9"
+# Main text.
 text = "#70624e"
+# Secondary text: artist/album columns, hints, timestamps, inactive icons.
 text_muted = "#88795e"
+# Selection source color; selected rows derive their fill from this.
 highlight_bg = "#a48b4f"
+# Text on strong highlights (the TUI's selected rows).
 highlight_fg = "#3a3227"
+# Errors: failure messages and the audio-device banner.
 error = "#a8423e"
+
+# Derived colors the desktop app paints — concrete values, no runtime
+# transparency. Each comment states the formula they were generated with;
+# edit freely, or delete a key (or this whole table) to fall back to the
+# formula. Regenerate after changing base colors: python themes/generate_desktop.py
+[desktop]
+# Selected list-row pill (highlight_bg 20% over background).
+row_selected = "#ded7bd"
+# Hovered sidebar row / quick link / range pill (text_muted 10% over background).
+row_hover = "#e2dfcd"
+# Hovered main-area list row (text_muted 8% over background).
+row_hover_faint = "#e4e1cf"
+# Placeholder cover boxes, small round-button hover, disabled buttons (text_muted 15% over background).
+wash_muted = "#ddd9c7"
+# Seek and volume bar track (text_muted 25% over background).
+bar_track = "#d3ceba"
+# Window-level borders: sidebar edge, bar tops, input outlines (text_muted 30% over background).
+border_soft = "#cec8b4"
+# Inactive pill outlines in the main area (text_muted 40% over background).
+outline = "#c4bda8"
+# Hovered tab or link (primary 10% over background).
+accent_wash = "#e5dfc9"
+# Hovered active-state transport toggle (primary 15% over background).
+accent_wash_icon = "#e1d9c1"
+# Drag-over drop targets and the sidebar resize handle (primary 20% over background).
+accent_wash_strong = "#ded3b9"
+# Selected command-bar suggestion chip (primary 25% over background).
+suggestion_selected = "#daceb1"
+# Hovered play/pause and prev/next buttons (text 15% over background).
+wash_fg = "#d9d6c4"
+# The faint heart on a not-liked track (secondary 25% over background).
+like_dim = "#dcd0b3"
+# That heart while hovered (secondary 70% over background).
+like_hover = "#bfa26f"
+# The audio-device failure banner fill (error 15% over background).
+error_wash = "#e2d1c2"
+# Hovered menu/modal row (text_muted 10% over surface).
+menu_hover = "#ece9db"
+# Selected context/track-menu row (highlight_bg 20% over surface).
+menu_row_selected = "#e6e0ca"
+# Selected theme-picker row (text_muted 18% over surface).
+menu_selected = "#e3dfd0"
+# Input and segmented-control outlines inside modals (text_muted 30% over surface).
+menu_border_soft = "#d6d0bf"
+# Popover, modal and drag-chip borders (text_muted 40% over surface).
+border_strong = "#cbc3b1"
+# Selected/hovered row in pickers, menus and suggestions (primary 12% over surface).
+picker_selected = "#ede6d4"
+# Hovered control inside modals (primary 10% over surface).
+menu_accent_wash = "#efe8d7"
+# Confirm-prompt destructive button border (fixed danger red 50% over surface).
+prompt_confirm_border = "#eca49e"
+# That button's hover fill (fixed danger red 12% over surface).
+prompt_confirm_wash = "#f4e1d7"
+# Confirm-prompt cancel button border (text_muted 50% over surface).
+prompt_cancel_border = "#c0b7a4"
+# That button's hover fill (text_muted 12% over surface).
+prompt_cancel_wash = "#eae6d8"
+# Titlebar minimize/maximize caption hover (text 8% over surface).
+titlebar_hover = "#ece9dd"
+# Those captions while pressed (text 12% over surface).
+titlebar_active = "#e7e3d6"
+# The close caption while pressed (Windows red 80% over surface; its hover is the system red itself).
+close_active = "#eb3f4b"

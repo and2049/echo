@@ -636,6 +636,12 @@ pub struct Theme {
     pub highlight_bg: String,
     pub highlight_fg: String,
     pub error: String,
+    /// Desktop-only derived colors (`[desktop]` table): washes, borders and hover tints the
+    /// GPUI frontend paints. Every key is optional — a missing key is computed from the base
+    /// slots with the same blend math the bundled themes were generated with, so hand-written
+    /// themes without this table look identical. See `echo-desktop/src/theme.rs` for the keys.
+    #[serde(default)]
+    pub desktop: std::collections::HashMap<String, String>,
 }
 
 fn default_surface() -> String {
@@ -654,6 +660,7 @@ impl Default for Theme {
             highlight_bg: "White".to_string(),
             highlight_fg: "Black".to_string(),
             error: "Red".to_string(),
+            desktop: std::collections::HashMap::new(),
         }
     }
 }
