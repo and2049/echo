@@ -91,6 +91,7 @@ impl FromStr for ThemeColor {
 }
 
 /// A theme with every color parsed, falling back per-slot like the old ratatui-typed version.
+#[derive(Clone)]
 pub struct ResolvedTheme {
     pub primary: ThemeColor,
     pub secondary: ThemeColor,
@@ -104,6 +105,10 @@ pub struct ResolvedTheme {
     pub selection_bg: ThemeColor,
     pub selected_item: ThemeColor,
     pub error: ThemeColor,
+    /// Parsed `[desktop]` table entries — the desktop's derived washes/borders/hovers when the
+    /// theme spells them out. Keys the desktop doesn't know, and values that fail to parse,
+    /// are dropped. Empty for themes without the table (the desktop then derives the colors).
+    pub desktop_overrides: std::collections::HashMap<String, ThemeColor>,
 }
 
 impl ResolvedTheme {
@@ -122,6 +127,13 @@ impl ResolvedTheme {
             selection_bg: parse(&theme.highlight_bg, ThemeColor::Named(White)),
             selected_item: parse(&theme.highlight_fg, ThemeColor::Named(Black)),
             error: parse(&theme.error, ThemeColor::Named(Red)),
+            desktop_overrides: theme
+                .desktop
+                .iter()
+                .filter_map(|(key, value)| {
+                    ThemeColor::from_str(value).ok().map(|c| (key.clone(), c))
+                })
+                .collect(),
         }
     }
 }

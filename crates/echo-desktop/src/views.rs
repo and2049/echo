@@ -18,7 +18,7 @@ use gpui::{
     div, img, prelude::*, px, relative, svg, uniform_list,
 };
 
-use crate::theme::{ToGpui, WINDOW_FG};
+use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
 use crate::{EchoApp, MenuAction, TrackMenuItem, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
@@ -28,32 +28,30 @@ const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") { 32.0 } else { 34.0
 // Zed's measured inset for the macOS traffic lights (71px, +1px window border).
 const TRAFFIC_LIGHT_PADDING: f32 = 71.0;
 
-/// The shape of a selectable list row: the fixed height `uniform_list` measures, the shorter pill
-/// drawn inside it, and how strongly hover tints an unselected row. See [`pill_row`].
+/// The shape of a selectable list row: the fixed height `uniform_list` measures and the
+/// shorter pill drawn inside it. Hover strength comes from the palette slot the caller
+/// passes ([`DesktopPalette::row_hover`] for the sidebar, `row_hover_faint` for the main
+/// area). See [`pill_row`].
 #[derive(Clone, Copy)]
 pub(crate) struct PillMetrics {
     row_height: f32,
     pill_height: f32,
-    hover_opacity: f32,
 }
 
 /// Sidebar rows, which hover a touch stronger than the main area.
 const SIDEBAR_PILL: PillMetrics = PillMetrics {
     row_height: 34.0,
     pill_height: 30.0,
-    hover_opacity: 0.1,
 };
 /// Main-area lists carrying a thumbnail column.
 const LIST_PILL: PillMetrics = PillMetrics {
     row_height: 34.0,
     pill_height: 30.0,
-    hover_opacity: 0.08,
 };
 /// The denser text-only lists — tracks and the queue.
 const COMPACT_PILL: PillMetrics = PillMetrics {
     row_height: 30.0,
     pill_height: 26.0,
-    hover_opacity: 0.08,
 };
 
 /// Whether row `ix` reads as selected: the cursor row, or any row inside a visual range.
@@ -92,7 +90,7 @@ fn pill_row(
     metrics: PillMetrics,
     selected: bool,
     selected_bg: Hsla,
-    muted: Hsla,
+    hover_bg: Hsla,
     build: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
 ) -> Div {
     let pill = div()
@@ -106,9 +104,7 @@ fn pill_row(
         .items_center()
         .text_sm()
         .when(selected, |el| el.bg(selected_bg))
-        .when(!selected, |el| {
-            el.hover(move |style| style.bg(muted.opacity(metrics.hover_opacity)))
-        })
+        .when(!selected, |el| el.hover(move |style| style.bg(hover_bg)))
         .cursor_pointer();
 
     div()
@@ -182,6 +178,7 @@ pub fn titlebar(
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -253,6 +250,7 @@ pub fn titlebar(
                         "icons/win-minimize.svg",
                         gpui::WindowControlArea::Min,
                         fg,
+                        palette,
                     ))
                     .child(caption_button(
                         "caption-max",
@@ -263,12 +261,14 @@ pub fn titlebar(
                         },
                         gpui::WindowControlArea::Max,
                         fg,
+                        palette,
                     ))
                     .child(caption_button(
                         "caption-close",
                         "icons/win-close.svg",
                         gpui::WindowControlArea::Close,
                         fg,
+                        palette,
                     )),
             )
         })
@@ -283,12 +283,13 @@ fn caption_button(
     icon: &'static str,
     area: gpui::WindowControlArea,
     fg: gpui::Hsla,
+    palette: DesktopPalette,
 ) -> impl IntoElement {
     let close = matches!(area, gpui::WindowControlArea::Close);
     // The close button hovers Windows-red with a white glyph; the rest get a faint wash.
     let hover_bg: gpui::Hsla =
-        if close { gpui::rgb(0xE81123).into() } else { fg.opacity(0.08) };
-    let active_bg = if close { hover_bg.opacity(0.8) } else { fg.opacity(0.12) };
+        if close { crate::theme::CLOSE_RED() } else { palette.titlebar_hover };
+    let active_bg = if close { palette.close_active } else { palette.titlebar_active };
     div()
         .id(id)
         .group(id)
@@ -312,6 +313,7 @@ fn caption_button(
 
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
 
@@ -330,7 +332,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             .rounded_md()
             .text_sm()
             .text_color(if active { accent } else { muted })
-            .hover(|style| style.bg(accent.opacity(0.1)))
+            .hover(move |style| style.bg(palette.accent_wash))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.state.ui.active_library_tab = target;
                 this.state.ui.selected_playlist_index = 0;
@@ -350,7 +352,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .flex()
         .flex_col()
         .border_r_1()
-        .border_color(muted.opacity(0.3))
+        .border_color(palette.border_soft)
         .child(
             div()
                 .flex()
@@ -395,7 +397,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     .gap_2()
                     .text_sm()
                     .text_color(muted)
-                    .hover(|style| style.bg(muted.opacity(0.1)))
+                    .hover(move |style| style.bg(palette.row_hover))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         if let Some(event) = open(&mut this.state) {
@@ -452,7 +454,8 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
@@ -557,7 +560,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             .flex_none()
                                             .w(px(THUMB_EDGE))
                                             .h(px(THUMB_EDGE))
-                                            .bg(muted.opacity(0.15))
+                                            .bg(palette.wash_muted)
                                             .flex()
                                             .items_center()
                                             .justify_center()
@@ -605,7 +608,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     None
                                 };
 
-                            pill_row(ix, SIDEBAR_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
+                            pill_row(ix, SIDEBAR_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover, |row| {
                                 row.pl(px(8.0 + indent_px))
                                 .gap_2()
                                 .text_color(label_color)
@@ -625,7 +628,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     )
                                 })
                                 .when_some(drag_source, |el, (id, name)| {
-                                    let border = muted.opacity(0.4);
+                                    let border = palette.border_strong;
                                     el.on_drag(
                                         DraggedPlaylist { id, name },
                                         move |drag, _offset, _window, cx| {
@@ -641,7 +644,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 })
                                 .when(tab == LibraryTab::Playlists, |el| {
                                     el.drag_over::<DraggedPlaylist>(move |style, _, _, _| {
-                                        style.bg(accent.opacity(0.2))
+                                        style.bg(palette.accent_wash_strong)
                                     })
                                     .on_drop(cx.listener(
                                         move |this: &mut EchoApp, drag: &DraggedPlaylist, _window, cx| {
@@ -756,7 +759,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .bottom_0()
                 .w(px(5.0))
                 .cursor_col_resize()
-                .hover(|style| style.bg(accent.opacity(0.2)))
+                .hover(move |style| style.bg(palette.accent_wash_strong))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
@@ -807,6 +810,7 @@ fn setup_view(
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -837,7 +841,7 @@ fn setup_view(
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(if focused { accent } else { muted.opacity(0.3) })
+            .border_color(if focused { accent } else { palette.border_soft })
             .flex()
             .flex_col()
             .gap_1()
@@ -874,7 +878,7 @@ fn setup_view(
                 .p_4()
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.3))
+                .border_color(palette.border_soft)
                 .flex()
                 .flex_col()
                 .gap_3()
@@ -931,7 +935,7 @@ fn setup_view(
                         .bg(if ready {
                             accent
                         } else {
-                            muted.opacity(0.15)
+                            palette.wash_muted
                         })
                         .text_color(if ready {
                             gpui::hsla(0.0, 0.0, 0.08, 1.0)
@@ -960,6 +964,7 @@ fn search_bar(
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -989,7 +994,7 @@ fn search_bar(
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(if focused { accent } else { muted.opacity(0.3) })
+            .border_color(if focused { accent } else { palette.border_soft })
             .flex()
             .flex_row()
             .items_center()
@@ -1032,6 +1037,7 @@ fn search_bar(
             "themes",
             "icons/paint-board.svg",
             muted,
+            palette.wash_muted,
             cx,
             |this, cx| this.toggle_themes(cx),
         ))
@@ -1039,6 +1045,7 @@ fn search_bar(
             "settings",
             "icons/settings.svg",
             muted,
+            palette.wash_muted,
             cx,
             |this, cx| this.toggle_settings(cx),
         ))
@@ -1059,18 +1066,26 @@ pub const SORT_OPTIONS: &[(&str, &str)] = &[
 
 fn sort_button(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let muted = theme.text_muted.gpui(WINDOW_FG());
-    crate::icon_button("track-sort", "icons/arrow-down.svg", muted, cx, |this, cx| {
-        this.sort_menu_open = !this.sort_menu_open;
-        cx.notify();
-    })
+    crate::icon_button(
+        "track-sort",
+        "icons/arrow-down.svg",
+        muted,
+        palette.wash_muted,
+        cx,
+        |this, cx| {
+            this.sort_menu_open = !this.sort_menu_open;
+            cx.notify();
+        },
+    )
 }
 
 /// The sort picker, anchored under the track-list header's sort button.
 pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
     let active = app.state.ui.track_sort;
@@ -1094,7 +1109,7 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                 .w(px(180.0))
                 .rounded_md()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .py_1()
                 .flex()
@@ -1119,9 +1134,9 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                         .justify_between()
                         .text_sm()
                         .text_color(if is_active { accent } else { fg })
-                        .when(is_selected, |el| el.bg(accent.opacity(0.12)))
+                        .when(is_selected, |el| el.bg(palette.picker_selected))
                         .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(accent.opacity(0.12)))
+                            el.hover(move |style| style.bg(palette.picker_selected))
                         })
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
@@ -1228,7 +1243,8 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let selected = this.state.ui.selected_track_index;
                     let visual = visual_range_in(&this.state, ActiveView::TrackList);
                     let playing_id = this.state.playback.playing_track_id.clone();
@@ -1270,10 +1286,10 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             let title_color = if is_playing { accent } else { fg };
                             let drag_name = SharedString::from(track.name.clone());
 
-                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
+                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover_faint, |row| {
                                 row.gap_3()
                                 .when(reorderable, |row| {
-                                    let border = muted.opacity(0.4);
+                                    let border = palette.border_strong;
                                     row.on_drag(
                                         DraggedTrack { from: ix, name: drag_name },
                                         move |drag, _offset, _window, cx| {
@@ -1287,7 +1303,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         },
                                     )
                                     .drag_over::<DraggedTrack>(move |style, _, _, _| {
-                                        style.bg(accent.opacity(0.2))
+                                        style.bg(palette.accent_wash_strong)
                                     })
                                     .on_drop(cx.listener(
                                         move |this: &mut EchoApp, drag: &DraggedTrack, _window, cx| {
@@ -1431,6 +1447,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         track.id.clone(),
                                         is_liked,
                                         secondary,
+                                        palette,
                                         cx,
                                     ))
                                 })
@@ -1498,7 +1515,8 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let secondary = theme.secondary.gpui(WINDOW_FG());
                     let selected = this.state.ui.selected_queue_index;
                     let visual = visual_range_in(&this.state, ActiveView::Queue);
@@ -1508,7 +1526,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             let track = &this.state.data.queue[ix];
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
 
-                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
+                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover_faint, |row| {
                                 row.gap_3()
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     if event.modifiers().shift {
@@ -1574,6 +1592,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                     track.id.clone(),
                                     is_liked,
                                     secondary,
+                                    palette,
                                     cx,
                                 ))
                                 .child(
@@ -1682,6 +1701,7 @@ fn liked_cell(
     track_id: String,
     liked: bool,
     color: Hsla,
+    palette: DesktopPalette,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     div()
@@ -1692,7 +1712,10 @@ fn liked_cell(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .when(!liked, |el| el.opacity(0.25).hover(|style| style.opacity(0.7)))
+        .text_color(if liked { color } else { palette.like_dim })
+        .when(!liked, |el| {
+            el.hover(move |style| style.text_color(palette.like_hover))
+        })
         .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
             cx.stop_propagation();
             if let Some(event) =
@@ -1702,12 +1725,7 @@ fn liked_cell(
             }
             cx.notify();
         }))
-        .child(
-            svg()
-                .path("icons/heart.svg")
-                .size(px(12.0))
-                .text_color(color),
-        )
+        .child(svg().path("icons/heart.svg").size(px(12.0)))
 }
 
 /// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
@@ -1735,7 +1753,7 @@ fn thumb_element(
                 .flex_none()
                 .w(px(edge))
                 .h(px(edge))
-                .bg(muted.opacity(0.15))
+                .bg(DesktopPalette::resolve(&this.state.ui.active_theme).wash_muted)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1753,6 +1771,7 @@ fn thumb_element(
 
 fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let outer_palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -1781,7 +1800,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             .rounded_md()
             .text_sm()
             .text_color(if active { accent } else { muted })
-            .hover(|style| style.bg(accent.opacity(0.1)))
+            .hover(move |style| style.bg(outer_palette.accent_wash))
             .cursor_pointer()
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.state.ui.active_search_tab = target;
@@ -1861,14 +1880,15 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let tab = this.state.ui.active_search_tab;
                     let selected = this.state.ui.selected_search_index;
                     let visual = visual_range_in(&this.state, ActiveView::SearchResults);
 
                     let rows: Vec<AnyElement> = range
                         .map(|ix| {
-                            pill_row(ix, LIST_PILL, row_selected(ix, selected, visual), selected_bg, muted, |row| {
+                            pill_row(ix, LIST_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover_faint, |row| {
                                 let row = row.gap_3().on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) =
@@ -1927,6 +1947,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                         track.id.clone(),
                                         is_liked,
                                         secondary,
+                                        palette,
                                         cx,
                                     ))
                                     .child(
@@ -2051,6 +2072,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
 fn range_switcher(app: &EchoApp, cx: &mut Context<EchoApp>) -> Div {
     use echo_core::models::TopItemsRange;
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
     let active = app.state.ui.library_config.top_items_range;
@@ -2072,9 +2094,9 @@ fn range_switcher(app: &EchoApp, cx: &mut Context<EchoApp>) -> Div {
                 .text_xs()
                 .when(is_active, |el| el.border_color(accent).text_color(accent))
                 .when(!is_active, |el| {
-                    el.border_color(muted.opacity(0.4)).text_color(muted)
+                    el.border_color(palette.outline).text_color(muted)
                 })
-                .hover(move |style| style.bg(muted.opacity(0.1)))
+                .hover(move |style| style.bg(palette.row_hover))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                     if let Some(event) =
@@ -2144,7 +2166,8 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let selected = this.state.ui.selected_artist_index;
                     let visual = visual_range_in(&this.state, ActiveView::ArtistList);
 
@@ -2165,7 +2188,7 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 LIST_PILL,
                                 row_selected(ix, selected, visual),
                                 selected_bg,
-                                muted,
+                                palette.row_hover_faint,
                                 |row| {
                                     row.gap_3()
                                         .on_click(cx.listener(
@@ -2284,7 +2307,8 @@ fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     let selected = this.state.ui.selected_whats_new_index;
                     let visual = visual_range_in(&this.state, ActiveView::WhatsNew);
 
@@ -2309,7 +2333,7 @@ fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                                 LIST_PILL,
                                 row_selected(ix, selected, visual),
                                 selected_bg,
-                                muted,
+                                palette.row_hover_faint,
                                 |row| {
                                     row.gap_3()
                                         .on_click(cx.listener(
@@ -2372,6 +2396,7 @@ fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
 
 fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
     let theme = &app.state.ui.active_theme;
+    let outer_palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
 
@@ -2423,7 +2448,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         .justify_center()
                         .rounded_full()
                         .text_color(muted)
-                        .hover(|style| style.bg(muted.opacity(0.15)))
+                        .hover(move |style| style.bg(outer_palette.wash_muted))
                         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
                             this.close_artist_page(cx);
                         }))
@@ -2516,7 +2541,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         let fg = theme.text.gpui(WINDOW_FG());
                         let muted = theme.text_muted.gpui(WINDOW_FG());
                         let accent = theme.primary.gpui(WINDOW_FG());
-                        let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                        let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                         // Combined index space: Popular rows come first, so `ix` compares
                         // against the page cursor directly.
                         let selected = this.state.ui.artist_page_album_index;
@@ -2548,7 +2574,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                     false,
                                     muted,
                                 );
-                                pill_row(ix, LIST_PILL, ix == selected, selected_bg, muted, |row| {
+                                pill_row(ix, LIST_PILL, ix == selected, selected_bg, palette.row_hover_faint, |row| {
                                     row.gap_3()
                                         .on_click(cx.listener(
                                             move |this: &mut EchoApp,
@@ -2597,6 +2623,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                             track.id.clone(),
                                             is_liked,
                                             secondary,
+                                            palette,
                                             cx,
                                         ))
                                         .child(
@@ -2651,7 +2678,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
                     let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+                    let palette = DesktopPalette::resolve(theme);
+                    let selected_bg = palette.row_selected;
                     // Album rows sit after the Popular rows in the page's combined index space.
                     let selected = this.state.ui.artist_page_album_index;
                     let top_len = this.artist_page_top_len();
@@ -2676,7 +2704,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .track_count
                                 .map(|n| format!("{n} tracks"))
                                 .unwrap_or_default();
-                            pill_row(ix, LIST_PILL, ix + top_len == selected, selected_bg, muted, |row| {
+                            pill_row(ix, LIST_PILL, ix + top_len == selected, selected_bg, palette.row_hover_faint, |row| {
                                 row.gap_3()
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
@@ -2839,7 +2867,7 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .h(px(480.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(DesktopPalette::resolve(&app.state.ui.active_theme).border_strong)
                 .bg(surface)
                 .p_3()
                 .flex()
@@ -2871,6 +2899,7 @@ pub fn sorted_theme_names(state: &echo_core::app::AppState) -> Vec<String> {
 
 pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
@@ -2900,7 +2929,7 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .max_h(px(420.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .p_3()
                 .flex()
@@ -2940,9 +2969,9 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                 .justify_between()
                                 .text_sm()
                                 .text_color(color)
-                                .when(is_selected, |el| el.bg(muted.opacity(0.18)))
+                                .when(is_selected, |el| el.bg(palette.menu_selected))
                                 .when(!is_selected, |el| {
-                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                    el.hover(move |style| style.bg(palette.menu_hover))
                                 })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
@@ -3088,7 +3117,7 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                 .max_h(px(600.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(DesktopPalette::resolve(&app.state.ui.active_theme).border_strong)
                 .bg(surface)
                 .p_4()
                 .flex()
@@ -3170,6 +3199,7 @@ pub fn settings_modal(
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
@@ -3230,11 +3260,11 @@ pub fn settings_modal(
                     .py_0p5()
                     .rounded_md()
                     .border_1()
-                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .border_color(if active { accent } else { palette.menu_border_soft })
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .hover(move |style| style.bg(palette.menu_accent_wash))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.run_setting(cmd.clone(), cx);
                     }))
@@ -3389,11 +3419,11 @@ pub fn settings_modal(
                     .py_0p5()
                     .rounded_md()
                     .border_1()
-                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .border_color(if active { accent } else { palette.menu_border_soft })
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .hover(move |style| style.bg(palette.menu_accent_wash))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.set_audio_quality(|config| config.bitrate = rate, cx);
                     }))
@@ -3420,11 +3450,11 @@ pub fn settings_modal(
                     .py_0p5()
                     .rounded_md()
                     .border_1()
-                    .border_color(if active { accent } else { muted.opacity(0.3) })
+                    .border_color(if active { accent } else { palette.menu_border_soft })
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(accent.opacity(0.1)))
+                    .hover(move |style| style.bg(palette.menu_accent_wash))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.set_audio_quality(|config| config.normalisation = on, cx);
                     }))
@@ -3447,11 +3477,11 @@ pub fn settings_modal(
             .justify_center()
             .rounded_md()
             .border_1()
-            .border_color(muted.opacity(0.3))
+            .border_color(palette.menu_border_soft)
             .text_xs()
             .text_color(muted)
             .cursor_pointer()
-            .hover(move |style| style.bg(accent.opacity(0.1)))
+            .hover(move |style| style.bg(palette.menu_accent_wash))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.set_audio_quality(
                     |config| {
@@ -3500,7 +3530,7 @@ pub fn settings_modal(
         .border_color(if path_focused {
             accent
         } else {
-            muted.opacity(0.3)
+            palette.menu_border_soft
         })
         .text_xs()
         .text_color(if path_value.is_empty() { muted } else { fg })
@@ -3528,11 +3558,11 @@ pub fn settings_modal(
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(muted.opacity(0.3))
+            .border_color(palette.menu_border_soft)
             .text_xs()
             .text_color(muted)
             .cursor_pointer()
-            .hover(move |style| style.bg(accent.opacity(0.1)))
+            .hover(move |style| style.bg(palette.menu_accent_wash))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.run_setting(cmd.to_string(), cx);
             }))
@@ -3559,7 +3589,7 @@ pub fn settings_modal(
                 .max_h(px(560.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .p_4()
                 .flex()
@@ -3599,11 +3629,11 @@ pub fn settings_modal(
                                 .py_0p5()
                                 .rounded_md()
                                 .border_1()
-                                .border_color(muted.opacity(0.3))
+                                .border_color(palette.menu_border_soft)
                                 .text_xs()
                                 .text_color(muted)
                                 .cursor_pointer()
-                                .hover(move |style| style.bg(accent.opacity(0.1)))
+                                .hover(move |style| style.bg(palette.menu_accent_wash))
                                 .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
                                     this.settings_open = false;
                                     this.toggle_themes(cx);
@@ -3660,11 +3690,12 @@ pub fn settings_modal(
 /// The Spotify Connect device picker, painted over everything else.
 pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
-    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+    let selected_bg = palette.menu_row_selected;
     let selected = app.state.ui.selected_device_index;
 
     let devices = app.state.data.devices.clone();
@@ -3689,7 +3720,7 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .max_h(px(420.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .p_3()
                 .flex()
@@ -3734,7 +3765,7 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                                 .text_sm()
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .when(ix != selected, |el| {
-                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                    el.hover(move |style| style.bg(palette.menu_hover))
                                 })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
@@ -3777,10 +3808,11 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
 /// local ones); Enter and row clicks resolve through `action_menu::commit_playlist_add`.
 pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let selected_bg = theme.highlight_bg.gpui(WINDOW_FG()).opacity(0.2);
+    let selected_bg = palette.menu_row_selected;
     let selected = app.state.ui.selected_playlist_modal_index;
 
     // Materialized before the element closures capture anything from `app`.
@@ -3815,7 +3847,7 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 .max_h(px(420.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .p_3()
                 .flex()
@@ -3860,7 +3892,7 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                                 .text_sm()
                                 .when(ix == selected, |el| el.bg(selected_bg))
                                 .when(ix != selected, |el| {
-                                    el.hover(|style| style.bg(muted.opacity(0.1)))
+                                    el.hover(move |style| style.bg(palette.menu_hover))
                                 })
                                 .cursor_pointer()
                                 .on_click(cx.listener(
@@ -3970,10 +4002,9 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         .clone()
         .expect("context_menu rendered without state");
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let accent = theme.primary.gpui(WINDOW_FG());
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
     let mut items: Vec<(SharedString, MenuAction, bool)> = Vec::new();
@@ -4058,7 +4089,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .w(px(210.0))
                 .rounded_md()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .py_1()
                 .flex()
@@ -4077,7 +4108,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
-                        .hover(move |style| style.bg(accent.opacity(0.12)))
+                        .hover(move |style| style.bg(palette.picker_selected))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, window, cx| {
                             this.run_menu_action(action, index, window, cx);
@@ -4134,10 +4165,9 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
         .clone()
         .expect("track_context_menu rendered without state");
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let accent = theme.primary.gpui(WINDOW_FG());
     let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
 
     let items = track_menu_items(app);
@@ -4171,7 +4201,7 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                 .w(px(210.0))
                 .rounded_md()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .py_1()
                 .flex()
@@ -4189,9 +4219,9 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
-                        .when(is_selected, |el| el.bg(accent.opacity(0.12)))
+                        .when(is_selected, |el| el.bg(palette.picker_selected))
                         .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(accent.opacity(0.12)))
+                            el.hover(move |style| style.bg(palette.picker_selected))
                         })
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
@@ -4206,10 +4236,11 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
 /// `intent::confirm_prompt`/`cancel_prompt` the TUI's y/n keys use.
 pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let danger_color = gpui::hsla(0.0, 0.7, 0.6, 1.0);
+    let danger_color = crate::theme::DANGER_RED();
 
     let ui = &app.state.ui;
     let delete_label = tr(&app.state, "desktop.prompt.delete");
@@ -4265,18 +4296,22 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
             )
         };
 
-    let button = |id: &'static str, label: SharedString, color: gpui::Hsla| {
+    let button = |id: &'static str,
+                  label: SharedString,
+                  color: gpui::Hsla,
+                  border: gpui::Hsla,
+                  hover_bg: gpui::Hsla| {
         div()
             .id(id)
             .px_3()
             .py_1()
             .rounded_md()
             .border_1()
-            .border_color(color.opacity(0.5))
+            .border_color(border)
             .text_sm()
             .text_color(color)
             .cursor_pointer()
-            .hover(move |style| style.bg(color.opacity(0.12)))
+            .hover(move |style| style.bg(hover_bg))
             .child(label)
     };
 
@@ -4298,7 +4333,7 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .w(px(380.0))
                 .rounded_lg()
                 .border_1()
-                .border_color(muted.opacity(0.4))
+                .border_color(palette.border_strong)
                 .bg(surface)
                 .p_4()
                 .flex()
@@ -4312,13 +4347,13 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .flex_row()
                         .justify_end()
                         .gap_2()
-                        .child(button("prompt-cancel", tr(&app.state, "desktop.prompt.cancel"), muted).on_click(cx.listener(
+                        .child(button("prompt-cancel", tr(&app.state, "desktop.prompt.cancel"), muted, palette.prompt_cancel_border, palette.prompt_cancel_wash).on_click(cx.listener(
                             |this: &mut EchoApp, _event, _window, cx| {
                                 echo_core::intent::cancel_prompt(&mut this.state);
                                 cx.notify();
                             },
                         )))
-                        .child(button("prompt-confirm", confirm_label, danger_color).on_click(
+                        .child(button("prompt-confirm", confirm_label, danger_color, palette.prompt_confirm_border, palette.prompt_confirm_wash).on_click(
                             cx.listener(|this: &mut EchoApp, _event, _window, cx| {
                                 if let Some(event) =
                                     echo_core::intent::confirm_prompt(&mut this.state)
