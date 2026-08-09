@@ -48,23 +48,6 @@ WINDOW_BG = (0x12, 0x12, 0x12)
 WINDOW_FG = (0xE5, 0xE5, 0xE5)
 PANEL_BG = (0x1F, 0x1F, 0x22)
 
-# Fixed reds (CLOSE_RED / DANGER_RED in echo-desktop/src/theme.rs).
-CLOSE_RED = (0xE8, 0x11, 0x23)
-
-
-def hsl_to_rgb(h, s, l):
-    c = (1 - abs(2 * l - 1)) * s
-    x = c * (1 - abs((h / 60) % 2 - 1))
-    m = l - c / 2
-    r, g, b = {0: (c, x, 0), 1: (x, c, 0), 2: (0, c, x), 3: (0, x, c), 4: (x, 0, c), 5: (c, 0, x)}[
-        int(h // 60) % 6
-    ]
-    return tuple(round((v + m) * 255) for v in (r, g, b))
-
-
-DANGER_RED = hsl_to_rgb(0.0, 0.7, 0.6)
-
-
 def xterm256(i):
     if i < 16:
         order = [
@@ -116,36 +99,23 @@ BASE = [
 ]
 
 # Derived slots: (key, base, alpha, underlay, comment). Order mirrors DesktopPalette.
+# One slot per semantic role — selection, hover, muted fill, border, accent hover, accent
+# selection — over the window background, then the same roles over the elevated surface.
 DERIVED = [
     ("row_selected", "highlight_bg", 0.20, "background", "Selected list-row pill (highlight_bg 20% over background)."),
-    ("row_hover", "text_muted", 0.10, "background", "Hovered sidebar row / quick link / range pill (text_muted 10% over background)."),
-    ("row_hover_faint", "text_muted", 0.08, "background", "Hovered main-area list row (text_muted 8% over background)."),
-    ("wash_muted", "text_muted", 0.15, "background", "Placeholder cover boxes, small round-button hover, disabled buttons (text_muted 15% over background)."),
-    ("bar_track", "text_muted", 0.25, "background", "Seek and volume bar track (text_muted 25% over background)."),
-    ("border_soft", "text_muted", 0.30, "background", "Window-level borders: sidebar edge, bar tops, input outlines (text_muted 30% over background)."),
-    ("outline", "text_muted", 0.40, "background", "Inactive pill outlines in the main area (text_muted 40% over background)."),
-    ("accent_wash", "primary", 0.10, "background", "Hovered tab or link (primary 10% over background)."),
-    ("accent_wash_icon", "primary", 0.15, "background", "Hovered active-state transport toggle (primary 15% over background)."),
-    ("accent_wash_strong", "primary", 0.20, "background", "Drag-over drop targets and the sidebar resize handle (primary 20% over background)."),
-    ("suggestion_selected", "primary", 0.25, "background", "Selected command-bar suggestion chip (primary 25% over background)."),
-    ("wash_fg", "text", 0.15, "background", "Hovered play/pause and prev/next buttons (text 15% over background)."),
-    ("like_dim", "secondary", 0.25, "background", "The faint heart on a not-liked track (secondary 25% over background)."),
-    ("like_hover", "secondary", 0.70, "background", "That heart while hovered (secondary 70% over background)."),
+    ("row_hover", "text_muted", 0.10, "background", "Any hovered row over the window: sidebar, lists, quick links, range pills (text_muted 10% over background)."),
+    ("wash", "text_muted", 0.15, "background", "Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background)."),
+    ("border", "text_muted", 0.30, "background", "Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background)."),
+    ("accent_hover", "primary", 0.12, "background", "Accent-tinted hover: tabs, links, active transport toggles (primary 12% over background)."),
+    ("accent_selected", "primary", 0.20, "background", "Accent-tinted selection: drop targets, resize handle, suggestion chip (primary 20% over background)."),
+    ("like_dim", "secondary", 0.25, "background", "The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background)."),
     ("error_wash", "error", 0.15, "background", "The audio-device failure banner fill (error 15% over background)."),
-    ("menu_hover", "text_muted", 0.10, "surface", "Hovered menu/modal row (text_muted 10% over surface)."),
-    ("menu_row_selected", "highlight_bg", 0.20, "surface", "Selected context/track-menu row (highlight_bg 20% over surface)."),
-    ("menu_selected", "text_muted", 0.18, "surface", "Selected theme-picker row (text_muted 18% over surface)."),
-    ("menu_border_soft", "text_muted", 0.30, "surface", "Input and segmented-control outlines inside modals (text_muted 30% over surface)."),
-    ("border_strong", "text_muted", 0.40, "surface", "Popover, modal and drag-chip borders (text_muted 40% over surface)."),
-    ("picker_selected", "primary", 0.12, "surface", "Selected/hovered row in pickers, menus and suggestions (primary 12% over surface)."),
-    ("menu_accent_wash", "primary", 0.10, "surface", "Hovered control inside modals (primary 10% over surface)."),
-    ("prompt_confirm_border", None, 0.50, "surface", "Confirm-prompt destructive button border (fixed danger red 50% over surface)."),
-    ("prompt_confirm_wash", None, 0.12, "surface", "That button's hover fill (fixed danger red 12% over surface)."),
-    ("prompt_cancel_border", "text_muted", 0.50, "surface", "Confirm-prompt cancel button border (text_muted 50% over surface)."),
-    ("prompt_cancel_wash", "text_muted", 0.12, "surface", "That button's hover fill (text_muted 12% over surface)."),
-    ("titlebar_hover", "text", 0.08, "surface", "Titlebar minimize/maximize caption hover (text 8% over surface)."),
-    ("titlebar_active", "text", 0.12, "surface", "Those captions while pressed (text 12% over surface)."),
-    ("close_active", None, 0.80, "surface", "The close caption while pressed (Windows red 80% over surface; its hover is the system red itself)."),
+    ("menu_hover", "text_muted", 0.10, "surface", "Hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface)."),
+    ("menu_selected", "highlight_bg", 0.20, "surface", "Selected menu/picker row (highlight_bg 20% over surface)."),
+    ("menu_accent", "primary", 0.12, "surface", "Accent-tinted hover/selection in pickers, suggestions and modal controls (primary 12% over surface)."),
+    ("menu_border", "text_muted", 0.35, "surface", "Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface)."),
+    ("danger_border", "error", 0.50, "surface", "Confirm-prompt destructive button border (error 50% over surface)."),
+    ("danger_wash", "error", 0.12, "surface", "That button's hover fill (error 12% over surface)."),
 ]
 
 
@@ -174,13 +144,7 @@ def regenerate(path):
     lines.append("# formula. Regenerate after changing base colors: python themes/generate_desktop.py")
     lines.append("[desktop]")
     for key, base, alpha, under, comment in DERIVED:
-        if key == "close_active":
-            src = CLOSE_RED
-        elif key.startswith("prompt_confirm"):
-            src = DANGER_RED
-        else:
-            src = resolved[base]
-        value = blend(src, resolved[under], alpha)
+        value = blend(resolved[base], resolved[under], alpha)
         lines.append(f"# {comment}")
         lines.append(f'{key} = "{hexstr(value)}"')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
