@@ -7,7 +7,7 @@ secondary = "#d4e0ee" # Second accent: liked-track hearts, the condensed lyric l
 
 background = "#4474b3" # The window background.
 
-surface = "#5782b3" # Elevated panels: menus, modals, popovers, the titlebar.
+surface = "#5481b6" # Elevated panels: menus, modals, popovers, the titlebar.
 
 text = "#e0dee4" # Main text.
 
@@ -17,28 +17,28 @@ highlight_bg = "#cad8e6" # Selection source color; selected rows derive their fi
 
 highlight_fg = "#3866a1" # Text on strong highlights (the TUI's selected rows).
 
-error = "#ed9b75" # Errors: failure messages and the audio-device banner.
+error = "#ff9fba" # Errors: failure messages and the audio-device banner.
 
 row_selected = "#5f88bd" # Any selected row/chip over the window: lists, sidebar, the command-bar suggestion (highlight_bg 20% over background).
 
-row_hover = "#4b78b6" # Any hovered row over the window: sidebar, lists, tabs, links, range pills (text_muted 10% over background).
+row_hover = "#4d7ab7" # Any hovered row over the window: sidebar, lists, tabs, links, range pills (text_muted 10% over background).
 
-wash = "#4e7ab7" # Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
+wash = "#517db9" # Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
 
-border = "#5880bb" # Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
+border = "#5f86be" # Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
 
 drag_target = "#5885c0" # Drag feedback: drop targets while dragging and the sidebar resize handle (primary 20% over background).
 
-like_dim = "#3c5fa1" # The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
+like_dim = "#688fc2" # The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
 
-error_wash = "#5d7aaa" # The audio-device failure banner fill (error 15% over background).
+error_wash = "#607ab4" # The audio-device failure banner fill (error 15% over background).
 
-menu_hover = "#5985ba" # Any hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
+menu_hover = "#5b86b9" # Any hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
 
-menu_selected = "#6c93c1" # Any selected menu/picker/suggestion row (highlight_bg 20% over surface).
+menu_selected = "#6c92c0" # Any selected menu/picker/suggestion row (highlight_bg 20% over surface).
 
-menu_border = "#668bc0" # Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
+menu_border = "#6e91c2" # Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
 
-danger_border = "#a08e96" # Confirm-prompt destructive button border (error 50% over surface).
+danger_border = "#aa90b8" # Confirm-prompt destructive button border (error 50% over surface).
 
-danger_wash = "#6685b0" # That button's hover fill (error 12% over surface).
+danger_wash = "#6985b6" # That button's hover fill (error 12% over surface).
