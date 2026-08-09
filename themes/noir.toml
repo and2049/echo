@@ -1,52 +1,44 @@
-# Accent: active tabs, the seek bar, links, the playing-track marker.
-primary = "#949ca0"
-# Second accent: liked-track hearts, the condensed lyric line's neighbours.
-secondary = "#becad6"
-# The window background.
-background = "#141314"
-# Elevated panels: menus, modals, popovers, the titlebar.
-surface = "#201f21"
-# Main text.
-text = "#d0d4d4"
-# Secondary text: artist/album columns, hints, timestamps, inactive icons.
-text_muted = "#5a6268"
-# Selection source color; selected rows derive their fill from this.
-highlight_bg = "#c0d1d6"
-# Text on strong highlights (the TUI's selected rows).
-highlight_fg = "#1e1e20"
-# Errors: failure messages and the audio-device banner.
-error = "#b4332a"
+# Derived colors below the base nine are generated — after changing a base
+# color, refresh them with: python themes/generate_desktop.py
 
-# Derived colors the desktop app paints — concrete values, no runtime
-# transparency. Each comment states the formula they were generated with;
-# edit freely, or delete a key (or this whole table) to fall back to the
-# formula. Regenerate after changing base colors: python themes/generate_desktop.py
-[desktop]
-# Selected list-row pill (highlight_bg 20% over background).
-row_selected = "#36393b"
-# Any hovered row over the window: sidebar, lists, quick links, range pills (text_muted 10% over background).
-row_hover = "#1b1b1c"
-# Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
-wash = "#1e1f21"
-# Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
-border = "#292b2d"
-# Accent-tinted hover: tabs, links, active transport toggles (primary 12% over background).
-accent_hover = "#232325"
-# Accent-tinted selection: drop targets, resize handle, suggestion chip (primary 20% over background).
-accent_selected = "#2e2e30"
-# The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
-like_dim = "#3e4144"
-# The audio-device failure banner fill (error 15% over background).
-error_wash = "#2c1817"
-# Hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
-menu_hover = "#262628"
-# Selected menu/picker row (highlight_bg 20% over surface).
-menu_selected = "#404345"
-# Accent-tinted hover/selection in pickers, suggestions and modal controls (primary 12% over surface).
-menu_accent = "#2e2e30"
-# Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
-menu_border = "#34363a"
-# Confirm-prompt destructive button border (error 50% over surface).
-danger_border = "#6a2926"
-# That button's hover fill (error 12% over surface).
-danger_wash = "#322122"
+primary = "#a6adb0" # Accent: active tabs, the seek bar, links, the playing-track marker.
+
+secondary = "#a6adb0" # Second accent: liked-track hearts, the condensed lyric line's neighbours.
+
+background = "#141314" # The window background.
+
+surface = "#201f21" # Elevated panels: menus, modals, popovers, the titlebar.
+
+text = "#d0d4d4" # Main text.
+
+text_muted = "#5a6268" # Secondary text: artist/album columns, hints, timestamps, inactive icons.
+
+highlight_bg = "#c0d1d6" # Selection source color; selected rows derive their fill from this.
+
+highlight_fg = "#1e1e20" # Text on strong highlights (the TUI's selected rows).
+
+error = "#a94039" # Errors: failure messages and the audio-device banner.
+
+row_selected = "#36393b" # Any selected row/chip over the window: lists, sidebar, the command-bar suggestion (highlight_bg 20% over background).
+
+row_hover = "#1b1b1c" # Any hovered row over the window: sidebar, lists, tabs, links, range pills (text_muted 10% over background).
+
+wash = "#1e1f21" # Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
+
+border = "#292b2d" # Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
+
+drag_target = "#313233" # Drag feedback: drop targets while dragging and the sidebar resize handle (primary 20% over background).
+
+like_dim = "#262a2c" # The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
+
+error_wash = "#2a1a1a" # The audio-device failure banner fill (error 15% over background).
+
+menu_hover = "#262628" # Any hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
+
+menu_selected = "#404345" # Any selected menu/picker/suggestion row (highlight_bg 20% over surface).
+
+menu_border = "#34363a" # Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
+
+danger_border = "#64302d" # Confirm-prompt destructive button border (error 50% over surface).
+
+danger_wash = "#302324" # That button's hover fill (error 12% over surface).

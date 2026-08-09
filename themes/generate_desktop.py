@@ -99,20 +99,19 @@ BASE = [
 ]
 
 # Derived slots: (key, base, alpha, underlay, comment). Order mirrors DesktopPalette.
-# One slot per semantic role — selection, hover, muted fill, border, accent hover, accent
-# selection — over the window background, then the same roles over the elevated surface.
+# One slot per semantic role — selection (highlight_bg-based), hover (text_muted-based),
+# muted fill, border — over the window background, then the same roles over the elevated
+# surface, plus drag feedback and the heart/error/danger tints.
 DERIVED = [
-    ("row_selected", "highlight_bg", 0.20, "background", "Selected list-row pill (highlight_bg 20% over background)."),
-    ("row_hover", "text_muted", 0.10, "background", "Any hovered row over the window: sidebar, lists, quick links, range pills (text_muted 10% over background)."),
+    ("row_selected", "highlight_bg", 0.20, "background", "Any selected row/chip over the window: lists, sidebar, the command-bar suggestion (highlight_bg 20% over background)."),
+    ("row_hover", "text_muted", 0.10, "background", "Any hovered row over the window: sidebar, lists, tabs, links, range pills (text_muted 10% over background)."),
     ("wash", "text_muted", 0.15, "background", "Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background)."),
     ("border", "text_muted", 0.30, "background", "Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background)."),
-    ("accent_hover", "primary", 0.12, "background", "Accent-tinted hover: tabs, links, active transport toggles (primary 12% over background)."),
-    ("accent_selected", "primary", 0.20, "background", "Accent-tinted selection: drop targets, resize handle, suggestion chip (primary 20% over background)."),
+    ("drag_target", "primary", 0.20, "background", "Drag feedback: drop targets while dragging and the sidebar resize handle (primary 20% over background)."),
     ("like_dim", "secondary", 0.25, "background", "The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background)."),
     ("error_wash", "error", 0.15, "background", "The audio-device failure banner fill (error 15% over background)."),
-    ("menu_hover", "text_muted", 0.10, "surface", "Hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface)."),
-    ("menu_selected", "highlight_bg", 0.20, "surface", "Selected menu/picker row (highlight_bg 20% over surface)."),
-    ("menu_accent", "primary", 0.12, "surface", "Accent-tinted hover/selection in pickers, suggestions and modal controls (primary 12% over surface)."),
+    ("menu_hover", "text_muted", 0.10, "surface", "Any hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface)."),
+    ("menu_selected", "highlight_bg", 0.20, "surface", "Any selected menu/picker/suggestion row (highlight_bg 20% over surface)."),
     ("menu_border", "text_muted", 0.35, "surface", "Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface)."),
     ("danger_border", "error", 0.50, "surface", "Confirm-prompt destructive button border (error 50% over surface)."),
     ("danger_wash", "error", 0.12, "surface", "That button's hover fill (error 12% over surface)."),
@@ -130,30 +129,31 @@ def regenerate(path):
             color = fallback if fallback is not None else reset
         resolved[key] = color
 
-    lines = []
+    # Flat layout: every color is a top-level key with its role as an inline comment.
+    # Derived values are concrete — the app does no runtime transparency; deleting a
+    # derived key makes the app fall back to the formula named in its comment.
+    lines = [
+        "# Derived colors below the base nine are generated — after changing a base",
+        "# color, refresh them with: python themes/generate_desktop.py",
+        "",
+    ]
     for key, _fallback, _reset, comment in BASE:
         value = raw.get(key)
         if value is None:
             continue
-        lines.append(f"# {comment}")
-        lines.append(f'{key} = "{value}"')
-    lines.append("")
-    lines.append("# Derived colors the desktop app paints — concrete values, no runtime")
-    lines.append("# transparency. Each comment states the formula they were generated with;")
-    lines.append("# edit freely, or delete a key (or this whole table) to fall back to the")
-    lines.append("# formula. Regenerate after changing base colors: python themes/generate_desktop.py")
-    lines.append("[desktop]")
+        lines.append(f'{key} = "{value}" # {comment}')
+        lines.append("")
     for key, base, alpha, under, comment in DERIVED:
         value = blend(resolved[base], resolved[under], alpha)
-        lines.append(f"# {comment}")
-        lines.append(f'{key} = "{hexstr(value)}"')
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lines.append(f'{key} = "{hexstr(value)}" # {comment}')
+        lines.append("")
+    path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
     print(f"{path.name}: regenerated")
 
 
 def main():
     here = Path(__file__).parent
-    for path in sorted(here.glob("*.toml")):
+    for path in sorted(here.glob("themes.bak/*.toml")):
         regenerate(path)
 
 
