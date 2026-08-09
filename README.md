@@ -205,6 +205,10 @@ Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 
+## Themes
+
+Themes live in `themes/*.toml` as a flat list: nine base colors followed by the twelve derived colors the desktop app paints, every one explicit with a comment saying what it drives. Edit values freely, or change base colors and run `python themes/generate_desktop.py` to recompute the derived ones. Derived keys are optional — a missing key is computed with the formula named in its comment, and a `[desktop]` table is also accepted for overrides. To iterate visually, `python tools/theme-preview/serve.py` opens a live mock of the desktop window in the browser that repaints on every save — no rebuild needed. Colors can be edited in either direction: change the toml in your editor, or click any color in the preview's legend to adjust it with a picker that writes straight back to the file (its "recompute derived" button re-runs the generator for the current theme).
+
 ## Audio Quality
 
 echo streams at 320 kbps and applies volume normalisation, matching the Spotify desktop app's defaults. These live under `[library]` in `~/.config/echo/config.toml` and take effect on the next launch.
