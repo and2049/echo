@@ -114,10 +114,11 @@ pub fn blend(color: Hsla, under: Hsla, alpha: f32) -> Hsla {
 
 /// Every derived color the desktop paints, resolved to a concrete opaque value.
 ///
-/// One slot per semantic role — selection, hover, muted fill, border, accent hover, accent
-/// selection — once over the window `background` and once over the elevated `surface`, plus
-/// the heart, error and danger tints. Each slot has a formula (base theme slot, mix strength,
-/// underlay) used when the theme file doesn't spell the color out. A theme's `[desktop]`
+/// One slot per semantic role — selection, hover, muted fill, border — once over the window
+/// `background` and once over the elevated `surface`, plus drag feedback and the heart,
+/// error and danger tints. Selections are always highlight_bg-based and hovers always
+/// text_muted-based, whatever the widget. Each slot has a formula (base theme slot, mix
+/// strength, underlay) used when the theme file doesn't spell the color out. A theme's `[desktop]`
 /// table overrides any slot by name; the bundled themes list every slot explicitly (values
 /// generated with `themes/generate_desktop.py`), so editing the file is the whole story for
 /// them.
@@ -137,12 +138,9 @@ pub struct DesktopPalette {
     /// Window-level borders and outlines, and the seek/volume bar track.
     /// Formula: `text_muted` 30% over `background`.
     pub border: Hsla,
-    /// Accent-tinted hover: tabs, links, active-state transport toggles.
-    /// Formula: `primary` 12% over `background`.
-    pub accent_hover: Hsla,
-    /// Accent-tinted selection: drag-over drop targets, the sidebar resize handle, the
-    /// selected command-bar suggestion chip. Formula: `primary` 20% over `background`.
-    pub accent_selected: Hsla,
+    /// Drag feedback: drop targets while dragging and the sidebar resize handle.
+    /// Formula: `primary` 20% over `background`.
+    pub drag_target: Hsla,
     /// The faint heart on a track that is not liked (hovering shows `secondary` itself).
     /// Formula: `secondary` 25% over `background`.
     pub like_dim: Hsla,
@@ -154,9 +152,6 @@ pub struct DesktopPalette {
     pub menu_hover: Hsla,
     /// Selected menu/picker row. Formula: `highlight_bg` 20% over `surface`.
     pub menu_selected: Hsla,
-    /// Accent-tinted hover/selection in pickers, suggestions and modal controls.
-    /// Formula: `primary` 12% over `surface`.
-    pub menu_accent: Hsla,
     /// Borders in and around menus, modals, popovers and drag chips.
     /// Formula: `text_muted` 35% over `surface`.
     pub menu_border: Hsla,
@@ -189,13 +184,11 @@ impl DesktopPalette {
             row_hover: slot("row_hover", blend(muted, bg, 0.10)),
             wash: slot("wash", blend(muted, bg, 0.15)),
             border: slot("border", blend(muted, bg, 0.30)),
-            accent_hover: slot("accent_hover", blend(accent, bg, 0.12)),
-            accent_selected: slot("accent_selected", blend(accent, bg, 0.20)),
+            drag_target: slot("drag_target", blend(accent, bg, 0.20)),
             like_dim: slot("like_dim", blend(secondary, bg, 0.25)),
             error_wash: slot("error_wash", blend(error, bg, 0.15)),
             menu_hover: slot("menu_hover", blend(muted, surface, 0.10)),
             menu_selected: slot("menu_selected", blend(highlight, surface, 0.20)),
-            menu_accent: slot("menu_accent", blend(accent, surface, 0.12)),
             menu_border: slot("menu_border", blend(muted, surface, 0.35)),
             danger_border: slot("danger_border", blend(error, surface, 0.50)),
             danger_wash: slot("danger_wash", blend(error, surface, 0.12)),

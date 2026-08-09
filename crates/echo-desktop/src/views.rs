@@ -331,7 +331,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             .rounded_md()
             .text_sm()
             .text_color(if active { accent } else { muted })
-            .hover(move |style| style.bg(palette.accent_hover))
+            .hover(move |style| style.bg(palette.row_hover))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.state.ui.active_library_tab = target;
                 this.state.ui.selected_playlist_index = 0;
@@ -643,7 +643,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 })
                                 .when(tab == LibraryTab::Playlists, |el| {
                                     el.drag_over::<DraggedPlaylist>(move |style, _, _, _| {
-                                        style.bg(palette.accent_selected)
+                                        style.bg(palette.drag_target)
                                     })
                                     .on_drop(cx.listener(
                                         move |this: &mut EchoApp, drag: &DraggedPlaylist, _window, cx| {
@@ -758,7 +758,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .bottom_0()
                 .w(px(5.0))
                 .cursor_col_resize()
-                .hover(move |style| style.bg(palette.accent_selected))
+                .hover(move |style| style.bg(palette.drag_target))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
@@ -1133,9 +1133,9 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                         .justify_between()
                         .text_sm()
                         .text_color(if is_active { accent } else { fg })
-                        .when(is_selected, |el| el.bg(palette.menu_accent))
+                        .when(is_selected, |el| el.bg(palette.menu_selected))
                         .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_accent))
+                            el.hover(move |style| style.bg(palette.menu_hover))
                         })
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
@@ -1302,7 +1302,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         },
                                     )
                                     .drag_over::<DraggedTrack>(move |style, _, _, _| {
-                                        style.bg(palette.accent_selected)
+                                        style.bg(palette.drag_target)
                                     })
                                     .on_drop(cx.listener(
                                         move |this: &mut EchoApp, drag: &DraggedTrack, _window, cx| {
@@ -1703,18 +1703,16 @@ fn liked_cell(
     palette: DesktopPalette,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
+    let group = SharedString::from(format!("liked-{section}-{ix}"));
     div()
-        .id(SharedString::from(format!("liked-{section}-{ix}")))
+        .id(group.clone())
+        .group(group.clone())
         .flex_none()
         .w(px(14.0))
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .text_color(if liked { color } else { palette.like_dim })
-        .when(!liked, |el| {
-            el.hover(move |style| style.text_color(color))
-        })
         .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
             cx.stop_propagation();
             if let Some(event) =
@@ -1724,7 +1722,17 @@ fn liked_cell(
             }
             cx.notify();
         }))
-        .child(svg().path("icons/heart.svg").size(px(12.0)))
+        .child(
+            // gpui svgs don't inherit text color, so the tint (and its hover swap) must
+            // live on the svg itself.
+            svg()
+                .path("icons/heart.svg")
+                .size(px(12.0))
+                .text_color(if liked { color } else { palette.like_dim })
+                .when(!liked, |el| {
+                    el.group_hover(group, move |style| style.text_color(color))
+                }),
+        )
 }
 
 /// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
@@ -1799,7 +1807,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             .rounded_md()
             .text_sm()
             .text_color(if active { accent } else { muted })
-            .hover(move |style| style.bg(outer_palette.accent_hover))
+            .hover(move |style| style.bg(outer_palette.row_hover))
             .cursor_pointer()
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.state.ui.active_search_tab = target;
@@ -3263,7 +3271,7 @@ pub fn settings_modal(
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_accent))
+                    .hover(move |style| style.bg(palette.menu_hover))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.run_setting(cmd.clone(), cx);
                     }))
@@ -3422,7 +3430,7 @@ pub fn settings_modal(
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_accent))
+                    .hover(move |style| style.bg(palette.menu_hover))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.set_audio_quality(|config| config.bitrate = rate, cx);
                     }))
@@ -3453,7 +3461,7 @@ pub fn settings_modal(
                     .text_xs()
                     .text_color(if active { accent } else { muted })
                     .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_accent))
+                    .hover(move |style| style.bg(palette.menu_hover))
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.set_audio_quality(|config| config.normalisation = on, cx);
                     }))
@@ -3480,7 +3488,7 @@ pub fn settings_modal(
             .text_xs()
             .text_color(muted)
             .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_accent))
+            .hover(move |style| style.bg(palette.menu_hover))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.set_audio_quality(
                     |config| {
@@ -3561,7 +3569,7 @@ pub fn settings_modal(
             .text_xs()
             .text_color(muted)
             .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_accent))
+            .hover(move |style| style.bg(palette.menu_hover))
             .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                 this.run_setting(cmd.to_string(), cx);
             }))
@@ -3632,7 +3640,7 @@ pub fn settings_modal(
                                 .text_xs()
                                 .text_color(muted)
                                 .cursor_pointer()
-                                .hover(move |style| style.bg(palette.menu_accent))
+                                .hover(move |style| style.bg(palette.menu_hover))
                                 .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
                                     this.settings_open = false;
                                     this.toggle_themes(cx);
@@ -4107,7 +4115,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
-                        .hover(move |style| style.bg(palette.menu_accent))
+                        .hover(move |style| style.bg(palette.menu_hover))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, window, cx| {
                             this.run_menu_action(action, index, window, cx);
@@ -4218,9 +4226,9 @@ pub fn track_context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .rounded_md()
                         .text_sm()
                         .text_color(if danger { danger_color } else { fg })
-                        .when(is_selected, |el| el.bg(palette.menu_accent))
+                        .when(is_selected, |el| el.bg(palette.menu_selected))
                         .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_accent))
+                            el.hover(move |style| style.bg(palette.menu_hover))
                         })
                         .cursor_pointer()
                         .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
