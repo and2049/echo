@@ -642,6 +642,10 @@ pub struct Theme {
     /// themes without this table look identical. See `echo-desktop/src/theme.rs` for the keys.
     #[serde(default)]
     pub desktop: std::collections::HashMap<String, String>,
+    /// The same derived colors written as top-level keys — the bundled themes' flat layout.
+    /// Merged into the overrides beneath any `[desktop]` entries.
+    #[serde(default, flatten)]
+    pub extra: std::collections::HashMap<String, String>,
 }
 
 fn default_surface() -> String {
@@ -661,6 +665,7 @@ impl Default for Theme {
             highlight_fg: "Black".to_string(),
             error: "Red".to_string(),
             desktop: std::collections::HashMap::new(),
+            extra: std::collections::HashMap::new(),
         }
     }
 }

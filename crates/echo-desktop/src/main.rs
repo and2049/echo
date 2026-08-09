@@ -1452,7 +1452,7 @@ impl EchoApp {
                             .text_xs()
                             .map(|el| {
                                 if selected {
-                                    el.bg(palette.accent_selected).text_color(fg)
+                                    el.bg(palette.row_selected).text_color(fg)
                                 } else {
                                     el.text_color(muted)
                                 }
@@ -1770,15 +1770,6 @@ impl EchoApp {
             "icons/play.svg"
         };
 
-        // Toggle buttons hover with a wash of their own color: accent while on, muted while
-        // off — mirrored alongside each color pick so `icon_button` needs no blending.
-        let wash_for = |color: Hsla| {
-            if color == accent {
-                palette.accent_hover
-            } else {
-                palette.wash
-            }
-        };
         let shuffle_color = if playback.is_shuffled { accent } else { muted };
         let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
             "Track" => ("icons/repeat-one.svg", accent),
@@ -2136,7 +2127,7 @@ impl EchoApp {
                                 "shuffle",
                                 "icons/shuffle.svg",
                                 shuffle_color,
-                                wash_for(shuffle_color),
+                                palette.wash,
                                 cx,
                                 |this, cx| this.toggle_shuffle(cx),
                             ))
@@ -2144,7 +2135,7 @@ impl EchoApp {
                                 "repeat",
                                 repeat_icon,
                                 repeat_color,
-                                wash_for(repeat_color),
+                                palette.wash,
                                 cx,
                                 |this, cx| this.cycle_repeat(cx),
                             ))
@@ -2152,7 +2143,7 @@ impl EchoApp {
                                 "lyrics",
                                 "icons/mic.svg",
                                 lyrics_color,
-                                wash_for(lyrics_color),
+                                palette.wash,
                                 cx,
                                 |this, cx| this.toggle_lyrics(cx),
                             )),
@@ -2231,7 +2222,7 @@ impl EchoApp {
                                 "queue",
                                 "icons/playlist.svg",
                                 queue_color,
-                                wash_for(queue_color),
+                                palette.wash,
                                 cx,
                                 |this, cx| this.toggle_queue(cx),
                             ))

@@ -105,9 +105,10 @@ pub struct ResolvedTheme {
     pub selection_bg: ThemeColor,
     pub selected_item: ThemeColor,
     pub error: ThemeColor,
-    /// Parsed `[desktop]` table entries — the desktop's derived washes/borders/hovers when the
-    /// theme spells them out. Keys the desktop doesn't know, and values that fail to parse,
-    /// are dropped. Empty for themes without the table (the desktop then derives the colors).
+    /// The desktop's derived washes/borders/hovers when the theme spells them out — top-level
+    /// keys and `[desktop]` table entries merged (the table wins on conflicts). Keys the
+    /// desktop doesn't know, and values that fail to parse, are dropped. Empty for themes
+    /// listing only base colors (the desktop then derives everything).
     pub desktop_overrides: std::collections::HashMap<String, ThemeColor>,
 }
 
@@ -128,8 +129,9 @@ impl ResolvedTheme {
             selected_item: parse(&theme.highlight_fg, ThemeColor::Named(Black)),
             error: parse(&theme.error, ThemeColor::Named(Red)),
             desktop_overrides: theme
-                .desktop
+                .extra
                 .iter()
+                .chain(theme.desktop.iter())
                 .filter_map(|(key, value)| {
                     ThemeColor::from_str(value).ok().map(|c| (key.clone(), c))
                 })
@@ -141,6 +143,33 @@ impl ResolvedTheme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_overrides_come_from_flat_keys_and_the_table() {
+        let theme: crate::config::Theme = toml::from_str(
+            r##"
+            primary = "cyan"
+            secondary = "yellow"
+            background = "#101014"
+            text = "white"
+            text_muted = "darkgray"
+            highlight_bg = "white"
+            highlight_fg = "black"
+            error = "red"
+            row_selected = "#222233" # flat layout
+            row_hover = "not a color"
+            [desktop]
+            row_selected = "#333344"
+            menu_hover = "#444455"
+            "##,
+        )
+        .unwrap();
+        let resolved = ResolvedTheme::from_theme(&theme);
+        let overrides = &resolved.desktop_overrides;
+        assert_eq!(overrides.get("row_selected"), Some(&ThemeColor::Rgb(0x33, 0x33, 0x44)));
+        assert_eq!(overrides.get("menu_hover"), Some(&ThemeColor::Rgb(0x44, 0x44, 0x55)));
+        assert!(!overrides.contains_key("row_hover"));
+    }
 
     #[test]
     fn named_colors_parse_with_any_separator_style() {
