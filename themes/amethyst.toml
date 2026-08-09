@@ -24,59 +24,29 @@ error = "#fa6537"
 [desktop]
 # Selected list-row pill (highlight_bg 20% over background).
 row_selected = "#463d52"
-# Hovered sidebar row / quick link / range pill (text_muted 10% over background).
+# Any hovered row over the window: sidebar, lists, quick links, range pills (text_muted 10% over background).
 row_hover = "#36303f"
-# Hovered main-area list row (text_muted 8% over background).
-row_hover_faint = "#35303e"
-# Placeholder cover boxes, small round-button hover, disabled buttons (text_muted 15% over background).
-wash_muted = "#383242"
-# Seek and volume bar track (text_muted 25% over background).
-bar_track = "#3c3647"
-# Window-level borders: sidebar edge, bar tops, input outlines (text_muted 30% over background).
-border_soft = "#3e374a"
-# Inactive pill outlines in the main area (text_muted 40% over background).
-outline = "#423b4f"
-# Hovered tab or link (primary 10% over background).
-accent_wash = "#3a3344"
-# Hovered active-state transport toggle (primary 15% over background).
-accent_wash_icon = "#3d3648"
-# Drag-over drop targets and the sidebar resize handle (primary 20% over background).
-accent_wash_strong = "#41394d"
-# Selected command-bar suggestion chip (primary 25% over background).
-suggestion_selected = "#453c52"
-# Hovered play/pause and prev/next buttons (text 15% over background).
-wash_fg = "#4c4555"
-# The faint heart on a not-liked track (secondary 25% over background).
+# Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
+wash = "#383242"
+# Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
+border = "#3e374a"
+# Accent-tinted hover: tabs, links, active transport toggles (primary 12% over background).
+accent_hover = "#3b3445"
+# Accent-tinted selection: drop targets, resize handle, suggestion chip (primary 20% over background).
+accent_selected = "#41394d"
+# The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
 like_dim = "#4e4059"
-# That heart while hovered (secondary 70% over background).
-like_hover = "#816491"
 # The audio-device failure banner fill (error 15% over background).
 error_wash = "#50353a"
-# Hovered menu/modal row (text_muted 10% over surface).
+# Hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
 menu_hover = "#433c4f"
-# Selected context/track-menu row (highlight_bg 20% over surface).
-menu_row_selected = "#524760"
-# Selected theme-picker row (text_muted 18% over surface).
-menu_selected = "#453e52"
-# Input and segmented-control outlines inside modals (text_muted 30% over surface).
-menu_border_soft = "#484056"
-# Popover, modal and drag-chip borders (text_muted 40% over surface).
-border_strong = "#4b425a"
-# Selected/hovered row in pickers, menus and suggestions (primary 12% over surface).
-picker_selected = "#484055"
-# Hovered control inside modals (primary 10% over surface).
-menu_accent_wash = "#473f54"
-# Confirm-prompt destructive button border (fixed danger red 50% over surface).
-prompt_confirm_border = "#90464f"
-# That button's hover fill (fixed danger red 12% over surface).
-prompt_confirm_wash = "#543d4d"
-# Confirm-prompt cancel button border (text_muted 50% over surface).
-prompt_cancel_border = "#4d445d"
-# That button's hover fill (text_muted 12% over surface).
-prompt_cancel_wash = "#443d50"
-# Titlebar minimize/maximize caption hover (text 8% over surface).
-titlebar_hover = "#4d4659"
-# Those captions while pressed (text 12% over surface).
-titlebar_active = "#544c60"
-# The close caption while pressed (Windows red 80% over surface; its hover is the system red itself).
-close_active = "#c7192b"
+# Selected menu/picker row (highlight_bg 20% over surface).
+menu_selected = "#524760"
+# Accent-tinted hover/selection in pickers, suggestions and modal controls (primary 12% over surface).
+menu_accent = "#484055"
+# Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
+menu_border = "#494158"
+# Confirm-prompt destructive button border (error 50% over surface).
+danger_border = "#9e5042"
+# That button's hover fill (error 12% over surface).
+danger_wash = "#573f49"

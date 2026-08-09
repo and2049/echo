@@ -1441,7 +1441,7 @@ impl EchoApp {
             .px_4()
             .py_1()
             .border_t_1()
-            .border_color(palette.border_soft)
+            .border_color(palette.border)
             .when(is_command && !suggestions.is_empty(), |el| {
                 el.child(div().flex().flex_row().gap_2().overflow_hidden().children(
                     suggestions.into_iter().enumerate().map(|(index, suggestion)| {
@@ -1452,7 +1452,7 @@ impl EchoApp {
                             .text_xs()
                             .map(|el| {
                                 if selected {
-                                    el.bg(palette.suggestion_selected).text_color(fg)
+                                    el.bg(palette.accent_selected).text_color(fg)
                                 } else {
                                     el.text_color(muted)
                                 }
@@ -1774,9 +1774,9 @@ impl EchoApp {
         // off — mirrored alongside each color pick so `icon_button` needs no blending.
         let wash_for = |color: Hsla| {
             if color == accent {
-                palette.accent_wash_icon
+                palette.accent_hover
             } else {
-                palette.wash_muted
+                palette.wash
             }
         };
         let shuffle_color = if playback.is_shuffled { accent } else { muted };
@@ -1879,7 +1879,7 @@ impl EchoApp {
             .h(px(108.0))
             .px_4()
             .border_t_1()
-            .border_color(palette.border_soft)
+            .border_color(palette.border)
             .child(
                 // Top row: song card, condensed lyric line, visualizer. Its contents come and go;
                 // its height doesn't, so nothing here can move the row below.
@@ -1909,7 +1909,7 @@ impl EchoApp {
                                     .w(px(36.0))
                                     .h(px(36.0))
                                     .rounded_md()
-                                    .bg(palette.wash_muted)
+                                    .bg(palette.wash)
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -2098,7 +2098,7 @@ impl EchoApp {
                                 "previous",
                                 "icons/previous.svg",
                                 fg,
-                                palette.wash_fg,
+                                palette.wash,
                                 cx,
                                 |this, cx| this.play_previous(cx),
                             ))
@@ -2112,7 +2112,7 @@ impl EchoApp {
                                     .items_center()
                                     .justify_center()
                                     .rounded_full()
-                                    .hover(move |style| style.bg(palette.wash_fg))
+                                    .hover(move |style| style.bg(palette.wash))
                                     .on_click(cx.listener(|this, _event, _window, cx| {
                                         this.toggle_playback(cx)
                                     }))
@@ -2128,7 +2128,7 @@ impl EchoApp {
                                 "next",
                                 "icons/next.svg",
                                 fg,
-                                palette.wash_fg,
+                                palette.wash,
                                 cx,
                                 |this, cx| this.play_next(cx),
                             ))
@@ -2192,7 +2192,7 @@ impl EchoApp {
                                             .w_full()
                                             .h(px(6.0))
                                             .rounded_full()
-                                            .bg(palette.bar_track)
+                                            .bg(palette.border)
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, _cx| seek_bounds.set(bounds),
@@ -2239,11 +2239,11 @@ impl EchoApp {
                                 "devices",
                                 "icons/computer.svg",
                                 muted,
-                                palette.wash_muted,
+                                palette.wash,
                                 cx,
                                 |this, cx| this.open_devices(cx),
                             ))
-                            .child(icon_button("mute", mute_icon, muted, palette.wash_muted, cx, |this, cx| {
+                            .child(icon_button("mute", mute_icon, muted, palette.wash, cx, |this, cx| {
                                 this.toggle_mute(cx)
                             }))
                             .child(
@@ -2265,7 +2265,7 @@ impl EchoApp {
                                             .w_full()
                                             .h(px(6.0))
                                             .rounded_full()
-                                            .bg(palette.bar_track)
+                                            .bg(palette.border)
                                             .child(
                                                 canvas(
                                                     move |bounds, _window, _cx| volume_bounds.set(bounds),
