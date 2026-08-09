@@ -236,8 +236,8 @@ pub fn titlebar(
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(svg().path("icons/music-note.svg").size(px(14.0)).text_color(accent))
-                .child(div().text_xs().text_color(muted).child("echo")),
+                .child(svg().path("icons/music-note.svg").size(px(14.0)).text_color(fg))
+                .child(div().text_xs().text_color(fg).child("echo")),
         )
         .when(cfg!(target_os = "windows") && !fullscreen, |el| {
             el.child(

@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>echo theme preview</title>
+<style>
+  :root {
+    --close-red: #e81123;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #131316;
+    color: #c9c9ce;
+    font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 18px;
+  }
+
+  /* ---- tool chrome (not themed) ---- */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(1460px, 100%);
+  }
+  .toolbar h1 { font-size: 14px; font-weight: 600; color: #e8e8ec; }
+  .toolbar .dot { width: 8px; height: 8px; border-radius: 50%; background: #e05252; }
+  .toolbar .dot.live { background: #3ecf7a; }
+  .toolbar select {
+    background: #1f1f24; color: #e8e8ec; border: 1px solid #33333a;
+    border-radius: 6px; padding: 4px 8px; font: inherit;
+  }
+  .toolbar button {
+    background: #1f1f24; color: #c9c9ce; border: 1px solid #33333a;
+    border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer;
+  }
+  .toolbar .hint { color: #77777e; font-size: 12px; margin-left: auto; }
+
+  .stage { display: flex; gap: 14px; align-items: flex-start; }
+
+  /* ---- the mock window ---- */
+  .window {
+    width: 1140px; height: 716px;
+    background: var(--background);
+    border: 1px solid #000;
+    border-radius: 8px;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 34px 1fr auto auto auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+    position: relative;
+    user-select: none;
+  }
+
+  .icon {
+    display: inline-block; width: 15px; height: 15px; flex: none;
+    background: currentColor;
+    -webkit-mask: var(--i) center / contain no-repeat;
+    mask: var(--i) center / contain no-repeat;
+  }
+
+  /* titlebar */
+  .titlebar {
+    background: var(--surface);
+    display: flex; align-items: center; gap: 7px; padding-left: 12px;
+    color: var(--text); font-size: 12px;
+  }
+  .captions { margin-left: auto; display: flex; height: 100%; }
+  .caption { width: 46px; display: flex; align-items: center; justify-content: center; color: var(--text); }
+  .caption .icon { width: 10px; height: 10px; }
+  .caption:hover { background: var(--menu-hover); }
+  .caption.close:hover { background: var(--close-red); color: #fff; }
+
+  .content { display: flex; min-height: 0; }
+
+  /* sidebar */
+  .sidebar {
+    width: 240px; flex: none; border-right: 1px solid var(--border);
+    padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+    position: relative;
+  }
+  .resize-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; }
+  .resize-handle:hover { background: var(--drag-target); }
+  .row.muted { color: var(--text-muted); }
+  .tabs { display: flex; gap: 14px; padding: 2px 8px 10px; font-weight: 600; }
+  .tabs span { color: var(--text-muted); cursor: default; padding: 2px 4px; border-radius: 5px; }
+  .tabs span:hover { background: var(--row-hover); }
+  .tabs .active { color: var(--primary); }
+  .row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 7px; color: var(--text); cursor: default;
+  }
+  .sidebar .row:hover { background: var(--row-hover); }
+  .sidebar .row.selected, .sidebar .row.selected:hover { background: var(--row-selected); }
+  .sidebar .row.dragover, .sidebar .row.dragover:hover { background: var(--drag-target); }
+  .row .icon { color: var(--text-muted); }
+  .quiet { color: var(--text-muted); }
+  .thumb {
+    width: 24px; height: 24px; flex: none; border-radius: 5px;
+    background: var(--wash); color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .thumb .icon { width: 12px; height: 12px; }
+  .section { padding: 10px 8px 4px; color: var(--text-muted); font-size: 11px; }
+
+  /* main area */
+  .main { flex: 1; min-width: 0; padding: 12px 18px; display: flex; flex-direction: column; gap: 12px; position: relative; }
+  .main-top { display: flex; align-items: center; gap: 10px; }
+  .search {
+    margin: 0 auto; width: 340px;
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; display: flex; align-items: center; gap: 8px;
+    color: var(--text-muted);
+  }
+  .main-top > .icon { color: var(--text-muted); cursor: default; }
+  .view-head { display: flex; align-items: baseline; gap: 10px; }
+  .view-head h2 { color: var(--text); font-size: 19px; }
+  .pills { display: flex; gap: 6px; margin-left: auto; }
+  .pill { padding: 3px 12px; border-radius: 999px; font-size: 12px; color: var(--text-muted); border: 1px solid var(--border); }
+  .pill:hover { background: var(--row-hover); }
+  .pill.active { background: var(--row-selected); color: var(--text); border-color: transparent; }
+
+  /* track list */
+  .tracks { display: flex; flex-direction: column; min-height: 0; }
+  .trow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; border-radius: 7px; color: var(--text);
+  }
+  .trow:hover { background: var(--row-hover); }
+  .trow.selected, .trow.selected:hover { background: var(--row-selected); }
+  .trow.head { color: var(--text-muted); font-size: 11px; letter-spacing: .06em; }
+  .trow.head:hover { background: none; }
+  .c-num { width: 26px; flex: none; color: var(--text-muted); text-align: right; }
+  .c-title { flex: 2 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-artist, .c-album { flex: 1.5 1 0; min-width: 0; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-heart { flex: none; width: 16px; color: var(--like-dim); }
+  .c-heart:hover { color: var(--secondary); }
+  .c-heart.liked { color: var(--secondary); }
+  .c-heart .icon { width: 12px; height: 12px; }
+  .c-len { width: 40px; flex: none; text-align: right; color: var(--text-muted); }
+  .trow.playing .c-title { color: var(--primary); display: flex; align-items: center; gap: 6px; }
+  .trow.playing .c-title .icon { width: 11px; height: 11px; color: var(--primary); }
+
+  /* overlays: context menu + picker + confirm prompt */
+  .popover {
+    position: absolute; background: var(--surface);
+    border: 1px solid var(--menu-border); border-radius: 9px;
+    padding: 5px; width: 172px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  .popover .row { padding: 5px 9px; border-radius: 6px; font-size: 12.5px; }
+  .popover .row:hover { background: var(--menu-hover); }
+  .popover .row.selected, .popover .row.selected:hover { background: var(--menu-selected); }
+  .overlay-tag {
+    position: absolute; top: -17px; left: 4px;
+    font-size: 10px; color: #77777e; letter-spacing: .05em;
+  }
+  #menu { right: 226px; top: 208px; }
+  #picker { right: 44px; top: 236px; }
+  .prompt {
+    position: absolute; right: 44px; bottom: 40px; width: 330px;
+    background: var(--surface); border: 1px solid var(--menu-border);
+    border-radius: 11px; padding: 15px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+  .prompt p { color: var(--text); margin-bottom: 12px; }
+  .prompt .buttons { display: flex; justify-content: flex-end; gap: 8px; }
+  .btn { padding: 4px 13px; border-radius: 7px; border: 1px solid; font-size: 12.5px; cursor: default; }
+  .btn.cancel { color: var(--text-muted); border-color: var(--menu-border); }
+  .btn.cancel:hover { background: var(--menu-hover); }
+  .btn.danger { color: var(--error); border-color: var(--danger-border); }
+  .btn.danger:hover { background: var(--danger-wash); }
+
+  /* command bar, error banner, playback bar */
+  .cmdbar {
+    border-top: 1px solid var(--border);
+    padding: 6px 16px; display: flex; align-items: center; gap: 8px; color: var(--text);
+  }
+  .chip { padding: 2px 10px; border-radius: 6px; color: var(--text-muted); font-size: 12px; }
+  .chip.selected { background: var(--row-selected); color: var(--text); }
+  .banner {
+    background: var(--error-wash); color: var(--error);
+    padding: 5px 16px; font-size: 12px;
+  }
+  .playbar {
+    border-top: 1px solid var(--border);
+    padding: 8px 16px 10px; display: flex; flex-direction: column; gap: 7px;
+  }
+  .pb-top { display: flex; align-items: center; gap: 10px; }
+  .pb-top .thumb { width: 34px; height: 34px; }
+  .np-title { color: var(--text); }
+  .np-artist { color: var(--text-muted); font-size: 12px; }
+  .lyric { flex: 1; text-align: center; color: var(--text-muted); font-size: 12px; }
+  .pb-icons { display: flex; gap: 12px; color: var(--text-muted); }
+  .pb-bottom { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 11.5px; }
+  .transport { display: flex; align-items: center; gap: 10px; color: var(--text); }
+  .transport .icon:hover { color: var(--text); }
+  .toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px;
+  }
+  .toggle:hover { background: var(--wash); }
+  .toggle.active { color: var(--primary); }
+  .slider { height: 4px; border-radius: 2px; background: var(--border); position: relative; }
+  .slider .fill { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--primary); }
+  .seek { flex: 1; }
+  .vol { width: 90px; }
+
+  /* legend */
+  .legend {
+    width: 305px; max-height: 716px; overflow-y: auto;
+    background: #1a1a1f; border: 1px solid #2b2b31; border-radius: 10px;
+    padding: 12px;
+  }
+  .legend h3 { font-size: 11px; letter-spacing: .08em; color: #8b8b93; margin: 10px 0 6px; }
+  .legend h3:first-child { margin-top: 0; }
+  .lrow { display: flex; gap: 8px; padding: 4px 5px; border-radius: 6px; align-items: flex-start; }
+  .lrow .swatch { width: 17px; height: 17px; border-radius: 4px; border: 1px solid rgba(255,255,255,.14); flex: none; margin-top: 1px; }
+  .lrow .name { font-family: Consolas, monospace; font-size: 12px; color: #e2e2e7; }
+  .lrow .hex { font-family: Consolas, monospace; font-size: 11px; color: #8b8b93; }
+  .lrow .tag { font-size: 10px; color: #8b8b93; border: 1px solid #33333a; border-radius: 4px; padding: 0 4px; margin-left: 5px; }
+  .lrow .comment { font-size: 11px; color: #77777e; }
+  .lrow.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { 0% { background: #3a5f43; } 100% { background: transparent; } }
+  .lrow { cursor: pointer; }
+  .lrow:hover { background: #232329; }
+  .hidden { display: none; }
+  .error-note { color: #e0a852; font-size: 12px; }
+  .save-note { color: #3ecf7a; font-size: 12px; opacity: 0; transition: opacity .3s; }
+  .save-note.show { opacity: 1; }
+
+  /* ---- color picker popover ---- */
+  .picker {
+    position: fixed; z-index: 50; width: 216px;
+    background: #1f1f24; border: 1px solid #3a3a42; border-radius: 10px;
+    padding: 10px; box-shadow: 0 10px 32px rgba(0,0,0,.55);
+    user-select: none;
+  }
+  .pk-head { display: flex; align-items: center; margin-bottom: 8px; }
+  .pk-key { font-family: Consolas, monospace; font-size: 12px; color: #e8e8ec; }
+  .pk-close { margin-left: auto; color: #8b8b93; cursor: pointer; padding: 0 4px; }
+  .pk-close:hover { color: #e8e8ec; }
+  .pk-sv {
+    position: relative; width: 196px; height: 196px; border-radius: 6px; cursor: crosshair;
+    background:
+      linear-gradient(to top, #000, rgba(0,0,0,0)),
+      linear-gradient(to right, #fff, rgba(255,255,255,0)),
+      var(--pk-hue, #f00);
+  }
+  .pk-dot {
+    position: absolute; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6);
+    transform: translate(-6px, -6px); pointer-events: none;
+  }
+  .pk-hue {
+    position: relative; height: 12px; border-radius: 6px; margin-top: 10px; cursor: crosshair;
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+  }
+  .pk-hue-dot {
+    position: absolute; top: -2px; width: 8px; height: 16px; border-radius: 4px;
+    background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6);
+    transform: translateX(-4px); pointer-events: none;
+  }
+  .pk-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .pk-row input {
+    width: 76px; background: #131316; color: #e8e8ec; border: 1px solid #3a3a42;
+    border-radius: 6px; padding: 3px 7px; font: 12px Consolas, monospace;
+  }
+  .pk-swatches { display: flex; margin-left: auto; border-radius: 6px; overflow: hidden; border: 1px solid #3a3a42; }
+  .pk-old, .pk-new { width: 26px; height: 20px; }
+  .pk-hint { margin-top: 8px; font-size: 10.5px; color: #77777e; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <span class="dot" id="dot"></span>
+    <h1>echo theme preview</h1>
+    <select id="theme-select"></select>
+    <button id="legend-toggle">legend</button>
+    <button id="regen" title="Recompute the 12 derived colors from the base nine and rewrite the file">recompute derived</button>
+    <span class="save-note" id="save-note">saved</span>
+    <span class="error-note hidden" id="parse-error"></span>
+    <span class="hint">edit themes/*.toml and save — the mock repaints live</span>
+  </div>
+
+  <div class="stage">
+    <div class="window">
+      <div class="titlebar">
+        <span class="icon" style="--i:url(/icons/music-note.svg)"></span> echo
+        <div class="captions">
+          <div class="caption"><span class="icon" style="--i:url(/icons/win-minimize.svg)"></span></div>
+          <div class="caption"><span class="icon" style="--i:url(/icons/win-maximize.svg)"></span></div>
+          <div class="caption close"><span class="icon" style="--i:url(/icons/win-close.svg)"></span></div>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="sidebar">
+          <div class="tabs"><span class="active">Playlists</span><span>Albums</span><span>Artists</span></div>
+          <div class="row muted"><span class="icon" style="--i:url(/icons/star.svg)"></span> Top Tracks</div>
+          <div class="row muted"><span class="icon" style="--i:url(/icons/clock.svg)"></span> Recently Played</div>
+          <div class="row muted"><span class="icon" style="--i:url(/icons/mic.svg)"></span> Top Artists</div>
+          <div class="row muted"><span class="icon" style="--i:url(/icons/sparkles.svg)"></span> What's New</div>
+          <div class="row selected"><span class="thumb"><span class="icon" style="--i:url(/icons/music-note.svg)"></span></span> ♥ Liked Songs</div>
+          <div class="row"><span class="thumb"><span class="icon" style="--i:url(/icons/computer.svg)"></span></span> Local Music</div>
+          <div class="row"><span style="color:var(--primary)">⌄</span> collection</div>
+          <div class="row"><span class="thumb"><span class="icon" style="--i:url(/icons/playlist.svg)"></span></span> bloom</div>
+          <div class="row dragover"><span class="thumb"><span class="icon" style="--i:url(/icons/playlist.svg)"></span></span> night drive <span class="quiet" style="margin-left:auto;font-size:10px">drag-over</span></div>
+          <div class="row"><span class="thumb"><span class="icon" style="--i:url(/icons/playlist.svg)"></span></span> 203</div>
+          <div class="row"><span class="thumb"><span class="icon" style="--i:url(/icons/playlist.svg)"></span></span> iris</div>
+          <div class="row"><span class="thumb"><span class="icon" style="--i:url(/icons/playlist.svg)"></span></span> 我的歌单 36</div>
+          <div class="resize-handle" title="sidebar resize handle — hover shows drag_target"></div>
+        </div>
+
+        <div class="main">
+          <div class="main-top">
+            <div class="search"><span class="icon" style="--i:url(/icons/search.svg)"></span> Search — ctrl-k</div>
+            <span class="icon" style="--i:url(/icons/paint-board.svg)"></span>
+            <span class="icon" style="--i:url(/icons/settings.svg)"></span>
+          </div>
+          <div class="view-head">
+            <h2>Liked Songs</h2><span class="quiet">142 tracks</span>
+            <div class="pills"><span class="pill active">4 weeks</span><span class="pill">6 months</span><span class="pill">all time</span></div>
+          </div>
+          <div class="tracks">
+            <div class="trow head"><span class="c-num">#</span><span class="c-title">TITLE</span><span class="c-artist">ARTIST</span><span class="c-album">ALBUM</span><span class="c-heart"></span><span class="c-len">⧗</span></div>
+            <div class="trow"><span class="c-num">1</span><span class="c-title">Fireproof</span><span class="c-artist">VANNER</span><span class="c-album">VENI VIDI VICI</span><span class="c-heart liked"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:11</span></div>
+            <div class="trow"><span class="c-num">2</span><span class="c-title">Slow Dancing</span><span class="c-artist">V</span><span class="c-album">Layover</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:29</span></div>
+            <div class="trow selected"><span class="c-num">3</span><span class="c-title">Blue Hour</span><span class="c-artist">TXT</span><span class="c-album">minisode1</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:24</span></div>
+            <div class="trow"><span class="c-num">4</span><span class="c-title">Ditto</span><span class="c-artist">NewJeans</span><span class="c-album">OMG</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:05</span></div>
+            <div class="trow playing"><span class="c-num">5</span><span class="c-title"><span class="icon" style="--i:url(/icons/play.svg)"></span>ICN &gt; YVR</span><span class="c-artist">BIG Naughty</span><span class="c-album">Nangman</span><span class="c-heart liked"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:54</span></div>
+            <div class="trow"><span class="c-num">6</span><span class="c-title">Love wins all</span><span class="c-artist">IU</span><span class="c-album">The Winning</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">4:15</span></div>
+            <div class="trow"><span class="c-num">7</span><span class="c-title">Supernova</span><span class="c-artist">aespa</span><span class="c-album">Armageddon</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">2:58</span></div>
+            <div class="trow"><span class="c-num">8</span><span class="c-title">이젠 널 추억이라 부를게</span><span class="c-artist">Various</span><span class="c-album">Singles</span><span class="c-heart"><span class="icon" style="--i:url(/icons/heart.svg)"></span></span><span class="c-len">3:47</span></div>
+          </div>
+
+          <div class="popover" id="menu">
+            <span class="overlay-tag">context menu</span>
+            <div class="row">Play</div>
+            <div class="row">Add to queue</div>
+            <div class="row selected">Add to playlist ▸</div>
+            <div class="row">Remove from playlist</div>
+          </div>
+          <div class="popover" id="picker">
+            <span class="overlay-tag">picker</span>
+            <div class="row selected">chill mix</div>
+            <div class="row">night drive</div>
+            <div class="row">bloom</div>
+          </div>
+          <div class="prompt">
+            <span class="overlay-tag">confirm prompt</span>
+            <p>Remove “iris” from Liked Songs?</p>
+            <div class="buttons"><span class="btn cancel">Cancel</span><span class="btn danger">Remove</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cmdbar">:sleep 3<span style="flex:1"></span><span class="chip">15m</span><span class="chip selected">30m</span><span class="chip">1h</span></div>
+      <div class="banner">audio output unavailable — device disconnected</div>
+
+      <div class="playbar">
+        <div class="pb-top">
+          <span class="thumb"><span class="icon" style="--i:url(/icons/music-note.svg)"></span></span>
+          <div><div class="np-title">ICN &gt; YVR</div><div class="np-artist">BIG Naughty</div></div>
+          <div class="lyric">평생, 평생, 평생</div>
+          <div class="pb-icons">
+            <span class="icon" style="--i:url(/icons/pin.svg)"></span>
+            <span class="icon" style="--i:url(/icons/computer.svg)"></span>
+          </div>
+        </div>
+        <div class="pb-bottom">
+          <div class="transport">
+            <span class="icon" style="--i:url(/icons/previous.svg)"></span>
+            <span class="icon" style="--i:url(/icons/play.svg)"></span>
+            <span class="icon" style="--i:url(/icons/next.svg)"></span>
+            <span class="toggle active"><span class="icon" style="--i:url(/icons/shuffle.svg)"></span></span>
+            <span class="toggle" style="color:var(--text-muted)"><span class="icon" style="--i:url(/icons/repeat.svg)"></span></span>
+            <span class="toggle" style="color:var(--text-muted)"><span class="icon" style="--i:url(/icons/mic.svg)"></span></span>
+          </div>
+          <span>2:21</span>
+          <div class="slider seek"><div class="fill" style="width:58%"></div></div>
+          <span>3:54</span>
+          <span class="icon" style="--i:url(/icons/volume-high.svg)"></span>
+          <div class="slider vol"><div class="fill" style="width:89%"></div></div>
+          <span>89%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="picker hidden" id="color-picker">
+    <div class="pk-head"><span class="pk-key" id="pk-key"></span><span class="pk-close" id="pk-close">✕</span></div>
+    <div class="pk-sv" id="pk-sv"><div class="pk-dot" id="pk-dot"></div></div>
+    <div class="pk-hue" id="pk-hue"><div class="pk-hue-dot" id="pk-hue-dot"></div></div>
+    <div class="pk-row">
+      <input id="pk-hex" maxlength="7" spellcheck="false">
+      <div class="pk-swatches"><div class="pk-old" id="pk-old" title="before"></div><div class="pk-new" id="pk-new" title="after"></div></div>
+    </div>
+    <div class="pk-hint">release to save to the toml · esc closes</div>
+  </div>
+
+<script>
+  const dot = document.getElementById("dot");
+  const select = document.getElementById("theme-select");
+  const legend = document.getElementById("legend");
+  const parseError = document.getElementById("parse-error");
+  let current =
+    new URLSearchParams(location.search).get("theme") ||
+    localStorage.getItem("echo-preview-theme");
+  let lastValues = {};
+
+  // highlight_bg/fg aren't painted directly by the desktop — annotate them in the legend.
+  const NOTES = { highlight_bg: "selection source", highlight_fg: "TUI only" };
+
+  const cssVar = (key) => "--" + key.replaceAll("_", "-");
+
+  function applyTheme(data) {
+    const values = {};
+    for (const group of ["base", "desktop"]) {
+      for (const [key, info] of Object.entries(data[group])) {
+        document.documentElement.style.setProperty(cssVar(key), info.value);
+        values[key] = info;
+      }
+    }
+    renderLegend(data, values);
+    lastValues = values;
+  }
+
+  function renderLegend(data, values) {
+    legend.innerHTML = "";
+    for (const [group, title] of [["base", "BASE COLORS"], ["desktop", "[DESKTOP] — DERIVED"]]) {
+      const h = document.createElement("h3");
+      h.textContent = title;
+      legend.appendChild(h);
+      for (const [key, info] of Object.entries(data[group])) {
+        const row = document.createElement("div");
+        row.className = "lrow";
+        row.dataset.key = key;
+        row.title = "click to edit";
+        if (lastValues[key] && lastValues[key].value !== info.value) row.classList.add("flash");
+        const tags =
+          (NOTES[key] ? `<span class="tag">${NOTES[key]}</span>` : "") +
+          (info.fallback ? `<span class="tag">formula</span>` : "");
+        row.innerHTML =
+          `<span class="swatch" style="background:${info.value}"></span>` +
+          `<span><span class="name">${key}</span> <span class="hex">${info.value}</span>${tags}` +
+          `<div class="comment">${info.comment}</div></span>`;
+        row.addEventListener("click", () => openPicker(key, info.value, row));
+        legend.appendChild(row);
+      }
+    }
+  }
+
+  async function loadTheme(name) {
+    const res = await fetch(`/api/theme/${name}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      parseError.textContent = body.error ? `parse error: ${body.error}` : "load failed";
+      parseError.classList.remove("hidden");
+      return;
+    }
+    parseError.classList.add("hidden");
+    applyTheme(await res.json());
+  }
+
+  async function loadThemeList() {
+    const names = await (await fetch("/api/themes")).json();
+    if (!names.includes(current)) current = names.includes("echo") ? "echo" : names[0];
+    select.innerHTML = names.map((n) => `<option${n === current ? " selected" : ""}>${n}</option>`).join("");
+    return names;
+  }
+
+  select.addEventListener("change", () => {
+    current = select.value;
+    localStorage.setItem("echo-preview-theme", current);
+    lastValues = {};
+    closePicker();
+    loadTheme(current);
+  });
+
+  document.getElementById("legend-toggle").addEventListener("click", () => {
+    legend.classList.toggle("hidden");
+  });
+
+  // ---- editing: square HSV picker that writes back to the toml ----
+  const picker = document.getElementById("color-picker");
+  const pkKey = document.getElementById("pk-key");
+  const pkSv = document.getElementById("pk-sv");
+  const pkDot = document.getElementById("pk-dot");
+  const pkHue = document.getElementById("pk-hue");
+  const pkHueDot = document.getElementById("pk-hue-dot");
+  const pkHex = document.getElementById("pk-hex");
+  const pkOld = document.getElementById("pk-old");
+  const pkNew = document.getElementById("pk-new");
+  const saveNote = document.getElementById("save-note");
+  const pk = { key: null, h: 0, s: 1, v: 1, lastSaved: null };
+
+  function hsvToHex(h, s, v) {
+    const f = (n) => {
+      const k = (n + h / 60) % 6;
+      const c = v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+      return Math.round(c * 255).toString(16).padStart(2, "0");
+    };
+    return `#${f(5)}${f(3)}${f(1)}`;
+  }
+
+  function hexToHsv(hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+    let h = 0;
+    if (d) {
+      if (max === r) h = 60 * (((g - b) / d) % 6);
+      else if (max === g) h = 60 * ((b - r) / d + 2);
+      else h = 60 * ((r - g) / d + 4);
+    }
+    return { h: (h + 360) % 360, s: max ? d / max : 0, v: max };
+  }
+
+  function pkRefresh(fromHexField) {
+    const hex = hsvToHex(pk.h, pk.s, pk.v);
+    pkSv.style.setProperty("--pk-hue", `hsl(${pk.h}, 100%, 50%)`);
+    pkDot.style.left = `${pk.s * 100}%`;
+    pkDot.style.top = `${(1 - pk.v) * 100}%`;
+    pkHueDot.style.left = `${(pk.h / 360) * 100}%`;
+    if (!fromHexField) pkHex.value = hex;
+    pkNew.style.background = hex;
+    document.documentElement.style.setProperty(cssVar(pk.key), hex);
+    return hex;
+  }
+
+  function openPicker(key, value, row) {
+    pk.key = key;
+    Object.assign(pk, hexToHsv(value));
+    pk.lastSaved = value;
+    pkKey.textContent = key;
+    pkOld.style.background = value;
+    picker.classList.remove("hidden");
+    const rect = row.getBoundingClientRect();
+    const height = 320;
+    picker.style.left = `${Math.max(8, rect.left - 236)}px`;
+    picker.style.top = `${Math.min(Math.max(8, rect.top - 40), window.innerHeight - height)}px`;
+    pkRefresh();
+  }
+
+  function closePicker() {
+    picker.classList.add("hidden");
+    pk.key = null;
+  }
+
+  async function pkSave() {
+    if (!pk.key) return;
+    const hex = hsvToHex(pk.h, pk.s, pk.v);
+    if (hex === pk.lastSaved) return;
+    const res = await fetch(`/api/theme/${current}/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: pk.key, value: hex }),
+    });
+    if (res.ok) {
+      pk.lastSaved = hex;
+      saveNote.classList.add("show");
+      setTimeout(() => saveNote.classList.remove("show"), 1200);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      parseError.textContent = body.error || "save failed";
+      parseError.classList.remove("hidden");
+    }
+  }
+
+  function dragControl(el, apply) {
+    el.addEventListener("pointerdown", (event) => {
+      el.setPointerCapture(event.pointerId);
+      const move = (ev) => {
+        const rect = el.getBoundingClientRect();
+        apply(
+          Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width)),
+          Math.min(1, Math.max(0, (ev.clientY - rect.top) / rect.height)),
+        );
+        pkRefresh();
+      };
+      move(event);
+      const up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        pkSave();
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+    });
+  }
+
+  dragControl(pkSv, (x, y) => { pk.s = x; pk.v = 1 - y; });
+  dragControl(pkHue, (x) => { pk.h = Math.min(359.9, x * 360); });
+
+  pkHex.addEventListener("change", () => {
+    const value = pkHex.value.trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(value)) {
+      Object.assign(pk, hexToHsv(value));
+      pkRefresh(true);
+      pkSave();
+    }
+  });
+  document.getElementById("pk-close").addEventListener("click", closePicker);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePicker();
+  });
+
+  document.getElementById("regen").addEventListener("click", async () => {
+    const res = await fetch(`/api/theme/${current}/regenerate`, { method: "POST" });
+    if (res.ok) {
+      saveNote.classList.add("show");
+      setTimeout(() => saveNote.classList.remove("show"), 1200);
+    }
+  });
+
+  function connect() {
+    const source = new EventSource("/api/events");
+    source.onopen = () => dot.classList.add("live");
+    source.onerror = () => dot.classList.remove("live");
+    source.onmessage = async (event) => {
+      const changed = JSON.parse(event.data);
+      await loadThemeList();
+      if (changed.includes(current)) loadTheme(current);
+    };
+  }
+
+  (async () => {
+    await loadThemeList();
+    localStorage.setItem("echo-preview-theme", current);
+    await loadTheme(current);
+    connect();
+    const editKey = new URLSearchParams(location.search).get("edit");
+    if (editKey) {
+      const row = legend.querySelector(`.lrow[data-key="${CSS.escape(editKey)}"]`);
+      if (row) row.click();
+    }
+  })();
+</script>
+</body>
+</html>
