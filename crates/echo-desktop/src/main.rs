@@ -135,6 +135,9 @@ pub(crate) struct TrackMenuState {
     pub position: Option<gpui::Point<Pixels>>,
     /// Keyboard selection within the item list.
     pub selected: usize,
+    /// The add-to-playlist flyout hanging off the "Add to playlist" row, and its own selection.
+    /// `None` while closed; while open, j/k and Enter address the flyout instead of the items.
+    pub submenu: Option<usize>,
 }
 
 /// What a track-menu item does. Most entries are the shared action-menu actions; remove is
@@ -208,6 +211,15 @@ pub(crate) struct EchoApp {
     pub(crate) context_menu: Option<ContextMenuState>,
     /// Right-click menu over a track row; mutually exclusive with `context_menu`.
     pub(crate) track_menu: Option<TrackMenuState>,
+    /// The add-to-playlist flyout's list. A plain scroll handle like the modal pickers': the
+    /// flyout holds every writable playlist, so it has to scroll past its `max_h`.
+    pub(crate) submenu_scroll: ScrollHandle,
+    /// Written each paint: the "Add to playlist" row's rectangle (the flyout hangs off its
+    /// side) and the flyout panel's own, which is the base of the hover triangle.
+    pub(crate) submenu_row_bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub(crate) submenu_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// Last pointer position seen over the "Add to playlist" row — the apex of that triangle.
+    submenu_apex: gpui::Point<Pixels>,
     /// Vim-style count prefix for j/k, accumulated from bare digit keys.
     pending_count: Option<usize>,
     /// Written by a canvas overlay each paint; read by the scrub handlers to turn a pointer's
@@ -358,6 +370,10 @@ impl EchoApp {
             help_scroll: ScrollHandle::new(),
             context_menu: None,
             track_menu: None,
+            submenu_scroll: ScrollHandle::new(),
+            submenu_row_bounds: Rc::default(),
+            submenu_bounds: Rc::default(),
+            submenu_apex: gpui::Point::default(),
             pending_count: None,
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
@@ -380,7 +396,11 @@ impl EchoApp {
         if self.theme_modal_open {
             return views::sorted_theme_names(&self.state).len();
         }
-        if self.track_menu.is_some() {
+        if let Some(menu) = self.track_menu.as_ref() {
+            // The flyout takes over navigation while it is open, exactly like a nested list.
+            if menu.submenu.is_some() {
+                return echo_core::action_menu::playlist_add_choices(&self.state).len();
+            }
             return views::track_menu_items(self).len();
         }
         if self.sort_menu_open {
@@ -442,7 +462,12 @@ impl EchoApp {
             self.theme_modal_index = index;
             self.theme_modal_scroll.scroll_to_item(index);
         } else if let Some(menu) = self.track_menu.as_mut() {
-            menu.selected = index;
+            if menu.submenu.is_some() {
+                menu.submenu = Some(index);
+                self.submenu_scroll.scroll_to_item(index);
+            } else {
+                menu.selected = index;
+            }
         } else if self.sort_menu_open {
             self.sort_menu_index = index;
         } else {
@@ -502,7 +527,7 @@ impl EchoApp {
         } else if self.theme_modal_open {
             self.theme_modal_index
         } else if let Some(menu) = self.track_menu.as_ref() {
-            menu.selected
+            menu.submenu.unwrap_or(menu.selected)
         } else if self.sort_menu_open {
             self.sort_menu_index
         } else {
@@ -594,9 +619,19 @@ impl EchoApp {
             self.theme_modal_open = false;
             None
         } else if let Some(menu) = self.track_menu.as_ref() {
-            let selected = menu.selected;
-            if let Some((_, item, _)) = views::track_menu_items(self).into_iter().nth(selected) {
-                self.run_track_menu_action(item, cx);
+            if let Some(choice) = menu.submenu {
+                self.commit_playlist_submenu(choice, cx);
+            } else {
+                let selected = menu.selected;
+                // Enter on "Add to playlist" steps into the flyout instead of running an
+                // action; every other item runs and closes the menu.
+                if self.track_menu_add_row() == Some(selected) {
+                    self.open_playlist_submenu(true, cx);
+                } else if let Some((_, item, _)) =
+                    views::track_menu_items(self).into_iter().nth(selected)
+                {
+                    self.run_track_menu_action(item, cx);
+                }
             }
             None
         } else if self.sort_menu_open {
@@ -701,6 +736,9 @@ impl EchoApp {
             echo_core::intent::exit_visual(&mut self.state);
         } else if self.context_menu.is_some() {
             self.context_menu = None;
+        } else if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_some()) {
+            // The flyout is the topmost layer: escape steps back to the menu items.
+            self.close_playlist_submenu(cx);
         } else if self.track_menu.is_some() {
             self.track_menu = None;
         } else if self.state.ui.playlist_add_modal_open {
@@ -867,6 +905,127 @@ impl EchoApp {
         cx.notify();
     }
 
+    // The add-to-playlist flyout. The track menu's "Add to playlist" row opens a second panel
+    // beside it rather than the full-screen picker `a` uses, so the choice stays in one gesture.
+
+    /// Index of the "Add to playlist" row in the open track menu, if it has one. The flyout
+    /// anchors to it, and the hover/keyboard handlers key off it.
+    pub(crate) fn track_menu_add_row(&self) -> Option<usize> {
+        views::track_menu_items(self).iter().position(|(_, item, _)| {
+            matches!(
+                item,
+                TrackMenuItem::Action(echo_core::models::ActionMenuAction::AddToPlaylist)
+            )
+        })
+    }
+
+    /// Open the flyout. `focus_row` also parks the menu's keyboard selection on the row it
+    /// hangs off, which is what Enter and a click mean; a hover leaves the selection where the
+    /// keyboard put it, since the view lights that row for as long as the flyout is open.
+    pub(crate) fn open_playlist_submenu(&mut self, focus_row: bool, cx: &mut Context<Self>) {
+        let Some(row) = self.track_menu_add_row() else {
+            return;
+        };
+        if let Some(menu) = self.track_menu.as_mut() {
+            if focus_row {
+                menu.selected = row;
+            }
+            if menu.submenu.is_none() {
+                menu.submenu = Some(0);
+                self.submenu_scroll.scroll_to_item(0);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Close the flyout but keep the menu itself: what escape, the left arrow and a hover that
+    /// leaves the row all mean.
+    pub(crate) fn close_playlist_submenu(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = self.track_menu.as_mut() {
+            menu.submenu = None;
+        }
+        cx.notify();
+    }
+
+    /// Add the menu's track to flyout choice `index`, then close the whole menu. The register
+    /// is what `commit_playlist_add` resolves tracks from, the same handoff
+    /// `action_menu::run(AddToPlaylist)` makes before opening the modal picker.
+    pub(crate) fn commit_playlist_submenu(&mut self, index: usize, cx: &mut Context<Self>) {
+        // Out of range only happens with no playlists at all, where Enter should do nothing
+        // rather than close the menu; it would also leave the register staged.
+        if index >= echo_core::action_menu::playlist_add_choices(&self.state).len() {
+            return;
+        }
+        let Some(menu) = self.track_menu.take() else {
+            return;
+        };
+        self.state.ui.operation_register = vec![menu.ctx.track_id];
+        if let Some(event) = echo_core::action_menu::commit_playlist_add(&mut self.state, index) {
+            self.dispatch(event);
+        }
+        cx.notify();
+    }
+
+    /// A pointer move over track-menu row `ix`. Hovering the "Add to playlist" row opens the
+    /// flyout; hovering any other row closes it — unless the pointer is inside the triangle
+    /// spanned by where it left that row and the flyout's near edge, which is the diagonal a
+    /// user aiming at the flyout travels through.
+    pub(crate) fn hover_track_menu_row(
+        &mut self,
+        ix: usize,
+        position: gpui::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.track_menu_add_row() != Some(ix) {
+            if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_some())
+                && !self.pointer_aims_at_submenu(position)
+            {
+                self.close_playlist_submenu(cx);
+            }
+            return;
+        }
+        self.submenu_apex = position;
+        if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_none()) {
+            self.open_playlist_submenu(false, cx);
+        }
+    }
+
+    /// Whether `position` falls in the triangle from [`Self::submenu_apex`] to the flyout's
+    /// near edge. Degenerate while the flyout has yet to be painted, which reads as "not
+    /// aiming" and simply closes it a frame early.
+    fn pointer_aims_at_submenu(&self, position: gpui::Point<Pixels>) -> bool {
+        let flyout = self.submenu_bounds.get();
+        if flyout.size.height <= px(0.0) {
+            return false;
+        }
+        // The flyout sits on whichever side of the menu had room (`views::playlist_submenu`),
+        // so the near edge — and which way "toward it" is — follows from where it landed.
+        let flipped = flyout.left() < self.submenu_row_bounds.get().left();
+        let edge = if flipped { flyout.right() } else { flyout.left() };
+        // The flyout can be much taller than the menu, so the triangle alone would cover most
+        // of the rows below: a move only counts as aiming while it still travels toward the
+        // flyout. Straight down the menu closes it at once.
+        let toward = if flipped {
+            position.x < self.submenu_apex.x
+        } else {
+            position.x > self.submenu_apex.x
+        };
+        if !toward {
+            return false;
+        }
+        // A few pixels of slack at both corners: the flyout's own border and rounding mean the
+        // exact corner is not where the pointer needs to land.
+        let apex = self.submenu_apex;
+        let top = gpui::point(edge, flyout.top() - px(4.0));
+        let bottom = gpui::point(edge, flyout.bottom() + px(4.0));
+        let side = |a: gpui::Point<Pixels>, b: gpui::Point<Pixels>| {
+            f32::from(b.x - a.x) * f32::from(position.y - a.y)
+                - f32::from(b.y - a.y) * f32::from(position.x - a.x)
+        };
+        let (ab, bc, ca) = (side(apex, top), side(top, bottom), side(bottom, apex));
+        (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+    }
+
     /// The track `a` / `shift-a` act on: the focused row where the view has one, otherwise the
     /// currently playing track. Mirrors the TUI's `A` handler.
     pub(crate) fn action_target(&self) -> Option<echo_core::models::ActionMenuContext> {
@@ -974,6 +1133,7 @@ impl EchoApp {
                 ctx,
                 position: None,
                 selected: 0,
+                submenu: None,
             });
         }
         cx.notify();
@@ -1560,12 +1720,25 @@ impl EchoApp {
     }
 
     fn focus_library(&mut self, cx: &mut Context<Self>) {
+        // With a menu open the arrows belong to it: left closes the add-to-playlist flyout
+        // rather than moving pane focus behind the overlay.
+        if self.track_menu.is_some() {
+            self.close_playlist_submenu(cx);
+            return;
+        }
         self.state.ui.pending_d_press = false;
         self.state.ui.active_view = ActiveView::Library;
         cx.notify();
     }
 
     fn focus_tracks(&mut self, cx: &mut Context<Self>) {
+        // Right steps into the flyout when the menu's "Add to playlist" row is selected.
+        if self.track_menu.is_some() {
+            if self.track_menu_add_row() == self.track_menu.as_ref().map(|menu| menu.selected) {
+                self.open_playlist_submenu(true, cx);
+            }
+            return;
+        }
         self.state.ui.pending_d_press = false;
         // Nothing to focus before a context has been opened.
         if !self.state.data.tracks.is_empty() || self.state.data.active_tracklist_context.is_some()
@@ -2412,7 +2585,7 @@ impl Render for EchoApp {
         let track_menu = self
             .track_menu
             .is_some()
-            .then(|| views::track_context_menu(self, cx).into_any_element());
+            .then(|| views::track_context_menu(self, window, cx).into_any_element());
         let playlist_add_modal = self
             .state
             .ui
