@@ -185,7 +185,24 @@
       "pregain_desc": "dB added back after normalisation — raise if playback is quiet",
       "folder_empty": "No folder set — type an absolute path",
       "folder_desc": "Folder to scan — must be an absolute path. Enter to apply.",
-      "rescan": "Rescan now"
+      "rescan": "Rescan now",
+      "updates": {
+        "section": "UPDATES",
+        "version": "Version",
+        "dev": "(development build)",
+        "label": "Software update",
+        "desc": "Replaces the installed app — restart to finish",
+        "check": "Check for updates",
+        "checking": "Checking…",
+        "uptodate": "Up to date",
+        "install": "Update to {}",
+        "downloading": "Downloading {}%",
+        "restart": "Restart to finish",
+        "installed": "Version {} installed — restart echo to use it",
+        "retry": "Try again",
+        "open_releases": "Open releases page",
+        "failed": "The update check did not finish"
+      }
     },
     "setup": {
       "title": "Connect to Spotify",

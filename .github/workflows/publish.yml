@@ -1,11 +1,16 @@
 name: publish
 
+# Pushing a v* tag cuts the release. The manual trigger stays as an escape hatch for
+# re-running a failed publish without deleting and re-pushing the tag.
 on:
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       version:
         description: "Release version (e.g. 0.1.3)"
-        required: true
+        required: false
         type: string
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version }}
@@ -23,21 +28,45 @@ jobs:
           - os: ubuntu-latest
             target: linux
             formats: "deb,appimage"
+            slug: linux-x64
           - os: windows-latest
             target: win
             formats: "wix"
+            slug: windows-x64
+          # arm64 runner, so macOS releases are Apple Silicon only. `update::platform_target`
+          # returns None on an Intel Mac, which surfaces as "no release build for macos-x86_64".
           - os: macos-15
             target: mac
             formats: "dmg,app"
+            slug: darwin-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        # Tag pushes carry no inputs, so the version comes from the ref; dispatch runs supply
+        # it directly. Everything downstream reads these outputs, never inputs.version.
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            VERSION="${VERSION#v}"
+          else
+            echo "::error::No tag or version input — push a v*.*.* tag or supply the version."
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${VERSION}"
 
       - name: Update Version in Cargo.toml
         shell: bash
         # Member crates inherit via version.workspace = true, so the root is the only bump.
         run: |
-          perl -0pi -e 's/(^version = ")[^"]+(")/${1}${{ inputs.version }}${2}/m' Cargo.toml
+          perl -0pi -e 's/(^version = ")[^"]+(")/${1}${{ steps.version.outputs.version }}${2}/m' Cargo.toml
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -67,6 +96,10 @@ jobs:
       # One "echo" package per OS, bundling the desktop app plus the `spotify` TUI
       # (the MSI also puts the install dir on PATH; the deb ships /usr/bin/spotify).
       - name: Build and Package
+        env:
+          # Marks these binaries as release builds; `update::is_dev_build` refuses to
+          # self-upgrade without it, so a working-tree build can never overwrite itself.
+          ECHO_RELEASE: "1"
         run: cargo packager --release -p echo-desktop --formats ${{ matrix.formats }}
 
       # Terminal-only Linux installs keep a TUI-only AppImage; install.sh copies it to
@@ -74,7 +107,35 @@ jobs:
       # covers those platforms.
       - name: Package TUI AppImage
         if: runner.os == 'Linux'
+        env:
+          ECHO_RELEASE: "1"
         run: cargo packager --release -p spotify-tui --formats appimage
+
+      # Raw-binary archives are what `spotify upgrade` and the desktop's update button pull.
+      # They carry themes/ as well, because themes are loaded from the install directory —
+      # binaries alone would leave a release's theme changes behind. Must run after both
+      # packaging steps, since on Linux `spotify` is only built by the second one.
+      - name: Build upgrade archives
+        shell: bash
+        run: |
+          set -eu
+          SUFFIX=""
+          if [ "${{ runner.os }}" = "Windows" ]; then SUFFIX=".exe"; fi
+
+          stage() {
+            rm -rf pkg && mkdir pkg
+            for binary in "$@"; do cp "target/release/${binary}${SUFFIX}" pkg/; done
+            cp -r themes pkg/themes
+          }
+
+          stage echo-desktop spotify
+          tar -czf "target/release/echo-${{ matrix.slug }}.tar.gz" -C pkg .
+
+          stage spotify
+          tar -czf "target/release/spotify-${{ matrix.slug }}.tar.gz" -C pkg .
+
+          rm -rf pkg
+          ls -la target/release/*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
@@ -84,6 +145,7 @@ jobs:
             target/release/*.dmg
             target/release/*.deb
             target/release/*.AppImage
+            target/release/*.tar.gz
           if-no-files-found: error
 
   release:
@@ -98,9 +160,23 @@ jobs:
         with:
           path: artifacts
 
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+            VERSION="${VERSION#v}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           mkdir -p release-assets
           test -d artifacts
@@ -108,17 +184,25 @@ jobs:
           cp -v assets/install.sh release-assets/install.sh
           test "$(find release-assets -type f | wc -l)" -gt 0
 
+          # On a tag push the tag already exists and --target would be rejected; on a manual
+          # run the release has to be pinned to the branch it was dispatched from.
+          TARGET=()
+          if [[ "${{ github.ref }}" != refs/tags/* ]]; then
+            TARGET=(--target "${{ github.ref_name }}")
+          fi
+
+          # Published, never draft: `releases/latest` does not see drafts, and that is the
+          # endpoint the in-app updater queries.
           if [ -f release.md ] && [ -s release.md ]; then
-            cp release.md release_notes.txt
-            gh release create v${{ inputs.version }} \
-              --title "v${{ inputs.version }}" \
-              --notes-file release_notes.txt \
-              --target ${{ github.ref_name }} \
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file release.md \
+              "${TARGET[@]}" \
               release-assets/*
           else
-            gh release create v${{ inputs.version }} \
-              --title "v${{ inputs.version }}" \
+            gh release create "$TAG" \
+              --title "$TAG" \
               --generate-notes \
-              --target ${{ github.ref_name }} \
+              "${TARGET[@]}" \
               release-assets/*
           fi

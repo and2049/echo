@@ -37,7 +37,7 @@ echo 是一款用 Rust 編寫的終端音樂播放器和 Spotify 用戶端。ech
 
 從[發佈頁面](https://github.com/and2049/echo/releases)下載對應平台的安裝程式。**echo** 安裝包同時包含桌面應用程式和 `spotify` 終端指令：
 
-- **Windows**（`echo-desktop_*.msi`）：安裝桌面應用程式，並將安裝目錄加入 `PATH`（解除安裝時自動移除），安裝後在新終端中即可直接執行 `spotify`。
+- **Windows**（`echo-desktop_*.msi`）：為目前使用者安裝至 `%LOCALAPPDATA%\Programs\echo`（不需系統管理員權限），並將該目錄加入使用者 `PATH`（解除安裝時自動移除），安裝後在新終端中即可直接執行 `spotify`。以使用者身分安裝正是 `spotify upgrade` 與應用程式內更新能夠免提權替換程式的原因。若 `C:\Program Files\echo` 中存在舊的系統層級安裝，安裝程式會提示先將其解除安裝。
 - **macOS**（`echo_*.dmg`）：將 `echo.app` 拖入 Applications。TUI 已內建於應用程式套件中，執行一次以下指令即可加入 `PATH`：
 
   ```bash

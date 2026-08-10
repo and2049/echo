@@ -9,6 +9,7 @@ fn redirect_config_for_tests() {
     unsafe { std::env::set_var("ECHO_CONFIG_DIR", &dir) };
 }
 
+mod cli;
 mod handlers;
 mod tui;
 
@@ -25,6 +26,17 @@ use tui::theme::ToRatatui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Ahead of everything, including the Linux relaunch below: `launch_in_terminal` forwards
+    // argv to a spawned terminal, so an un-intercepted `upgrade` would open a window to run in.
+    let command = cli::parse(std::env::args().skip(1));
+    if command != cli::Command::Tui {
+        std::process::exit(cli::run(command).await);
+    }
+
+    // Windows cannot delete the image of a running process, so a previous upgrade leaves its
+    // backups behind. Nothing holds them now.
+    echo_core::update::sweep_backups();
+
     #[cfg(target_os = "linux")]
     {
         use std::io::IsTerminal;

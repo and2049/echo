@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Referenced from [package.metadata.packager.wix] fragment_paths. Appends the install
-    dir to the system PATH so the bundled `spotify` TUI (and echo-desktop.exe) are callable
+    dir to the user's PATH so the bundled `spotify` TUI (and echo-desktop.exe) are callable
     from any shell; Permanent="no" makes the MSI strip the entry again on uninstall.
     Win64 is hardcoded: releases only build x86_64 Windows.
+
+    System="no" writes HKCU\Environment rather than the machine PATH — writing the latter
+    needs administrator rights, which would defeat the per-user install this package does.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Fragment>
         <DirectoryRef Id="INSTALLDIR">
             <Component Id="EnvPathEntry" Guid="*" Win64="yes">
                 <RegistryValue Root="HKCU" Key="Software\echo\echo" Name="EnvPathEntry" Type="integer" Value="1" KeyPath="yes" />
-                <Environment Id="EchoInstallDirOnPath" Name="PATH" Value="[INSTALLDIR]" Part="last" Action="set" Permanent="no" System="yes" />
+                <Environment Id="EchoInstallDirOnPath" Name="PATH" Value="[INSTALLDIR]" Part="last" Action="set" Permanent="no" System="no" />
             </Component>
         </DirectoryRef>
     </Fragment>
