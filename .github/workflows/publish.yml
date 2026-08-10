@@ -25,9 +25,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux installs from the portable archive (assets/install.sh), so there is no
+          # installer to build — just the binaries the archive step picks up.
           - os: ubuntu-latest
             target: linux
-            formats: "deb,appimage"
+            formats: ""
             slug: linux-x64
           - os: windows-latest
             target: win
@@ -89,51 +91,47 @@ jobs:
           rm -rf /tmp/*.dmg /var/tmp/*.dmg
 
       - name: Install cargo-packager
+        if: matrix.formats != ''
         # Pinned: the desktop package injects a custom WiX fragment, so template drift in a
         # new packager release should be adopted deliberately, not picked up by surprise.
         run: cargo install cargo-packager --locked --version 0.11.8
 
-      # One "echo" package per OS, bundling the desktop app plus the `spotify` TUI
-      # (the MSI also puts the install dir on PATH; the deb ships /usr/bin/spotify).
+      # One echo package carrying both frontends: the desktop app plus the `spotify` TUI. The
+      # MSI also puts its install dir on PATH; the macOS bundle holds both in Contents/MacOS.
       - name: Build and Package
+        shell: bash
         env:
           # Marks these binaries as release builds; `update::is_dev_build` refuses to
           # self-upgrade without it, so a working-tree build can never overwrite itself.
           ECHO_RELEASE: "1"
-        run: cargo packager --release -p echo-desktop --formats ${{ matrix.formats }}
+        run: |
+          if [ -n "${{ matrix.formats }}" ]; then
+            cargo packager --release -p echo-desktop --formats ${{ matrix.formats }}
+          else
+            cargo build --release -p echo-desktop -p spotify-tui
+          fi
 
-      # Terminal-only Linux installs keep a TUI-only AppImage; install.sh copies it to
-      # ~/.local/bin/spotify. The standalone TUI MSI/DMG/deb are gone — the echo package
-      # covers those platforms.
-      - name: Package TUI AppImage
-        if: runner.os == 'Linux'
-        env:
-          ECHO_RELEASE: "1"
-        run: cargo packager --release -p spotify-tui --formats appimage
-
-      # Raw-binary archives are what `spotify upgrade` and the desktop's update button pull.
-      # They carry themes/ as well, because themes are loaded from the install directory —
-      # binaries alone would leave a release's theme changes behind. Must run after both
-      # packaging steps, since on Linux `spotify` is only built by the second one.
-      - name: Build upgrade archives
+      # The portable archive: what `spotify upgrade` and the desktop's update button pull on
+      # every platform, and what install.sh lays down on Linux. It carries themes/ because
+      # themes are loaded from the install directory — binaries alone would leave a release's
+      # theme changes behind — and the hicolor icons install.sh files into the menu entry.
+      - name: Build upgrade archive
         shell: bash
         run: |
           set -eu
           SUFFIX=""
           if [ "${{ runner.os }}" = "Windows" ]; then SUFFIX=".exe"; fi
 
-          stage() {
-            rm -rf pkg && mkdir pkg
-            for binary in "$@"; do cp "target/release/${binary}${SUFFIX}" pkg/; done
-            cp -r themes pkg/themes
-          }
+          rm -rf pkg && mkdir -p pkg/icons
+          for binary in echo-desktop spotify; do
+            cp "target/release/${binary}${SUFFIX}" pkg/
+          done
+          cp -r themes pkg/themes
+          for icon in 32x32.png 64x64.png 128x128.png "128x128@2x.png"; do
+            cp "icons/$icon" pkg/icons/
+          done
 
-          stage echo-desktop spotify
           tar -czf "target/release/echo-${{ matrix.slug }}.tar.gz" -C pkg .
-
-          stage spotify
-          tar -czf "target/release/spotify-${{ matrix.slug }}.tar.gz" -C pkg .
-
           rm -rf pkg
           ls -la target/release/*.tar.gz
 
@@ -143,8 +141,6 @@ jobs:
           path: |
             target/release/*.msi
             target/release/*.dmg
-            target/release/*.deb
-            target/release/*.AppImage
             target/release/*.tar.gz
           if-no-files-found: error
 
@@ -181,7 +177,9 @@ jobs:
           mkdir -p release-assets
           test -d artifacts
           find artifacts -type f -exec cp -v {} release-assets/ \;
-          cp -v assets/install.sh release-assets/install.sh
+          # The installers are fetched straight off the release, so they ship as assets too:
+          # `curl .../releases/latest/download/install.sh`.
+          cp -v assets/install.sh assets/install.ps1 release-assets/
           test "$(find release-assets -type f | wc -l)" -gt 0
 
           # On a tag push the tag already exists and --target would be rejected; on a manual

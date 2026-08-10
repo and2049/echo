@@ -1,13 +1,15 @@
 //! Self-upgrade: replacing an installed echo with a newer GitHub release.
 //!
-//! Releases carry OS installers *and* plain `.tar.gz` archives of the raw payload. Installers
-//! are the first-install path; the archives are what an upgrade swaps in, which keeps upgrading
-//! free of installer UI.
+//! There is exactly one install shape — `echo-desktop` and `spotify` side by side in a directory
+//! the user owns, with `themes/` beside them — so there is exactly one thing to swap: the
+//! `echo-<os>-<arch>.tar.gz` archive of that directory. The installers (`assets/install.sh`,
+//! `assets/install.ps1`) lay that shape down; every upgrade after it happens here, with no
+//! installer UI involved.
 //!
 //! Two details drive the design:
 //!
-//! - `echo-desktop` and `spotify` are packaged into the *same* directory on every platform (see
-//!   `echo-desktop/Cargo.toml`), so one archive updates both frontends at once.
+//! - Both frontends live in the *same* directory on every platform (see
+//!   `echo-desktop/Cargo.toml`), so one archive updates both at once.
 //! - Themes are loaded from `<exe dir>/themes` (see [`crate::config`]), so an archive of bare
 //!   binaries would leave a release's theme changes behind. The archives carry `themes/` too and
 //!   the directory is swapped along with the binaries.
@@ -16,7 +18,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
-/// Owner/name of the repository releases are pulled from. Matches `assets/install.sh`.
+/// Owner/name of the repository releases are pulled from. Matches the install scripts.
 pub const REPO: &str = "and2049/echo";
 
 /// The version in the committed `Cargo.toml`. CI rewrites it per release, so a binary still
@@ -60,17 +62,9 @@ pub enum UpdateError {
     MissingAsset { version: String, asset: String },
     #[error("could not tell how echo was installed (looked in {0})")]
     UnknownInstall(PathBuf),
-    #[error(
-        "echo was installed from a system package in {0} — upgrade it with your package \
-         manager, or reinstall from {1}"
-    )]
-    SystemPackage(PathBuf, String),
-    // Current installs are per-user and writable, so reaching this almost always means an
-    // older system-wide install — for which reinstalling, not elevating, is the real fix.
-    #[error(
-        "{0} is not writable — this looks like an older system-wide install; \
-         reinstall the current version from {1} (or re-run from an elevated terminal)"
-    )]
+    // Installs are per-user by construction, so this means something moved echo somewhere the
+    // user cannot write — reinstalling puts it back where upgrades work.
+    #[error("{0} is not writable — reinstall echo from {1}")]
     NotWritable(PathBuf, String),
     #[error("download was incomplete or corrupt — try again")]
     CorruptDownload,
@@ -200,20 +194,8 @@ fn require_target() -> Result<&'static str, UpdateError> {
     })
 }
 
-/// Which release asset an install needs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Payload {
-    /// Both frontends sit in one directory — the MSI and the macOS bundle look like this.
-    Combined,
-    /// Only the TUI is installed.
-    TuiOnly,
-    /// The TUI is a single AppImage file, replaced whole rather than extracted.
-    AppImage,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
-    pub payload: Payload,
     /// Directory replacements are staged in and renamed into.
     pub dir: PathBuf,
     /// Absolute paths of binaries to replace. File names double as archive member names.
@@ -223,13 +205,10 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn asset_name(&self, version: &str) -> Result<String, UpdateError> {
-        Ok(match self.payload {
-            // install.sh names AppImages after their main binary; match that exactly.
-            Payload::AppImage => format!("spotify_{version}_x86_64.AppImage"),
-            Payload::Combined => format!("echo-{}.tar.gz", require_target()?),
-            Payload::TuiOnly => format!("spotify-{}.tar.gz", require_target()?),
-        })
+    /// The one asset an upgrade ever pulls. Unversioned in the name, so `releases/latest`
+    /// download URLs stay stable.
+    pub fn asset_name(&self) -> Result<String, UpdateError> {
+        Ok(format!("echo-{}.tar.gz", require_target()?))
     }
 }
 
@@ -241,57 +220,24 @@ fn bin_name(stem: &str) -> String {
     }
 }
 
-/// Directories owned by a distro package manager, where rewriting files behind dpkg's back
-/// would desync its database.
-#[cfg(target_os = "linux")]
-fn is_system_package_dir(dir: &Path) -> bool {
-    matches!(
-        dir.to_str(),
-        Some("/usr/bin" | "/usr/local/bin" | "/bin" | "/usr/sbin")
-    )
-}
-
-#[cfg(not(target_os = "linux"))]
-fn is_system_package_dir(_dir: &Path) -> bool {
-    false
-}
-
-/// Resolve what to replace from the paths and environment of the running process.
+/// Resolve what to replace from the path of the running process.
 ///
 /// Split out from [`plan`] so it is testable without a matching install on disk: `exists`
 /// answers "is there a file at this path".
-fn resolve(
-    appimage: Option<PathBuf>,
-    exe: &Path,
-    exists: impl Fn(&Path) -> bool,
-) -> Result<Plan, UpdateError> {
-    // Inside an AppImage, `current_exe()` points into the mounted squashfs, which is read-only
-    // and vanishes on exit. $APPIMAGE is the actual file on disk and the only thing to replace.
-    if let Some(appimage) = appimage {
-        let dir = parent_of(&appimage)?;
-        return Ok(Plan {
-            payload: Payload::AppImage,
-            dir,
-            targets: vec![appimage],
-            themes: None,
-        });
-    }
-
+fn resolve(exe: &Path, exists: impl Fn(&Path) -> bool) -> Result<Plan, UpdateError> {
     let dir = parent_of(exe)?;
-    if is_system_package_dir(&dir) {
-        return Err(UpdateError::SystemPackage(dir, releases_url()));
-    }
 
-    let tui = dir.join(bin_name("spotify"));
-    let desktop = dir.join(bin_name("echo-desktop"));
-    let (payload, targets) = match (exists(&tui), exists(&desktop)) {
-        (true, true) => (Payload::Combined, vec![tui, desktop]),
-        (true, false) => (Payload::TuiOnly, vec![tui]),
-        // The desktop app without the TUI beside it: only the combined archive carries
-        // `echo-desktop`, so fetch that and extract just the one binary from it.
-        (false, true) => (Payload::Combined, vec![desktop]),
-        (false, false) => return Err(UpdateError::UnknownInstall(dir)),
-    };
+    // An install normally holds both binaries, but only what is actually on disk gets replaced:
+    // extracting `echo-desktop` over a directory that never had it would leave a stray copy
+    // outside whatever the user's launcher points at.
+    let targets: Vec<PathBuf> = ["spotify", "echo-desktop"]
+        .into_iter()
+        .map(|stem| dir.join(bin_name(stem)))
+        .filter(|path| exists(path))
+        .collect();
+    if targets.is_empty() {
+        return Err(UpdateError::UnknownInstall(dir));
+    }
 
     // Mirrors `config::app_theme_dirs`: themes sit beside the binary, except in a macOS
     // bundle where they live in Contents/Resources.
@@ -306,7 +252,6 @@ fn resolve(
         .filter(|path| exists(path));
 
     Ok(Plan {
-        payload,
         dir,
         targets,
         themes,
@@ -318,9 +263,10 @@ fn resolve(
 /// Proves the install directory is writable before anything is downloaded, so someone on a
 /// system-owned path finds out immediately rather than after a 25 MB transfer.
 pub fn plan() -> Result<Plan, UpdateError> {
-    let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+    // Resolves symlinks, so the `~/.local/bin/spotify` link the installers leave behind lands
+    // on the real install directory rather than on a directory holding nothing but links.
     let exe = std::env::current_exe().map_err(io)?;
-    let plan = resolve(appimage, &exe, |path| path.exists())?;
+    let plan = resolve(&exe, |path| path.exists())?;
     probe_writable(&plan.dir)?;
     // The theme directory is replaced by renaming it, which needs write permission on its
     // parent, not on the directory itself — and in a macOS bundle that parent is
@@ -421,7 +367,7 @@ pub async fn download(
     mut on_progress: impl FnMut(u8),
 ) -> Result<Staged, UpdateError> {
     let version = release.version().to_string();
-    let asset_name = plan.asset_name(&version)?;
+    let asset_name = plan.asset_name()?;
     let asset = release
         .asset(&asset_name)
         .ok_or_else(|| UpdateError::MissingAsset {
@@ -443,21 +389,7 @@ pub async fn download(
         version,
     };
 
-    staged.moves = match plan.payload {
-        Payload::AppImage => {
-            let target = plan
-                .targets
-                .first()
-                .cloned()
-                .ok_or_else(|| UpdateError::UnknownInstall(plan.dir.clone()))?;
-            let file = staging.join(&asset_name);
-            std::fs::write(&file, &bytes).map_err(io)?;
-            // Must be executable *before* the rename — after it, the file is live.
-            set_executable(&file);
-            vec![(file, target)]
-        }
-        Payload::Combined | Payload::TuiOnly => unpack(&bytes, &staging, &plan)?,
-    };
+    staged.moves = unpack(&bytes, &staging, &plan)?;
 
     Ok(staged)
 }
@@ -747,26 +679,16 @@ mod tests {
     }
 
     #[test]
-    fn asset_names_follow_the_payload() {
-        let plan = |payload| Plan {
-            payload,
+    fn the_asset_is_the_combined_archive_for_this_platform() {
+        let plan = Plan {
             dir: PathBuf::from("/opt/echo"),
             targets: Vec::new(),
             themes: None,
         };
-        // AppImage assets follow install.sh's naming; archives follow the platform.
-        assert_eq!(
-            plan(Payload::AppImage).asset_name("0.4.6").unwrap(),
-            "spotify_0.4.6_x86_64.AppImage"
-        );
         if let Some(target) = platform_target() {
             assert_eq!(
-                plan(Payload::Combined).asset_name("0.4.6").unwrap(),
+                plan.asset_name().unwrap(),
                 format!("echo-{target}.tar.gz")
-            );
-            assert_eq!(
-                plan(Payload::TuiOnly).asset_name("0.4.6").unwrap(),
-                format!("spotify-{target}.tar.gz")
             );
         }
     }
@@ -804,40 +726,26 @@ mod tests {
     }
 
     #[test]
-    fn an_appimage_replaces_itself_and_ignores_the_exe() {
-        let plan = resolve(
-            Some(PathBuf::from("/home/a/.local/bin/spotify")),
-            Path::new("/tmp/.mount_abc/usr/bin/spotify"),
-            present(&[]),
-        )
-        .unwrap();
-        assert_eq!(plan.payload, Payload::AppImage);
-        assert_eq!(plan.targets, vec![PathBuf::from("/home/a/.local/bin/spotify")]);
-        assert_eq!(plan.dir, PathBuf::from("/home/a/.local/bin"));
-        assert!(plan.themes.is_none());
-    }
-
-    #[test]
-    fn both_binaries_side_by_side_take_the_combined_archive() {
-        let exe = if cfg!(windows) {
-            "C:/echo/spotify.exe"
-        } else {
-            "/opt/echo/spotify"
-        };
+    fn both_binaries_side_by_side_are_both_replaced() {
         let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
+        let exe = format!("{dir}/{}", bin_name("spotify"));
         let desktop = format!("{dir}/{}", bin_name("echo-desktop"));
-        let plan = resolve(None, Path::new(exe), present(&[exe, &desktop])).unwrap();
-        assert_eq!(plan.payload, Payload::Combined);
-        assert_eq!(plan.targets.len(), 2);
+        let plan = resolve(Path::new(&exe), present(&[&exe, &desktop])).unwrap();
+        assert_eq!(
+            plan.targets,
+            vec![PathBuf::from(&exe), PathBuf::from(&desktop)]
+        );
     }
 
     #[test]
-    fn a_lone_tui_takes_the_tui_archive_and_picks_up_themes() {
+    fn only_the_binaries_actually_installed_are_replaced() {
+        // Someone who kept just the TUI out of the archive gets the same archive back, with
+        // `echo-desktop` left out of it rather than dropped beside a binary they never had.
         let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
         let exe = format!("{dir}/{}", bin_name("spotify"));
         let themes = format!("{dir}/themes");
-        let plan = resolve(None, Path::new(&exe), present(&[&exe, &themes])).unwrap();
-        assert_eq!(plan.payload, Payload::TuiOnly);
+        let plan = resolve(Path::new(&exe), present(&[&exe, &themes])).unwrap();
+        assert_eq!(plan.targets, vec![PathBuf::from(&exe)]);
         assert_eq!(plan.themes, Some(PathBuf::from(themes)));
     }
 
@@ -845,30 +753,19 @@ mod tests {
     fn an_install_with_neither_binary_is_not_upgradeable() {
         let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
         let exe = format!("{dir}/something-else");
-        let error = resolve(None, Path::new(&exe), present(&[])).unwrap_err();
+        let error = resolve(Path::new(&exe), present(&[])).unwrap_err();
         assert!(matches!(error, UpdateError::UnknownInstall(_)));
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn distro_installs_are_refused_rather_than_rewritten() {
-        // Rewriting /usr/bin behind dpkg's back would desync its database.
-        let error = resolve(
-            None,
-            Path::new("/usr/bin/spotify"),
-            present(&["/usr/bin/spotify", "/usr/bin/echo-desktop"]),
-        )
-        .unwrap_err();
-        assert!(matches!(error, UpdateError::SystemPackage(_, _)));
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn a_mac_bundle_finds_themes_in_resources() {
+        // install.sh drops echo.app in /Applications, so the upgrade target is the bundle's
+        // own MacOS directory — themes are one level up in Resources, not beside the binaries.
         let exe = "/Applications/echo.app/Contents/MacOS/spotify";
         let desktop = "/Applications/echo.app/Contents/MacOS/echo-desktop";
         let themes = "/Applications/echo.app/Contents/Resources/themes";
-        let plan = resolve(None, Path::new(exe), present(&[exe, desktop, themes])).unwrap();
+        let plan = resolve(Path::new(exe), present(&[exe, desktop, themes])).unwrap();
         assert_eq!(plan.themes, Some(PathBuf::from(themes)));
     }
 
@@ -913,8 +810,7 @@ mod tests {
             ("themes/added.toml", b"added theme"),
         ]);
 
-        let plan = resolve(None, &binary, |path| path.exists()).unwrap();
-        assert_eq!(plan.payload, Payload::TuiOnly);
+        let plan = resolve(&binary, |path| path.exists()).unwrap();
         assert_eq!(plan.themes, Some(dir.join("themes")));
 
         let staging = dir.join(".echo-update-test");
@@ -959,7 +855,7 @@ mod tests {
             ("./themes/echo.toml", b"new theme"),
         ]);
 
-        let plan = resolve(None, &binary, |path| path.exists()).unwrap();
+        let plan = resolve(&binary, |path| path.exists()).unwrap();
         let staging = dir.join(".echo-update-test");
         std::fs::create_dir(&staging).unwrap();
         let moves = unpack(&archive, &staging, &plan).unwrap();
@@ -991,7 +887,7 @@ mod tests {
         // would not notice, because it stops at the end-of-archive marker.
         let truncated = &archive[..archive.len() - 8];
 
-        let plan = resolve(None, &binary, |path| path.exists()).unwrap();
+        let plan = resolve(&binary, |path| path.exists()).unwrap();
         let staging = dir.join(".echo-update-test");
         std::fs::create_dir(&staging).unwrap();
         assert!(matches!(
@@ -1009,7 +905,7 @@ mod tests {
         std::fs::write(&binary, b"old binary").unwrap();
 
         let archive = build_archive(&[("themes/echo.toml", b"only themes")]);
-        let plan = resolve(None, &binary, |path| path.exists()).unwrap();
+        let plan = resolve(&binary, |path| path.exists()).unwrap();
         let staging = dir.join(".echo-update-test");
         std::fs::create_dir(&staging).unwrap();
 

@@ -1,0 +1,3 @@
+# install.sh is piped straight into `sh` off the release page — a CRLF checkout on a Windows
+# machine would ship a script every POSIX shell chokes on, so pin shell scripts to LF.
+*.sh text eol=lf

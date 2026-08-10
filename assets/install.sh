@@ -1,359 +1,344 @@
 #!/bin/sh
-# install.sh — Install echo as a desktop application on Linux.
+# install.sh — install echo (the desktop app and the `spotify` terminal command) on Linux and macOS.
 #
-# Usage:
-#   ./install.sh                         # auto-detect AppImage or ./echo binary
-#   ./install.sh /path/to/echo.AppImage  # install a specific AppImage
-#   ./install.sh /path/to/echo           # install a specific binary
-#   ./install.sh --uninstall             # remove echo
-#
-# Remote (curl) usage:
 #   curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
-#   curl -fsSL .../install.sh | sh -s -- /path/to/echo.AppImage
+#   curl -fsSL .../install.sh | sh -s -- --version 0.4.6
 #   curl -fsSL .../install.sh | sh -s -- --uninstall
+#
+# Both frontends come from one release artifact and land in one directory, which is what makes
+# `spotify upgrade` able to replace them afterwards without reinstalling. See
+# crates/echo-core/src/update.rs.
+#
+# Linux takes the portable `echo-linux-x64.tar.gz`; macOS takes the DMG, because a Mac desktop
+# app has to be an .app bundle to appear in Launchpad. Either way `spotify` ends up in
+# ~/.local/bin, on PATH.
 
 set -eu
 
-BINARY_NAME="spotify"
-ICON_NAME="echo"
-APP_NAME="echo"
 REPO="and2049/echo"
-RAW_BASE="https://raw.githubusercontent.com/${REPO}/main"
+API="https://api.github.com/repos/${REPO}"
+DOWNLOAD="https://github.com/${REPO}/releases/download"
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-
-find_repo_root() {
-    dir=$1
-    while [ "$dir" != "/" ]; do
-        if [ -f "$dir/assets/spotify.desktop" ] && [ -d "$dir/icons" ]; then
-            echo "$dir"
-            return 0
-        fi
-        dir=$(dirname "$dir")
-    done
-    return 1
-}
-
-REPO_ROOT=$(find_repo_root "$SCRIPT_DIR") || true
-IS_LOCAL=0
-if [ -n "$REPO_ROOT" ]; then
-    IS_LOCAL=1
-fi
-
-DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BIN_HOME="${HOME}/.local/bin"
-
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+LINUX_DIR="$DATA_HOME/echo"
 ICON_DIR="$DATA_HOME/icons/hicolor"
-APP_DIR="$DATA_HOME/applications"
-BIN_PATH="$BIN_HOME/$BINARY_NAME"
-LAUNCHER_PATH="$BIN_HOME/spotify-launcher"
-DESKTOP_PATH="$APP_DIR/$BINARY_NAME.desktop"
+DESKTOP_FILE="$DATA_HOME/applications/echo.desktop"
 
+VERSION=""
+NO_MODIFY_PATH=0
 TMP_DIR=""
-REMOTE=0
-DOWNLOADED_APPIMAGE=""
 
 usage() {
     cat <<EOF
-Usage: $0 [OPTIONS] [BINARY]
+Install echo — the desktop app plus the \`spotify\` terminal command.
 
-Install echo as a desktop application on Linux.
-
-Arguments:
-  BINARY            Path to an AppImage or echo binary to install.
-                    If omitted, auto-detects ./*.AppImage or ./echo,
-                    or downloads the latest AppImage from GitHub releases.
+Usage: install.sh [options]
 
 Options:
-  --uninstall       Remove echo and its desktop integration files.
-  -h, --help        Show this help message.
+  -v, --version <version>  Install a specific release (e.g. 0.4.6)
+      --no-modify-path     Don't touch your shell config, even if ~/.local/bin is not on PATH
+      --uninstall          Remove echo (leaves your config in ~/.config/echo alone)
+  -h, --help               Show this message
+
+After installing, upgrade with \`spotify upgrade\` — no need to re-run this script.
 EOF
 }
 
-err() {
-    printf 'error: %s\n' "$*" >&2
-    exit 1
-}
-
-warn() {
-    printf 'warning: %s\n' "$*" >&2
-}
-
-info() {
-    printf '%s\n' "$*"
-}
+err() { printf 'error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+info() { printf '%s\n' "$*"; }
 
 cleanup() {
     if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
         rm -rf "$TMP_DIR"
     fi
+    return 0
 }
 
 download() {
-    url=$1
-    dest=$2
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$dest" "$url"
+        curl -fsSL -o "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
-        wget -q -O "$dest" "$url"
+        wget -q -O "$2" "$1"
     else
-        err "Neither curl nor wget is installed. Please install one and retry."
+        err "this script needs curl or wget."
     fi
 }
 
-setup_remote_assets() {
-    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
-        err "Remote mode requires curl or wget. Please install one and retry."
+fetch_stdout() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1"
+    else
+        wget -qO- "$1"
+    fi
+}
+
+# --- Platform --------------------------------------------------------------
+
+detect_os() {
+    os=$(uname -s)
+    case "$os" in
+        Linux) OS=linux ;;
+        Darwin) OS=macos ;;
+        *) err "unsupported operating system: $os. Linux and macOS only — on Windows use install.ps1." ;;
+    esac
+}
+
+detect_platform() {
+    detect_os
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64|amd64) ARCH=x64 ;;
+        arm64|aarch64) ARCH=arm64 ;;
+        *) err "unsupported architecture: $arch." ;;
+    esac
+    # A Mac binary running under Rosetta reports x86_64 while the machine is Apple Silicon,
+    # and releases are arm64-only, so ask the kernel rather than trusting uname.
+    if [ "$OS" = macos ] && [ "$ARCH" = x64 ]; then
+        if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+            ARCH=arm64
+        fi
+    fi
+    if [ "$OS" = linux ] && [ "$ARCH" != x64 ]; then
+        err "no Linux build for $arch — releases are x86_64 only."
+    fi
+    if [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then
+        err "no macOS build for $arch — releases are Apple Silicon only."
+    fi
+}
+
+resolve_version() {
+    if [ -n "$VERSION" ]; then
+        VERSION="${VERSION#v}"
+        return
+    fi
+    # Only the tag is needed, and the response is small — no jq dependency.
+    VERSION=$(fetch_stdout "$API/releases/latest" \
+        | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' \
+        | head -n1)
+    [ -n "$VERSION" ] || err "could not work out the latest version from the GitHub API."
+}
+
+# --- Install ---------------------------------------------------------------
+
+install_linux() {
+    archive="echo-linux-x64.tar.gz"
+    info "Downloading $archive ($VERSION)"
+    download "$DOWNLOAD/v$VERSION/$archive" "$TMP_DIR/$archive"
+
+    mkdir -p "$TMP_DIR/unpacked"
+    tar -xzf "$TMP_DIR/$archive" -C "$TMP_DIR/unpacked"
+    [ -f "$TMP_DIR/unpacked/spotify" ] || err "release archive is missing the spotify binary."
+
+    # Replaced wholesale rather than merged, so a release that drops a theme actually drops it.
+    rm -rf "$LINUX_DIR"
+    mkdir -p "$LINUX_DIR" "$BIN_HOME"
+    cp -R "$TMP_DIR/unpacked/." "$LINUX_DIR/"
+    chmod +x "$LINUX_DIR/spotify"
+    ln -sf "$LINUX_DIR/spotify" "$BIN_HOME/spotify"
+
+    if [ -f "$LINUX_DIR/echo-desktop" ]; then
+        chmod +x "$LINUX_DIR/echo-desktop"
+        ln -sf "$LINUX_DIR/echo-desktop" "$BIN_HOME/echo-desktop"
+        install_desktop_entry
     fi
 
-    REMOTE=1
-    TMP_DIR=$(mktemp -d)
+    INSTALLED_AT="$LINUX_DIR"
+}
+
+# Menu entry and icons for the desktop app. Icons ride along in the archive so this script
+# needs exactly one download.
+install_desktop_entry() {
+    mkdir -p "$(dirname "$DESKTOP_FILE")"
+    for size in 32x32 64x64 128x128; do
+        if [ -f "$LINUX_DIR/icons/$size.png" ]; then
+            mkdir -p "$ICON_DIR/$size/apps"
+            cp -f "$LINUX_DIR/icons/$size.png" "$ICON_DIR/$size/apps/echo.png"
+        fi
+    done
+    if [ -f "$LINUX_DIR/icons/128x128@2x.png" ]; then
+        mkdir -p "$ICON_DIR/256x256/apps"
+        cp -f "$LINUX_DIR/icons/128x128@2x.png" "$ICON_DIR/256x256/apps/echo.png"
+    fi
+
+    cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Name=echo
+Comment=Spotify client and music player
+Exec=$LINUX_DIR/echo-desktop
+Icon=echo
+Terminal=false
+Type=Application
+Categories=Audio;Music;Player;
+StartupWMClass=echo-desktop
+EOF
+
+    command -v update-desktop-database >/dev/null 2>&1 &&
+        update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 &&
+        gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
+}
+
+# /Applications belongs to the `admin` group, so a standard account cannot write to it. Such
+# a user gets ~/Applications, which Launchpad and Spotlight index just the same.
+mac_app_dir() {
+    if [ -w /Applications ]; then
+        printf '%s' "/Applications"
+    else
+        printf '%s' "$HOME/Applications"
+    fi
+}
+
+install_macos() {
+    dmg="echo_${VERSION}_aarch64.dmg"
+    info "Downloading $dmg"
+    download "$DOWNLOAD/v$VERSION/$dmg" "$TMP_DIR/$dmg"
+
+    mount="$TMP_DIR/mnt"
+    mkdir -p "$mount"
+    hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mount" "$TMP_DIR/$dmg" ||
+        err "could not mount $dmg."
+    # shellcheck disable=SC2064  # $mount is fixed here and must expand now, not at trap time.
+    trap "hdiutil detach -quiet '$mount' 2>/dev/null || true; cleanup" EXIT
+
+    [ -d "$mount/echo.app" ] || err "$dmg does not contain echo.app."
+
+    app_dir=$(mac_app_dir)
+    mkdir -p "$app_dir"
+    app="$app_dir/echo.app"
+    # Staged beside the destination and swapped in, so a copy that fails partway leaves the
+    # installed app untouched rather than deleted.
+    staging="$app_dir/.echo-install-$$.app"
+    rm -rf "$staging"
+    cp -R "$mount/echo.app" "$staging" || {
+        rm -rf "$staging"
+        err "could not copy echo.app into $app_dir."
+    }
+    hdiutil detach -quiet "$mount" 2>/dev/null || true
     trap cleanup EXIT
 
-    mkdir -p "$TMP_DIR/icons" "$TMP_DIR/assets"
+    # Curl does not set the quarantine attribute, but a browser-downloaded DMG passed to this
+    # script would; clearing it keeps Gatekeeper from refusing an ad-hoc signed bundle.
+    xattr -dr com.apple.quarantine "$staging" 2>/dev/null || true
 
-    info "Downloading icons and desktop entry..."
-    download "$RAW_BASE/icons/32x32.png"        "$TMP_DIR/icons/32x32.png"        || true
-    download "$RAW_BASE/icons/64x64.png"        "$TMP_DIR/icons/64x64.png"        || true
-    download "$RAW_BASE/icons/128x128.png"      "$TMP_DIR/icons/128x128.png"      || true
-    download "$RAW_BASE/icons/128x128@2x.png"   "$TMP_DIR/icons/128x128@2x.png"   || true
-    download "$RAW_BASE/assets/spotify.desktop"    "$TMP_DIR/assets/spotify.desktop"    || err "Failed to download desktop entry."
-    download "$RAW_BASE/assets/spotify-launcher"   "$TMP_DIR/assets/spotify-launcher"   || true
+    rm -rf "$app"
+    mv "$staging" "$app"
 
-    REPO_ROOT="$TMP_DIR"
+    mkdir -p "$BIN_HOME"
+    ln -sf "$app/Contents/MacOS/spotify" "$BIN_HOME/spotify"
+
+    INSTALLED_AT="$app"
 }
 
-download_latest_appimage() {
-    info "Finding latest echo AppImage from GitHub releases..."
-    _api_json=$(mktemp)
-    _api_url="https://api.github.com/repos/${REPO}/releases/latest"
-    download "$_api_url" "$_api_json" || { rm -f "$_api_json"; err "Failed to query GitHub releases API."; }
+# --- PATH ------------------------------------------------------------------
 
-    # Releases carry two AppImages: the echo desktop app (echo-desktop_*) and the TUI
-    # (spotify_* — AppImages are named after their main binary). This script installs the
-    # TUI one, which becomes the on-PATH `spotify` command; the fallback covers older
-    # single-asset releases.
-    _appimage_url=$(grep "browser_download_url.*spotify.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
-    if [ -z "$_appimage_url" ]; then
-        _appimage_url=$(grep "browser_download_url.*AppImage" "$_api_json" | head -n1 | cut -d'"' -f4)
+on_path() {
+    case ":$PATH:" in
+        *":$BIN_HOME:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+add_to_path() {
+    if on_path; then
+        return 0
     fi
-    rm -f "$_api_json"
-
-    if [ -z "$_appimage_url" ]; then
-        err "Could not find an AppImage in the latest release."
+    if [ "$NO_MODIFY_PATH" -eq 1 ]; then
+        warn "$BIN_HOME is not on your PATH. Add it with:
+  export PATH=\"$BIN_HOME:\$PATH\""
+        return 0
     fi
 
-    info "Downloading $_appimage_url"
-    DOWNLOADED_APPIMAGE="$REPO_ROOT/echo-tui-latest.AppImage"
-    download "$_appimage_url" "$DOWNLOADED_APPIMAGE"
+    shell_name=$(basename "${SHELL:-sh}")
+    case "$shell_name" in
+        fish)
+            config="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+            line="fish_add_path $BIN_HOME"
+            ;;
+        zsh)
+            config="$HOME/.zshrc"
+            line="export PATH=\"$BIN_HOME:\$PATH\""
+            ;;
+        *)
+            config="$HOME/.bashrc"
+            [ -f "$config" ] || config="$HOME/.profile"
+            line="export PATH=\"$BIN_HOME:\$PATH\""
+            ;;
+    esac
+
+    mkdir -p "$(dirname "$config")"
+    if [ -f "$config" ] && grep -Fq "$BIN_HOME" "$config"; then
+        return 0
+    fi
+    printf '\n# echo\n%s\n' "$line" >> "$config" ||
+        { warn "could not write to $config. Add this yourself:
+  $line"; return 0; }
+    info "Added $BIN_HOME to your PATH in $config"
+    PATH_CHANGED=1
 }
 
 # --- Uninstall -------------------------------------------------------------
 
 uninstall() {
-    info "Removing echo desktop integration..."
-    rm -f "$BIN_PATH"
-    rm -f "$LAUNCHER_PATH"
-    rm -f "$DESKTOP_PATH"
-    rm -f "$ICON_DIR/32x32/apps/$ICON_NAME.png"
-    rm -f "$ICON_DIR/64x64/apps/$ICON_NAME.png"
-    rm -f "$ICON_DIR/128x128/apps/$ICON_NAME.png"
-    rm -f "$ICON_DIR/256x256/apps/$ICON_NAME.png"
-    rm -f "$ICON_DIR/scalable/apps/$ICON_NAME.svg"
-
-    if command -v update-desktop-database >/dev/null 2>&1; then
-        update-desktop-database "$APP_DIR" 2>/dev/null || true
+    detect_os
+    rm -f "$BIN_HOME/spotify" "$BIN_HOME/echo-desktop"
+    if [ "$OS" = macos ]; then
+        # Both, because which one an install picked depends on whether the account is an admin.
+        rm -rf "/Applications/echo.app" "$HOME/Applications/echo.app"
+    else
+        rm -rf "$LINUX_DIR"
+        rm -f "$DESKTOP_FILE"
+        for size in 32x32 64x64 128x128 256x256; do
+            rm -f "$ICON_DIR/$size/apps/echo.png"
+        done
+        command -v update-desktop-database >/dev/null 2>&1 &&
+            update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
     fi
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
-    fi
-
-    info "echo has been uninstalled."
+    info "echo has been uninstalled. Your settings in ~/.config/echo were left alone."
 }
 
-# --- Install ---------------------------------------------------------------
+# --- Main ------------------------------------------------------------------
 
-install() {
-    if [ "$(id -u)" -eq 0 ]; then
-        err "Refusing to run as root. This script installs to your user directory (~/.local)."
-    fi
-
-    if [ "$IS_LOCAL" -eq 0 ]; then
-        setup_remote_assets
-    fi
-
-    SRC=""
-    if [ $# -ge 1 ]; then
-        SRC=$1
-    elif [ "$IS_LOCAL" -eq 1 ]; then
-        if ls "$REPO_ROOT"/spotify*.AppImage >/dev/null 2>&1; then
-            SRC=$(ls "$REPO_ROOT"/spotify*.AppImage | head -n1)
-        elif ls "$REPO_ROOT"/*.AppImage >/dev/null 2>&1; then
-            SRC=$(ls "$REPO_ROOT"/*.AppImage | head -n1)
-        elif [ -f "$REPO_ROOT/$BINARY_NAME" ]; then
-            SRC="$REPO_ROOT/$BINARY_NAME"
-        elif [ -f "$REPO_ROOT/target/release/$BINARY_NAME" ]; then
-            SRC="$REPO_ROOT/target/release/$BINARY_NAME"
-        else
-            download_latest_appimage
-            SRC="$DOWNLOADED_APPIMAGE"
-        fi
-    elif [ "$REMOTE" -eq 1 ]; then
-        download_latest_appimage
-        SRC="$DOWNLOADED_APPIMAGE"
-    else
-        err "Could not find an AppImage or binary to install.
-Pass the path explicitly:  $0 /path/to/echo.AppImage"
-    fi
-
-    if [ ! -f "$SRC" ]; then
-        err "File not found: $SRC"
-    fi
-
-    case "$SRC" in
-        *.AppImage)
-            if command -v lsb_release >/dev/null 2>&1; then
-                DIST=$(lsb_release -is 2>/dev/null || true)
-                case "$DIST" in
-                    Ubuntu|LinuxMint|Pop)
-                        if ! ldconfig -p 2>/dev/null | grep -q libfuse.so.2; then
-                            warn "AppImage requires libfuse2, which is not installed.
-Install it with:  sudo apt-get install libfuse2
-(On Ubuntu 24.04+ the package may be named libfuse2t64.)"
-                        fi
-                        ;;
-                esac
-            fi
-            ;;
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -v|--version)
+            [ $# -ge 2 ] || err "--version needs a version, e.g. --version 0.4.6"
+            VERSION="$2"; shift 2 ;;
+        --version=*) VERSION="${1#--version=}"; shift ;;
+        --no-modify-path) NO_MODIFY_PATH=1; shift ;;
+        --uninstall) uninstall; exit 0 ;;
+        *) err "unknown option: $1 (try --help)" ;;
     esac
+done
 
-    mkdir -p "$BIN_HOME" "$APP_DIR"
-    mkdir -p "$ICON_DIR/32x32/apps" \
-             "$ICON_DIR/64x64/apps" \
-             "$ICON_DIR/128x128/apps" \
-             "$ICON_DIR/256x256/apps"
-
-    info "Installing binary to $BIN_PATH"
-    cp -f "$SRC" "$BIN_PATH"
-    chmod +x "$BIN_PATH"
-
-    info "Installing launcher to $LAUNCHER_PATH"
-    LAUNCHER_SRC="$REPO_ROOT/assets/spotify-launcher"
-    if [ -f "$LAUNCHER_SRC" ]; then
-        cp -f "$LAUNCHER_SRC" "$LAUNCHER_PATH"
-    else
-        cat > "$LAUNCHER_PATH" <<'LAUNCHEREOF'
-#!/bin/sh
-set -eu
-dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exe="$dir/spotify"
-if [ ! -x "$exe" ]; then
-    if command -v zenity >/dev/null 2>&1; then
-        zenity --error --title=echo --text="spotify binary not found at $exe"
-    fi
-    exit 1
-fi
-try_terminal() {
-    term=$1; shift
-    if command -v "$term" >/dev/null 2>&1; then
-        exec "$term" "$@" "$exe"
-    fi
-}
-if [ -n "${TERMINAL:-}" ]; then
-    exec "$TERMINAL" -e "$exe"
-fi
-try_terminal ghostty           -e
-try_terminal x-terminal-emulator -e
-try_terminal gnome-terminal    --
-try_terminal konsole           -e
-try_terminal xfce4-terminal    -e
-try_terminal mate-terminal     -e
-try_terminal alacritty         -e
-try_terminal kitty             --
-try_terminal wezterm           start --
-try_terminal terminator        -e
-try_terminal xterm             -e
-if command -v zenity >/dev/null 2>&1; then
-    zenity --error --title=echo --text="No terminal emulator found. Please install one."
-fi
-exit 1
-LAUNCHEREOF
-    fi
-    chmod +x "$LAUNCHER_PATH"
-
-    ICONS_SRC="$REPO_ROOT/icons"
-
-    if [ -f "$ICONS_SRC/32x32.png" ]; then
-        cp -f "$ICONS_SRC/32x32.png" "$ICON_DIR/32x32/apps/$ICON_NAME.png"
-    fi
-    if [ -f "$ICONS_SRC/64x64.png" ]; then
-        cp -f "$ICONS_SRC/64x64.png" "$ICON_DIR/64x64/apps/$ICON_NAME.png"
-    fi
-    if [ -f "$ICONS_SRC/128x128.png" ]; then
-        cp -f "$ICONS_SRC/128x128.png" "$ICON_DIR/128x128/apps/$ICON_NAME.png"
-    fi
-    if [ -f "$ICONS_SRC/128x128@2x.png" ]; then
-        cp -f "$ICONS_SRC/128x128@2x.png" "$ICON_DIR/256x256/apps/$ICON_NAME.png"
-    fi
-
-    info "Installing desktop entry to $DESKTOP_PATH"
-    DESKTOP_SRC="$REPO_ROOT/assets/spotify.desktop"
-    if [ -f "$DESKTOP_SRC" ]; then
-        cp -f "$DESKTOP_SRC" "$DESKTOP_PATH"
-    else
-        cat > "$DESKTOP_PATH" <<EOF
-[Desktop Entry]
-Name=$APP_NAME
-Comment=Terminal-based Spotify client and music player
-Exec=$BINARY_NAME
-Icon=$ICON_NAME
-Terminal=false
-Type=Application
-Categories=Audio;Music;Player;
-EOF
-    fi
-    sed -i "s|^Exec=.*|Exec=$LAUNCHER_PATH|" "$DESKTOP_PATH"
-
-    if command -v update-desktop-database >/dev/null 2>&1; then
-        update-desktop-database "$APP_DIR" 2>/dev/null || true
-    fi
-    if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-        gtk-update-icon-cache -f -t "$ICON_DIR" 2>/dev/null || true
-    fi
-
-    info ""
-    info "echo has been installed!"
-    info "  Binary:   $BIN_PATH"
-    info "  Launcher: $LAUNCHER_PATH"
-    info "  Desktop:  $DESKTOP_PATH"
-    info ""
-    info "Search for '$APP_NAME' in your applications menu to launch it."
-    info "Make sure $BIN_HOME is in your PATH (it usually is on modern Linux distributions)."
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_HOME"; then
-        warn "$BIN_HOME is not in your PATH. Add it with:
-  export PATH=\"$BIN_HOME:\$PATH\""
-    fi
-}
-
-# --- Argument parsing ------------------------------------------------------
-
-if [ $# -eq 0 ]; then
-    install
-    exit 0
+if [ "$(id -u)" -eq 0 ]; then
+    err "refusing to run as root — echo installs into your home directory."
 fi
 
-case "$1" in
-    --uninstall)
-        uninstall
-        ;;
-    -h|--help)
-        usage
-        ;;
-    --*)
-        err "Unknown option: $1
-Run '$0 --help' for usage."
-        ;;
-    *)
-        install "$1"
-        ;;
-esac
+detect_platform
+resolve_version
+
+TMP_DIR=$(mktemp -d)
+trap cleanup EXIT
+
+PATH_CHANGED=0
+if [ "$OS" = macos ]; then
+    install_macos
+else
+    install_linux
+fi
+add_to_path
+
+info ""
+info "echo $VERSION is installed."
+info "  App:      $INSTALLED_AT"
+info "  Terminal: $BIN_HOME/spotify"
+info ""
+if [ "$PATH_CHANGED" -eq 1 ]; then
+    info "Open a new terminal, then run 'spotify' to start."
+else
+    info "Run 'spotify' to start."
+fi
+info "Later on, 'spotify upgrade' updates both the terminal client and the app."

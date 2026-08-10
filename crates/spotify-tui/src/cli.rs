@@ -124,7 +124,7 @@ async fn upgrade(target: Option<String>, check_only: bool) -> Result<i32, Update
     // Resolved before downloading so an install we cannot write to fails in a second rather
     // than after 25 MB.
     let plan = update::plan()?;
-    let asset = plan.asset_name(&version)?;
+    let asset = plan.asset_name()?;
 
     let mut progress = Progress::new(&asset);
     let staged = update::download(plan.clone(), &release, |percent| progress.update(percent)).await?;
