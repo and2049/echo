@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=echo
-Comment=Spotify client and music player
-Exec=echo-desktop
-Icon=echo
-Terminal=false
-Type=Application
-Categories=Audio;Music;Player;
-StartupWMClass=echo-desktop

@@ -700,33 +700,8 @@ fn app_theme_dirs() -> Vec<PathBuf> {
         }
     }
 
-    if let Ok(appdir) = env::var("APPDIR") {
-        let appdir = PathBuf::from(appdir);
-        dirs.push(appdir.join("themes"));
-        dirs.extend(packaged_theme_dirs(&appdir));
-    }
-
-    #[cfg(target_os = "linux")]
-    dirs.extend(packaged_theme_dirs(Path::new("/")));
-
     dirs.push(workspace_theme_dir());
     dedupe_paths(dirs)
-}
-
-/// The binary names cargo-packager files `resources` under: it writes them to
-/// `usr/lib/<main binary name>`, and the two Linux packages disagree on which binary is
-/// "main" — the echo package is built around `echo-desktop`, the terminal-only AppImage
-/// around `spotify`. Both are searched because the echo deb installs *both* binaries, so
-/// `spotify` from that package still has to find themes filed under `echo-desktop`.
-const PACKAGE_RESOURCE_DIRS: [&str; 2] = ["echo-desktop", "spotify"];
-
-/// Theme directories as laid out inside a deb or AppImage, relative to `root` (`/` for an
-/// installed deb, `$APPDIR` for an AppImage).
-fn packaged_theme_dirs(root: &Path) -> Vec<PathBuf> {
-    PACKAGE_RESOURCE_DIRS
-        .iter()
-        .map(|package| root.join("usr").join("lib").join(package).join("themes"))
-        .collect()
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -814,23 +789,6 @@ mod tests {
             .expect("system time should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("echo-{}-{}-{}", name, std::process::id(), nanos))
-    }
-
-    #[test]
-    fn packaged_theme_dirs_match_where_cargo_packager_writes_resources() {
-        let dirs = packaged_theme_dirs(Path::new("/opt/echo.AppDir"));
-
-        // cargo-packager writes `resources` to usr/lib/<main binary name>: `echo-desktop`
-        // for the echo deb and AppImage, `spotify` for the terminal-only AppImage.
-        assert!(dirs.contains(&PathBuf::from("/opt/echo.AppDir/usr/lib/echo-desktop/themes")));
-        assert!(dirs.contains(&PathBuf::from("/opt/echo.AppDir/usr/lib/spotify/themes")));
-
-        // Regression: this used to look under usr/lib/echo, which no package ever creates,
-        // so every deb and AppImage install silently ran on the one embedded theme.
-        assert!(
-            !dirs.iter().any(|dir| dir.ends_with("usr/lib/echo/themes")),
-            "no Linux package is named plain `echo`"
-        );
     }
 
     #[test]

@@ -184,7 +184,6 @@ impl UpdateState {
         let message = error.to_string();
         match error {
             E::NotWritable(..)
-            | E::SystemPackage(..)
             | E::UnsupportedPlatform(_)
             | E::MissingAsset { .. }
             | E::DevBuild(_) => Self::Blocked(message),

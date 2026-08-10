@@ -36,48 +36,59 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 
 ### Installation
 
-Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **echo** package installs the desktop app *and* the `spotify` terminal command:
+One command, one install: the desktop app **and** the `spotify` terminal command.
 
-- **Windows** (`echo-desktop_*.msi`): installs the desktop app to `%LOCALAPPDATA%\Programs\echo` for the current user — no administrator prompt — and adds that directory to your user `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again. Installing per-user is what lets `spotify upgrade` and the in-app updater replace the app without elevation. If an older system-wide echo is present in `C:\Program Files\echo`, the installer will ask you to uninstall it first.
-- **macOS** (`echo_*.dmg`): drag `echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
-
-  ```bash
-  sudo ln -sf /Applications/echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
-  ```
-
-- **Linux** (`.deb`): installs the desktop app plus `/usr/bin/spotify`. Prefer just the TUI? Use the TUI AppImage below (`spotify_*.AppImage`) instead — don't install both, they'd both own `spotify`.
-
-### TUI AppImage Setup (Linux)
-
-On Ubuntu 22.04+ the AppImage runtime requires `libfuse2`:
-
-```bash
-sudo apt-get install libfuse2
-```
-
-**Install with one command** (downloads the latest AppImage and sets up desktop integration):
+**Linux and macOS**
 
 ```bash
 curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
 ```
 
-To uninstall:
+**Windows** (PowerShell)
+
+```powershell
+irm https://github.com/and2049/echo/releases/latest/download/install.ps1 | iex
+```
+
+Neither needs administrator rights. Both put `spotify` on your `PATH` — open a new terminal afterwards — and add the desktop app to your Start menu, Launchpad, or applications menu.
+
+| Platform | Where it lands |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\Programs\echo` (installed from the release MSI, x64) |
+| macOS | `/Applications/echo.app`, with `spotify` linked into `~/.local/bin` (Apple Silicon) |
+| Linux | `~/.local/share/echo`, with both commands linked into `~/.local/bin` (x86_64) |
+
+To pin a version or remove echo:
 
 ```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --version 0.4.6
 curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --uninstall
 ```
 
-**Or** if you already have the AppImage downloaded, run the included install script:
-
-```bash
-./install.sh /path/to/echo.AppImage
+```powershell
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Version 0.4.6
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Uninstall
 ```
 
-To remove:
+Uninstalling leaves your settings in `~/.config/echo` alone.
+
+On Linux the desktop app links against a few system libraries — on Debian/Ubuntu:
 
 ```bash
-./install.sh --uninstall
+sudo apt-get install libasound2 libdbus-1-3 libssl3
 ```
+
+#### Updating
+
+After the first install, echo updates itself — no reinstall, no administrator rights:
+
+```bash
+spotify upgrade          # upgrade to the latest release
+spotify upgrade --check  # only report whether one is available
+spotify upgrade 0.4.6    # move to a specific version
+```
+
+The desktop app does the same from **Settings → Updates → Check for updates**. Both swap the binaries and bundled themes in place and ask you to restart.
 
 ### Build from Source
 

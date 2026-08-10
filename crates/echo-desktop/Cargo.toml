@@ -45,16 +45,13 @@ icons = [
 resources = [{ src = "../../themes", target = "themes" }]
 # The echo package carries both frontends: the desktop app plus the `spotify` TUI, so one
 # install puts the terminal command on PATH (MSI: install dir appended via the WiX fragment
-# below; deb: both land in /usr/bin; macOS: both inside echo.app/Contents/MacOS).
+# below; macOS: both inside echo.app/Contents/MacOS). Linux does not build an installer at
+# all — assets/install.sh lays down the portable archive instead.
 binaries = [
     { path = "echo-desktop", main = true },
     { path = "spotify", main = false },
 ]
 before-packaging-command = "cargo build --release -p echo-desktop -p spotify-tui"
-
-[package.metadata.packager.deb]
-desktop_template = "../../assets/echo.desktop.hbs"
-depends = ["libssl3", "libasound2", "libdbus-1-3"]
 
 [package.metadata.packager.wix]
 # Appends the install dir to the machine PATH (and removes it on uninstall) so `spotify`

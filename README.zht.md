@@ -35,16 +35,61 @@ echo 是一款用 Rust 編寫的終端音樂播放器和 Spotify 用戶端。ech
 
 ### 安裝
 
-從[發佈頁面](https://github.com/and2049/echo/releases)下載對應平台的安裝程式。**echo** 安裝包同時包含桌面應用程式和 `spotify` 終端指令：
+一行指令即可完成安裝：桌面應用程式**與** `spotify` 終端指令。
 
-- **Windows**（`echo-desktop_*.msi`）：為目前使用者安裝至 `%LOCALAPPDATA%\Programs\echo`（不需系統管理員權限），並將該目錄加入使用者 `PATH`（解除安裝時自動移除），安裝後在新終端中即可直接執行 `spotify`。以使用者身分安裝正是 `spotify upgrade` 與應用程式內更新能夠免提權替換程式的原因。若 `C:\Program Files\echo` 中存在舊的系統層級安裝，安裝程式會提示先將其解除安裝。
-- **macOS**（`echo_*.dmg`）：將 `echo.app` 拖入 Applications。TUI 已內建於應用程式套件中，執行一次以下指令即可加入 `PATH`：
+**Linux 與 macOS**
 
-  ```bash
-  sudo ln -sf /Applications/echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
-  ```
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
+```
 
-- **Linux**（`.deb`）：安裝桌面應用程式及 `/usr/bin/spotify`。只想要 TUI？請改用發佈頁面中的 TUI AppImage（`spotify_*.AppImage`；不要與 deb 同時安裝，兩者都提供 `spotify`）。
+**Windows**（PowerShell）
+
+```powershell
+irm https://github.com/and2049/echo/releases/latest/download/install.ps1 | iex
+```
+
+兩者皆不需系統管理員權限，都會將 `spotify` 加入 `PATH`（安裝後請開啟新終端），並把桌面應用程式加入開始功能表、Launchpad 或應用程式選單。
+
+| 平台 | 安裝位置 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\Programs\echo`（透過發佈的 MSI 安裝，x64） |
+| macOS | `/Applications/echo.app`，並將 `spotify` 連結至 `~/.local/bin`（Apple Silicon） |
+| Linux | `~/.local/share/echo`，並將兩個指令連結至 `~/.local/bin`（x86_64） |
+
+指定版本或解除安裝：
+
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --version 0.4.6
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --uninstall
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Version 0.4.6
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Uninstall
+```
+
+解除安裝不會刪除 `~/.config/echo` 中的設定。
+
+在 Linux 上，桌面應用程式相依於數個系統程式庫——Debian/Ubuntu 下：
+
+```bash
+sudo apt-get install libasound2 libdbus-1-3 libssl3
+```
+
+#### 更新
+
+首次安裝之後，echo 可自我更新——不需重新安裝，也不需系統管理員權限：
+
+```bash
+spotify upgrade          # 更新至最新版本
+spotify upgrade --check  # 僅檢查是否有可用更新
+spotify upgrade 0.4.6    # 更新至指定版本
+```
+
+桌面應用程式也可透過**設定 → 更新 → 檢查更新**完成同樣操作。兩者都會就地取代執行檔與內建主題，並提示重新啟動。
+
+### 從原始碼建置
 
 或者
 

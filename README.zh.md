@@ -35,16 +35,61 @@ echo 是一款用 Rust 编写的终端音乐播放器和 Spotify 客户端。ech
 
 ### 安装
 
-从[发布页面](https://github.com/and2049/echo/releases)下载对应平台的安装程序。**echo** 安装包同时包含桌面应用和 `spotify` 终端命令：
+一条命令即可完成安装：桌面应用**与** `spotify` 终端命令。
 
-- **Windows**（`echo-desktop_*.msi`）：为当前用户安装到 `%LOCALAPPDATA%\Programs\echo`（无需管理员权限），并将该目录加入用户 `PATH`（卸载时自动移除），安装后在新终端中即可直接运行 `spotify`。按用户安装正是 `spotify upgrade` 与应用内更新能够免提权替换程序的原因。若 `C:\Program Files\echo` 中存在旧的系统级安装，安装程序会提示先将其卸载。
-- **macOS**（`echo_*.dmg`）：将 `echo.app` 拖入 Applications。TUI 已内置于应用包中，执行一次以下命令即可加入 `PATH`：
+**Linux 与 macOS**
 
-  ```bash
-  sudo ln -sf /Applications/echo.app/Contents/MacOS/spotify /usr/local/bin/spotify
-  ```
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
+```
 
-- **Linux**（`.deb`）：安装桌面应用及 `/usr/bin/spotify`。只想要 TUI？请改用发布页面中的 TUI AppImage（`spotify_*.AppImage`；不要与 deb 同时安装，两者都提供 `spotify`）。
+**Windows**（PowerShell）
+
+```powershell
+irm https://github.com/and2049/echo/releases/latest/download/install.ps1 | iex
+```
+
+两者均无需管理员权限，都会将 `spotify` 加入 `PATH`（安装后请打开新终端），并把桌面应用添加到开始菜单、启动台或应用程序菜单中。
+
+| 平台 | 安装位置 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\Programs\echo`（通过发布的 MSI 安装，x64） |
+| macOS | `/Applications/echo.app`，并将 `spotify` 链接到 `~/.local/bin`（Apple Silicon） |
+| Linux | `~/.local/share/echo`，并将两个命令链接到 `~/.local/bin`（x86_64） |
+
+指定版本或卸载：
+
+```bash
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --version 0.4.6
+curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh -s -- --uninstall
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Version 0.4.6
+& ([scriptblock]::Create((irm https://github.com/and2049/echo/releases/latest/download/install.ps1))) -Uninstall
+```
+
+卸载不会删除 `~/.config/echo` 中的配置。
+
+在 Linux 上，桌面应用依赖若干系统库——Debian/Ubuntu 下：
+
+```bash
+sudo apt-get install libasound2 libdbus-1-3 libssl3
+```
+
+#### 更新
+
+首次安装之后，echo 可自我更新——无需重装，也无需管理员权限：
+
+```bash
+spotify upgrade          # 更新到最新版本
+spotify upgrade --check  # 仅检查是否有可用更新
+spotify upgrade 0.4.6    # 更新到指定版本
+```
+
+桌面应用也可通过**设置 → 更新 → 检查更新**完成同样操作。两者都会就地替换二进制文件与内置主题，并提示重启。
+
+### 从源码构建
 
 或者
 

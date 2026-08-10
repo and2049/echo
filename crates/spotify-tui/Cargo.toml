@@ -23,27 +23,7 @@ unicode-width = { workspace = true }
 # Redirects echo-core's config root before tests run (see redirect_config_for_tests).
 ctor = "0.4"
 
-[package.metadata.packager]
-product-name = "echo TUI"
-identifier = "com.echo.tui"
-publisher = "echo"
-category = "Music"
-icons = [
-    "../../icons/icon.icns",
-    "../../icons/icon.ico",
-    "../../icons/32x32.png",
-    "../../icons/128x128.png",
-    "../../icons/icon.png",
-    "../../icons/128x128@2x.png",
-]
-resources = [
-    { src = "../../themes", target = "themes" },
-    { src = "../../assets/install.sh", target = "install.sh" },
-    { src = "../../assets/spotify.desktop", target = "spotify.desktop" },
-    { src = "../../assets/echo-rs.svg", target = "echo.svg" },
-]
-before-packaging-command = "cargo build --release -p spotify-tui"
-
-[package.metadata.packager.deb]
-desktop_template = "../../assets/spotify.desktop.hbs"
-depends = ["libssl3", "libasound2", "libdbus-1-3"]
+# No `[package.metadata.packager]` here on purpose: the TUI is never packaged on its own. It
+# ships inside the one echo package alongside the desktop app (see echo-desktop/Cargo.toml),
+# so there is only ever one `spotify` command on a machine and one thing for `spotify upgrade`
+# to replace.
