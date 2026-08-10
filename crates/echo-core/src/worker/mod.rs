@@ -1128,6 +1128,10 @@ impl Worker {
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayTrack failed: {:?}", e));
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "playback".to_string(),
+                                                message: crate::worker::errors::playback_error_message(&e),
+                                            }).await;
                                         }
                                     }
                                 }
@@ -1166,6 +1170,10 @@ impl Worker {
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayContext failed: {:?}", e));
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                                label: "playback".to_string(),
+                                                message: crate::worker::errors::playback_error_message(&e),
+                                            }).await;
                                         }
                                     }
                                 }

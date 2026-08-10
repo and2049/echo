@@ -354,7 +354,7 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     }
 
     // Check if we are waiting for discovery
-    if std::path::Path::new("echo-librespot-status.log").exists() {
+    if echo_core::config::debug_log_path("echo-librespot-status.log").exists() {
         let popup_area = centered_rect(72, 32, frame.area());
         let popup = Paragraph::new(vec![
             Line::from("Spotify Connect Onboarding Required")

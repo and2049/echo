@@ -10,6 +10,14 @@ const PLAYBACK_TYPES: [&rspotify::model::AdditionalType; 2] = [
     &rspotify::model::AdditionalType::Episode,
 ];
 
+/// Marker in the error chain when echo's own Connect device could not be resolved.
+/// Callers match on it to show a device message instead of a raw HTTP 404.
+pub const NO_DEVICE_ERROR: &str = "no playback device available";
+
+/// How long to wait before re-polling the device list. The librespot daemon registers a few
+/// seconds after login, so a play issued during startup can race it.
+const DEVICE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(1500);
+
 impl SpotifyWorker {
     pub async fn get_device_id(&mut self) -> Option<String> {
         if self.device_id.is_some() {
@@ -25,6 +33,22 @@ impl SpotifyWorker {
             }
         }
         None
+    }
+
+    /// Resolves echo's own Connect device, giving a late-registering daemon one retry.
+    ///
+    /// Playback always targets our librespot device, so a `None` device id is not a benign
+    /// "let Spotify choose" — `/v1/me/player/play` with no `device_id` and nothing active is a
+    /// guaranteed 404. Failing here reports the real problem (no device) instead of laundering
+    /// it through an HTTP error that reads like a bad track id.
+    async fn require_device_id(&mut self) -> Result<String> {
+        if let Some(id) = self.get_device_id().await {
+            return Ok(id);
+        }
+        tokio::time::sleep(DEVICE_RETRY_DELAY).await;
+        self.get_device_id()
+            .await
+            .ok_or_else(|| anyhow::anyhow!(NO_DEVICE_ERROR))
     }
 
     pub async fn wake_up_device(&mut self) -> Result<()> {
@@ -404,7 +428,7 @@ impl SpotifyWorker {
     }
 
     async fn play_context_inner(&mut self, context_id: &str, is_album: bool) -> Result<()> {
-        let target_device = self.get_device_id().await;
+        let target_device = self.require_device_id().await?;
         let context_uri = if is_album {
             rspotify::model::PlayContextId::Album(rspotify::model::AlbumId::from_id(context_id)?)
         } else {
@@ -413,7 +437,7 @@ impl SpotifyWorker {
             )?)
         };
         self.client
-            .start_context_playback(context_uri, target_device.as_deref(), None, None)
+            .start_context_playback(context_uri, Some(target_device.as_str()), None, None)
             .await?;
         Ok(())
     }
@@ -440,14 +464,14 @@ impl SpotifyWorker {
         track_id: &str,
         is_album: bool,
     ) -> Result<()> {
-        let target_device = self.get_device_id().await;
+        let target_device = self.require_device_id().await?;
 
         if context_id == "LIKED_SONGS" {
             let track_uri =
                 rspotify::model::PlayableId::Track(rspotify::model::TrackId::from_id(track_id)?);
             let res = self
                 .client
-                .start_uris_playback([track_uri], target_device.as_deref(), None, None)
+                .start_uris_playback([track_uri], Some(target_device.as_str()), None, None)
                 .await;
             res?;
             return Ok(());
@@ -467,7 +491,7 @@ impl SpotifyWorker {
 
         let res = self
             .client
-            .start_context_playback(context_uri, target_device.as_deref(), Some(offset), None)
+            .start_context_playback(context_uri, Some(target_device.as_str()), Some(offset), None)
             .await;
 
         if let Err(e) = &res {
@@ -492,7 +516,7 @@ impl SpotifyWorker {
     /// Plays an ad-hoc uris list (artist top tracks) starting at `selected_index`,
     /// so up-next is the remainder of the list.
     async fn play_uris_inner(&mut self, track_ids: &[String], selected_index: usize) -> Result<()> {
-        let target_device = self.get_device_id().await;
+        let target_device = self.require_device_id().await?;
 
         let uris = track_ids
             .iter()
@@ -506,7 +530,7 @@ impl SpotifyWorker {
             .map(|uri| rspotify::model::Offset::Uri(uri.uri()));
 
         self.client
-            .start_uris_playback(uris, target_device.as_deref(), offset, None)
+            .start_uris_playback(uris, Some(target_device.as_str()), offset, None)
             .await?;
         Ok(())
     }
@@ -687,6 +711,13 @@ impl SpotifyWorker {
     }
 }
 
+/// True when the error is Spotify's "device not found / no active device" 404.
+///
+/// Matched on the formatted error because the callers hold a mix of `rspotify::ClientError`
+/// and `anyhow::Error`. A bare `contains("404")` also fired on any URL, track id, or header
+/// containing those digits, so both concrete renderings are matched instead: rspotify's
+/// `Debug` prints `status: 404` and its `Display` prints `status code 404`.
 fn is_device_not_found<E: std::fmt::Debug>(err: &E) -> bool {
-    format!("{err:?}").contains("404")
+    let rendered = format!("{err:?}");
+    rendered.contains("status: 404") || rendered.contains("status code 404")
 }
