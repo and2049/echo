@@ -22,7 +22,16 @@ webbrowser = { workspace = true }
 # Pinned to the same rev because gpui_platform is not yet published to crates.io and
 # gpui's API moves quickly. Bumping this rev is a deliberate task, not routine.
 gpui = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71" }
+# Every backend sits behind a feature and `default = []`, so these are not optional extras:
+# without them Linux compiles cleanly to a binary with no windowing backend at all, which
+# panics out of `current_platform()` before opening a window, and macOS substitutes
+# NoopTextSystem and draws no text. Listed unconditionally, as zed itself does — each one
+# resolves to a target-gated crate, so it is inert off its platform. Windows needs no flag.
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd77f6e1c1dde98bb1dcebba0d254dbd71", features = [
+    "wayland",
+    "x11",
+    "font-kit",
+] }
 
 [build-dependencies]
 embed-resource = "3"

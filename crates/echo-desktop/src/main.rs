@@ -2959,6 +2959,17 @@ pub(crate) fn format_time(ms: u32) -> String {
 }
 
 fn main() {
+    // Neither launch path has a stderr anyone reads — the Linux .desktop entry sets
+    // Terminal=false and the Windows build is a windows_subsystem app — so a panic before the
+    // window opens is indistinguishable from the icon doing nothing at all. First thing in
+    // main, so it covers the runtime and bootstrap below as well as the UI.
+    std::panic::set_hook(Box::new(|info| {
+        let path = echo_core::config::debug_log_path("echo-desktop-panic.log");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let _ = std::fs::write(&path, format!("{info}\n\n{backtrace}\n"));
+        eprintln!("{info}");
+    }));
+
     // The worker lives on this runtime; entering it makes bootstrap::init()'s tokio::spawn work.
     // It must outlive the UI, which `run()` blocks for.
     let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");

@@ -74,8 +74,12 @@ curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh |
 在 Linux 上，桌面應用程式相依於數個系統程式庫——Debian/Ubuntu 下：
 
 ```bash
-sudo apt-get install libasound2 libdbus-1-3 libssl3
+sudo apt-get install libasound2 libdbus-1-3 libssl3 \
+  libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1
 ```
+
+桌面環境通常已經帶有其中大部分。算繪優先使用 Vulkan，並可回退到 OpenGL，因此
+`libvulkan1` 與顯示卡驅動程式值得安裝，但並非必要。
 
 #### 更新
 
