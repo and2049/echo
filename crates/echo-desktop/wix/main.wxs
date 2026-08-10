@@ -36,7 +36,7 @@
                  InstallerVersion="450"
                  Languages="0"
                  Compressed="yes"
-                 InstallScope="perMachine"
+                 InstallScope="perUser"
                  SummaryCodepage="!(loc.CargoPackagerCodepage)"/>
 
         <!-- https://docs.microsoft.com/en-us/windows/win32/msi/reinstallmode -->
@@ -78,6 +78,44 @@
             <RegistrySearch Id="PrevInstallDirReg" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstallDir" Type="raw"/>
         </Property>
 
+        <!--
+            ECHO: default the install to %LOCALAPPDATA%\Programs\echo — a per-user install
+            root, not Program Files. echo updates itself (`spotify upgrade` and the desktop
+            Settings button both rewrite the binaries in place), and a Program Files install
+            makes every one of those paths demand elevation.
+
+            Set here at runtime rather than as a nested Directory element because a
+            statically-declared user-profile directory fails ICE validation; see the
+            INSTALLDIR entry in the Directory table below. Conditioned on INSTALLDIR being
+            empty so it never overrides the RegistrySearch above (an upgrade reuses wherever
+            the previous version went) or a path the user picked in the install dialog.
+        -->
+        <!-- The doubled backslash is required: `\{{` is a handlebars escape, so a single
+             one would emit the literal text "{{product_name}}" into the install path. -->
+        <SetProperty Id="INSTALLDIR"
+                     Value="[LocalAppDataFolder]Programs\\{{product_name}}"
+                     Before="CostFinalize"
+                     Sequence="both">NOT INSTALLDIR</SetProperty>
+
+        <!--
+            ECHO: refuse to install alongside the old system-wide (perMachine) echo.
+
+            A per-user package cannot remove a per-machine one, so both would remain
+            installed — and the old copy's directory is on the *machine* PATH, which
+            resolves ahead of the user PATH this package writes. `spotify` would keep
+            launching the old build even after a successful upgrade. Searching for the
+            file rather than a product code is deliberate: Product/@Id is "*", so the
+            ProductCode changes every build and cannot be searched for.
+        -->
+        <Property Id="OLDMACHINEINSTALL" Secure="yes">
+            <DirectorySearch Id="OldEchoInstallDir" Path="[ProgramFiles64Folder]{{product_name}}" Depth="0">
+                <FileSearch Id="OldEchoDesktopExe" Name="echo-desktop.exe" />
+            </DirectorySearch>
+        </Property>
+        <Condition Message="An older system-wide version of echo is installed. Uninstall it first (Settings &gt; Apps &gt; echo), then run this installer again.">
+            Installed OR NOT OLDMACHINEINSTALL
+        </Condition>
+
         <!-- launch app checkbox -->
         <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchApp)" />
         <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
@@ -118,9 +156,18 @@
                     <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Desktop Shortcut" Type="integer" Value="1" KeyPath="yes" />
                 </Component>
             </Directory>
-            <Directory Id="$(var.PlatformProgramFilesFolder)" Name="PFiles">
-                <Directory Id="INSTALLDIR" Name="{{product_name}}"/>
-            </Directory>
+            <!--
+                ECHO: INSTALLDIR hangs off TARGETDIR and gets its real value at runtime
+                from the SetProperty above, rather than being nested under a standard
+                folder here. Nesting it under LocalAppDataFolder is the obvious spelling
+                but does not link: light.exe runs ICE validation with no way to suppress
+                it (cargo-packager passes no -sice), and a statically-known user-profile
+                directory trips ICE38/ICE64 on every file component — including the
+                theme components cargo-packager generates itself, which we cannot give
+                HKCU keypaths to. Resolving the path at runtime keeps the Directory
+                table free of profile folders, so validation passes.
+            -->
+            <Directory Id="INSTALLDIR" Name="{{product_name}}"/>
             <Directory Id="ProgramMenuFolder">
                 <Directory Id="ApplicationProgramsFolder" Name="{{product_name}}"/>
             </Directory>

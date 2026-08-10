@@ -20,4 +20,5 @@ pub mod models;
 pub mod platform;
 pub mod theme;
 pub mod thumbnails;
+pub mod update;
 pub mod worker;

@@ -19,7 +19,7 @@ use gpui::{
 };
 
 use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
-use crate::{EchoApp, MenuAction, TrackMenuItem, format_time};
+use crate::{EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
 /// The add-to-playlist flyout's box. The row height is the measured height of one choice, used
@@ -3583,6 +3583,94 @@ pub fn settings_modal(
             .child(label)
     };
 
+    // --- Updates ---------------------------------------------------------------------
+    // The one control here that is neither a `:` command nor a config write: it runs a network
+    // call, so its label and action both come from `app.update_state`.
+    let version_row = row(
+        s("desktop.settings.updates.version"),
+        None,
+        div()
+            .text_xs()
+            .text_color(muted)
+            .child(SharedString::from(if echo_core::update::is_dev_build() {
+                format!(
+                    "{} {}",
+                    echo_core::update::current_version(),
+                    echo_core::i18n::t("desktop.settings.updates.dev", &config.language)
+                )
+            } else {
+                echo_core::update::current_version().to_string()
+            }))
+            .into_any_element(),
+    );
+
+    let translate = |key: &str, value: &str| -> SharedString {
+        SharedString::from(echo_core::i18n::t(key, &config.language).replace("{}", value))
+    };
+    let (update_label, update_hint, update_active) = match &app.update_state {
+        UpdateState::Idle => (s("desktop.settings.updates.check"), None, true),
+        UpdateState::Checking => (s("desktop.settings.updates.checking"), None, false),
+        UpdateState::UpToDate => (s("desktop.settings.updates.uptodate"), None, true),
+        UpdateState::Available(release) => (
+            translate("desktop.settings.updates.install", release.version()),
+            None,
+            true,
+        ),
+        UpdateState::Downloading(percent) => (
+            translate("desktop.settings.updates.downloading", &percent.to_string()),
+            None,
+            false,
+        ),
+        UpdateState::Ready(version) => (
+            s("desktop.settings.updates.restart"),
+            Some(translate("desktop.settings.updates.installed", version)),
+            false,
+        ),
+        UpdateState::Failed(message) => (
+            s("desktop.settings.updates.retry"),
+            Some(SharedString::from(message.clone())),
+            true,
+        ),
+        // Nothing in-app can fix this one, so the button leaves for the releases page.
+        UpdateState::Blocked(message) => (
+            s("desktop.settings.updates.open_releases"),
+            Some(SharedString::from(message.clone())),
+            true,
+        ),
+    };
+
+    let update_button = div()
+        .id("settings-update")
+        .flex_none()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(if update_active { accent } else { palette.menu_border })
+        .text_xs()
+        .text_color(if update_active { accent } else { muted })
+        .when(update_active, |el| {
+            el.cursor_pointer()
+                .hover(move |style| style.bg(palette.menu_hover))
+                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                    match &this.update_state {
+                        UpdateState::Available(_) => this.install_update(cx),
+                        UpdateState::Blocked(_) => {
+                            let _ = webbrowser::open(&echo_core::update::releases_url());
+                        }
+                        _ => this.check_for_updates(cx),
+                    }
+                }))
+        })
+        .child(update_label)
+        .into_any_element();
+
+    let update_row = row(
+        s("desktop.settings.updates.label"),
+        update_hint.or_else(|| Some(s("desktop.settings.updates.desc"))),
+        update_button,
+    );
+
     div()
         .id("settings-backdrop")
         .absolute()
@@ -3696,7 +3784,10 @@ pub fn settings_modal(
                                             cx,
                                         )),
                                 ),
-                        ),
+                        )
+                        .child(heading(s("desktop.settings.updates.section")))
+                        .child(version_row)
+                        .child(update_row),
                 ),
         )
 }

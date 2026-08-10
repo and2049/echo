@@ -15,6 +15,7 @@ anyhow = "1.0.102"
 chrono = "0.4.44"
 crossterm = "0.29.0"
 dirs = "6.0.0"
+flate2 = "1.1.9"
 futures-util = "0.3.32"
 image = "0.25.10"
 # Pinned: librespot has no compatible crates.io release, and an unpinned git dep
@@ -33,9 +34,14 @@ reqwest = { version = "0.13.4", features = ["json"] }
 rodio = "0.21.1"
 rspotify = { version = "0.16.1", features = ["cli"] }
 rustfft = "6.4.1"
+semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+sha2 = "0.10.9"
 souvlaki = "0.8.3"
+# Release archives are .tar.gz on every platform, Windows included, so `spotify upgrade`
+# has one extraction path instead of a second zip branch.
+tar = "0.4.44"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["full"] }
 toml = "1.1.2"

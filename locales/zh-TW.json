@@ -185,7 +185,24 @@
       "pregain_desc": "均衡後補償的 dB — 播放偏小聲時可調高",
       "folder_empty": "未設定資料夾 — 請輸入絕對路徑",
       "folder_desc": "要掃描的資料夾 — 必須為絕對路徑。Enter 套用。",
-      "rescan": "立即重新掃描"
+      "rescan": "立即重新掃描",
+      "updates": {
+        "section": "更新",
+        "version": "版本",
+        "dev": "（開發版本）",
+        "label": "軟體更新",
+        "desc": "將取代已安裝的應用程式 — 重新啟動後生效",
+        "check": "檢查更新",
+        "checking": "檢查中…",
+        "uptodate": "已是最新",
+        "install": "更新至 {}",
+        "downloading": "下載中 {}%",
+        "restart": "重新啟動以完成",
+        "installed": "已安裝版本 {} — 重新啟動 echo 後生效",
+        "retry": "重試",
+        "open_releases": "開啟發布頁面",
+        "failed": "更新檢查未完成"
+      }
     },
     "setup": {
       "title": "連接 Spotify",

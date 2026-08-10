@@ -185,7 +185,24 @@
       "pregain_desc": "均衡后补偿的 dB — 播放偏轻时可调高",
       "folder_empty": "未设置文件夹 — 请输入绝对路径",
       "folder_desc": "要扫描的文件夹 — 必须为绝对路径。回车应用。",
-      "rescan": "立即重新扫描"
+      "rescan": "立即重新扫描",
+      "updates": {
+        "section": "更新",
+        "version": "版本",
+        "dev": "（开发版本）",
+        "label": "软件更新",
+        "desc": "将替换已安装的应用 — 重启后生效",
+        "check": "检查更新",
+        "checking": "检查中…",
+        "uptodate": "已是最新",
+        "install": "更新到 {}",
+        "downloading": "下载中 {}%",
+        "restart": "重启以完成",
+        "installed": "已安装版本 {} — 重启 echo 后生效",
+        "retry": "重试",
+        "open_releases": "打开发布页面",
+        "failed": "更新检查未完成"
+      }
     },
     "setup": {
       "title": "连接 Spotify",

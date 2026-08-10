@@ -160,6 +160,39 @@ pub(crate) enum MenuAction {
     RemoveAlbum,
 }
 
+/// Lifecycle of the settings sheet's update control.
+///
+/// [`UpdateState::Blocked`] is separated from [`UpdateState::Failed`] because the two need
+/// different offers: a failure is worth retrying in place, whereas a blocked install (system
+/// directory, distro package, no build for the platform) can only be resolved by downloading
+/// an installer, so the button becomes a link to the releases page.
+#[derive(Clone)]
+pub(crate) enum UpdateState {
+    Idle,
+    Checking,
+    UpToDate,
+    Available(echo_core::update::Release),
+    Downloading(u8),
+    Ready(String),
+    Failed(String),
+    Blocked(String),
+}
+
+impl UpdateState {
+    fn from_error(error: echo_core::update::UpdateError) -> Self {
+        use echo_core::update::UpdateError as E;
+        let message = error.to_string();
+        match error {
+            E::NotWritable(..)
+            | E::SystemPackage(..)
+            | E::UnsupportedPlatform(_)
+            | E::MissingAsset { .. }
+            | E::DevBuild(_) => Self::Blocked(message),
+            _ => Self::Failed(message),
+        }
+    }
+}
+
 pub(crate) struct EchoApp {
     pub(crate) state: echo_core::app::AppState,
     pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
@@ -204,6 +237,9 @@ pub(crate) struct EchoApp {
     pub(crate) settings_path_input: String,
     pub(crate) settings_path_focus: FocusHandle,
     pub(crate) settings_scroll: ScrollHandle,
+    /// Where the settings sheet's update control is in its lifecycle. Desktop-only: the TUI
+    /// upgrades through `spotify upgrade`, so this never belongs in the shared `AppState`.
+    pub(crate) update_state: UpdateState,
     /// The `?` cheat sheet. Nothing else in the GUI reveals the `:` commands or vim motions.
     pub(crate) help_open: bool,
     pub(crate) help_scroll: ScrollHandle,
@@ -236,6 +272,11 @@ pub(crate) struct EchoApp {
     /// starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
     titlebar_should_move: bool,
     focus_handle: FocusHandle,
+    /// Captured once on the main thread, where `main`'s runtime guard is active. Network work
+    /// is spawned through this rather than `tokio::spawn`, which would depend on the calling
+    /// thread happening to be inside the runtime context — true for GPUI's foreground
+    /// executor today, false for anything moved to a background one.
+    tokio: tokio::runtime::Handle,
 }
 
 impl EchoApp {
@@ -366,6 +407,7 @@ impl EchoApp {
             settings_path_input: String::new(),
             settings_path_focus: cx.focus_handle(),
             settings_scroll: ScrollHandle::new(),
+            update_state: UpdateState::Idle,
             help_open: false,
             help_scroll: ScrollHandle::new(),
             context_menu: None,
@@ -381,6 +423,7 @@ impl EchoApp {
             sidebar_resizing: None,
             titlebar_should_move: false,
             focus_handle,
+            tokio: tokio::runtime::Handle::current(),
         }
     }
 
@@ -1250,6 +1293,105 @@ impl EchoApp {
         self.state.ui.status_message_expiry =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
         cx.notify();
+    }
+
+    /// Ask GitHub whether a newer release exists.
+    ///
+    /// The second exception to the "every setting is a `:` command" rule, alongside
+    /// [`Self::set_audio_quality`]: `commands::execute` is synchronous and returns an
+    /// `Option<AppEvent>`, which cannot express an in-flight network call.
+    pub(crate) fn check_for_updates(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.update_state,
+            UpdateState::Checking | UpdateState::Downloading(_)
+        ) {
+            return;
+        }
+        self.update_state = UpdateState::Checking;
+        cx.notify();
+
+        // reqwest needs the tokio reactor, so the request runs on the runtime; the result comes
+        // back over a oneshot, which is reactor-free and therefore safe to await on GPUI's
+        // foreground executor (the same reasoning as the worker-event bridge above).
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.tokio.spawn(async move {
+            let _ = tx.send(echo_core::update::check().await);
+        });
+
+        cx.spawn(async move |this, cx| {
+            let outcome = rx.await;
+            let _ = this.update(cx, |app: &mut EchoApp, cx| {
+                app.update_state = match outcome {
+                    Ok(Ok(echo_core::update::Check::UpToDate)) => UpdateState::UpToDate,
+                    Ok(Ok(echo_core::update::Check::Available(release))) => {
+                        UpdateState::Available(release)
+                    }
+                    Ok(Err(error)) => UpdateState::from_error(error),
+                    Err(_) => UpdateState::Failed(
+                        views::tr(&app.state, "desktop.settings.updates.failed").to_string(),
+                    ),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Download the release found by [`Self::check_for_updates`] and swap it in.
+    pub(crate) fn install_update(&mut self, cx: &mut Context<Self>) {
+        let UpdateState::Available(release) = self.update_state.clone() else {
+            return;
+        };
+        // Resolved before the download so a read-only install fails immediately.
+        let plan = match echo_core::update::plan() {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.update_state = UpdateState::from_error(error);
+                cx.notify();
+                return;
+            }
+        };
+
+        self.update_state = UpdateState::Downloading(0);
+        cx.notify();
+
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+        self.tokio.spawn(async move {
+            let staged = echo_core::update::download(plan, &release, move |percent| {
+                let _ = progress_tx.send(percent);
+            })
+            .await;
+            // The swap is blocking filesystem work, but it is a handful of renames — keeping it
+            // on the runtime rather than the UI thread is enough.
+            let _ = done_tx.send(staged.and_then(echo_core::update::apply));
+        });
+
+        cx.spawn(async move |this, cx| {
+            // The progress sender is dropped when the download future completes, which ends
+            // this loop and lets the outcome through.
+            while let Some(percent) = progress_rx.recv().await {
+                let applied = this.update(cx, |app: &mut EchoApp, cx| {
+                    app.update_state = UpdateState::Downloading(percent);
+                    cx.notify();
+                });
+                if applied.is_err() {
+                    return; // entity dropped — app is shutting down
+                }
+            }
+            let outcome = done_rx.await;
+            let _ = this.update(cx, |app: &mut EchoApp, cx| {
+                app.update_state = match outcome {
+                    Ok(Ok(version)) => UpdateState::Ready(version),
+                    Ok(Err(error)) => UpdateState::from_error(error),
+                    Err(_) => UpdateState::Failed(
+                        views::tr(&app.state, "desktop.settings.updates.failed").to_string(),
+                    ),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Typing in the settings sheet's local-folder field. Enter submits it as `:localpath`.
@@ -2822,6 +2964,10 @@ fn main() {
     // It must outlive the UI, which `run()` blocks for.
     let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
     let _guard = runtime.enter();
+
+    // Windows cannot delete the image of a running process, so a previous upgrade leaves its
+    // backups behind. Nothing holds them now.
+    echo_core::update::sweep_backups();
 
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();

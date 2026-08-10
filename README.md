@@ -38,7 +38,7 @@ echo is a terminal-based music player and Spotify client written in Rust. echo b
 
 Download the installer for your platform from the [releases page](https://github.com/and2049/echo/releases). Each **echo** package installs the desktop app *and* the `spotify` terminal command:
 
-- **Windows** (`echo-desktop_*.msi`): installs the desktop app and adds the install directory to `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again.
+- **Windows** (`echo-desktop_*.msi`): installs the desktop app to `%LOCALAPPDATA%\Programs\echo` for the current user — no administrator prompt — and adds that directory to your user `PATH`, so `spotify` works from any shell after install (open a new terminal). Uninstalling removes the `PATH` entry again. Installing per-user is what lets `spotify upgrade` and the in-app updater replace the app without elevation. If an older system-wide echo is present in `C:\Program Files\echo`, the installer will ask you to uninstall it first.
 - **macOS** (`echo_*.dmg`): drag `echo.app` to Applications. The TUI ships inside the bundle; to put it on `PATH`, link it once:
 
   ```bash
