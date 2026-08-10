@@ -74,8 +74,12 @@ curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh |
 在 Linux 上，桌面应用依赖若干系统库——Debian/Ubuntu 下：
 
 ```bash
-sudo apt-get install libasound2 libdbus-1-3 libssl3
+sudo apt-get install libasound2 libdbus-1-3 libssl3 \
+  libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1
 ```
+
+桌面环境通常已经带有其中大部分。渲染优先使用 Vulkan，并可回退到 OpenGL，因此
+`libvulkan1` 与显卡驱动值得安装，但并非必需。
 
 #### 更新
 

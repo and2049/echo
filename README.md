@@ -75,8 +75,12 @@ Uninstalling leaves your settings in `~/.config/echo` alone.
 On Linux the desktop app links against a few system libraries — on Debian/Ubuntu:
 
 ```bash
-sudo apt-get install libasound2 libdbus-1-3 libssl3
+sudo apt-get install libasound2 libdbus-1-3 libssl3 \
+  libfontconfig1 libxkbcommon0 libxkbcommon-x11-0 libwayland-client0 libx11-xcb1
 ```
+
+A desktop install already has most of these. Rendering prefers Vulkan and falls back to
+OpenGL, so `libvulkan1` plus your GPU's driver is worth having but is not required.
 
 #### Updating
 
@@ -98,7 +102,8 @@ Clone the repository and build using Cargo:
 
 ```bash
 sudo apt-get install -y --no-install-recommends \
-  libasound2-dev libdbus-1-dev pkg-config libssl-dev
+  libasound2-dev libdbus-1-dev pkg-config libssl-dev \
+  libfontconfig-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev
 ```
 
 ```bash

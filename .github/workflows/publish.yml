@@ -74,10 +74,13 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        # The second line is what gpui's wayland/x11 backends link against. Vulkan and EGL are
+        # dlopen'd at runtime, so they need nothing here.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libdbus-1-dev pkg-config libssl-dev
+            libasound2-dev libdbus-1-dev pkg-config libssl-dev \
+            libfontconfig-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -110,6 +113,14 @@ jobs:
           else
             cargo build --release -p echo-desktop -p spotify-tui
           fi
+
+      # A gpui_platform missing its wayland/x11 features still compiles — it just yields a
+      # desktop binary that panics instead of opening a window, which no build step notices.
+      # libxkbcommon is linked only when those features are on, so it stands in for the whole
+      # backend. v0.5.0 shipped without it.
+      - name: Assert the Linux GUI backend is linked
+        if: runner.os == 'Linux'
+        run: ldd target/release/echo-desktop | grep -q libxkbcommon
 
       # The portable archive: what `spotify upgrade` and the desktop's update button pull on
       # every platform, and what install.sh lays down on Linux. It carries themes/ because

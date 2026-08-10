@@ -27,10 +27,13 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
+        # The second line is what gpui's wayland/x11 backends link against. Vulkan and EGL are
+        # dlopen'd at runtime, so they need nothing here.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libdbus-1-dev pkg-config libssl-dev
+            libasound2-dev libdbus-1-dev pkg-config libssl-dev \
+            libfontconfig-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev
 
       - uses: Swatinem/rust-cache@v2
 
