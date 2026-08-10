@@ -19,7 +19,16 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc as std_mpsc,
 };
+use std::time::Duration;
 use tokio::sync::mpsc;
+
+/// Deadline for `Spirc::new`, which logs in to the access point and registers the Connect
+/// device. Generous enough for a slow network, short enough that a hung access point becomes a
+/// retryable error rather than a permanently missing device.
+const SPIRC_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Retries after the one-shot credential reset, backing off 2s → 4s → 8s → 16s.
+const DAEMON_MAX_ATTEMPTS: u32 = 4;
 
 // Prefer a native stereo config, at `preferred_rate` if the device supports it, else at the device
 // default rate. Taking the device default config verbatim can yield mono, which rodio downmixes by
@@ -60,6 +69,23 @@ pub(crate) fn log_output_config(kind: &str, device: &str, stream: &rodio::Output
             config.sample_format()
         ),
     );
+}
+
+/// Appends a timestamped line to the librespot daemon's lifecycle log.
+///
+/// The daemon's failures used to be invisible: the success line overwrote the file and the
+/// crash line went to a cwd-relative path that a GUI launch discards. A daemon that never
+/// registers its Connect device makes every `/v1/me/player/play` call 404, so its fate has to
+/// be recoverable from the log directory alone.
+fn log_daemon(message: &str) {
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(crate::config::debug_log_path("echo-debug-fallback.log"))
+    {
+        let _ = writeln!(file, "{} {message}", chrono::Utc::now().to_rfc3339());
+    }
 }
 
 struct EchoRodioSink {
@@ -226,26 +252,49 @@ pub async fn spawn_librespot_daemon(
     volume: u32,
 ) {
     tokio::spawn(async move {
+        let mut attempt: u32 = 0;
+        let mut credentials_reset = false;
+        // Retrying is only worth a browser prompt once. Re-prompting on every backoff turns a
+        // failing login into a stream of auth windows the user has to dismiss.
+        let browser_auth_used = Arc::new(AtomicBool::new(false));
         loop {
             let tx = tx.clone();
+            // The async block below moves its `tx`, so the give-up path needs its own handle.
+            let err_tx = tx.clone();
             let output_available = output_available.clone();
             let playback_is_playing = playback_is_playing.clone();
+            let browser_auth_used = browser_auth_used.clone();
             let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
                 // Find or create cache directory
                 let cache_dir = crate::config::echo_config_root();
                 std::fs::create_dir_all(&cache_dir)?;
                 let cache = Cache::new(Some(cache_dir.clone()), None, None, None)?;
 
+                // Built before the credentials so the OAuth flow can borrow its client id.
+                let session_config = SessionConfig::default();
+
                 let credentials = if let Some(creds) = cache.credentials() {
+                    log_daemon("credentials source=cached_blob");
                     creds
                 } else {
+                    log_daemon(&format!(
+                        "credentials source=oauth opening browser client_id={}",
+                        session_config.client_id
+                    ));
+                    browser_auth_used.store(true, Ordering::SeqCst);
                     let _ = std::fs::write(
-                        "echo-librespot-status.log",
+                        crate::config::debug_log_path("echo-librespot-status.log"),
                         "FALLBACK: OPENING BROWSER FOR HARDCODED OAUTH",
                     );
 
+                    // The OAuth client id must be the one the session logs in with. On Windows,
+                    // login5 sends `SessionConfig::client_id` alongside the token, and Spotify
+                    // rejects the pair with INVALID_CREDENTIALS when the token was minted for a
+                    // different client — which is what a hardcoded third-party id did here.
+                    // librespot's own CLI passes `session_config.client_id` for exactly this
+                    // reason, so the two can never drift apart.
                     let client_builder = librespot_oauth::OAuthClientBuilder::new(
-                        "d420a117a32841c2b3474932e49fb54b",
+                        &session_config.client_id,
                         "http://127.0.0.1:8989/login",
                         vec![
                             "streaming",
@@ -256,12 +305,11 @@ pub async fn spawn_librespot_daemon(
                     )
                     .open_in_browser();
 
-                    let oauth_client = client_builder
-                        .build()
-                        .expect("Failed to build OAuth client");
-                    let t = oauth_client
-                        .get_access_token()
-                        .expect("Failed to get access token");
+                    // `?` rather than `expect`: a panic here kills the spawned task outright,
+                    // skipping the retry loop and the error log below, which leaves the app with
+                    // no Connect device and no explanation.
+                    let oauth_client = client_builder.build()?;
+                    let t = oauth_client.get_access_token()?;
 
                     // Clear the terminal because librespot-oauth hardcodes a `println!` that
                     // corrupts the TUI layout. Raw ANSI rather than crossterm so the core stays
@@ -275,11 +323,12 @@ pub async fn spawn_librespot_daemon(
 
                     let creds = Credentials::with_access_token(t.access_token);
                     cache.save_credentials(&creds);
-                    let _ = std::fs::remove_file("echo-librespot-status.log");
+                    let _ = std::fs::remove_file(crate::config::debug_log_path(
+                        "echo-librespot-status.log",
+                    ));
                     creds
                 };
 
-                let session_config = SessionConfig::default();
                 let session = Session::new(session_config, Some(cache.clone()));
 
                 let player_config = PlayerConfig {
@@ -296,14 +345,15 @@ pub async fn spawn_librespot_daemon(
                     ..Default::default()
                 };
 
-                let mixer_fn = librespot_playback::mixer::find(None).unwrap();
+                let mixer_fn = librespot_playback::mixer::find(None)
+                    .ok_or("no librespot mixer available")?;
                 // Cubic matches the taper local playback uses, so the same percentage sounds the
                 // same on both sources. The default logarithmic curve is far more aggressive.
                 let mixer_config = librespot_playback::mixer::MixerConfig {
                     volume_ctrl: VolumeCtrl::Cubic(VOLUME_DB_RANGE),
                     ..Default::default()
                 };
-                let mixer = mixer_fn(mixer_config).unwrap();
+                let mixer = mixer_fn(mixer_config)?;
                 // SoftMixer opens at a hardcoded 0.5 attenuation, so seed it before any audio flows.
                 mixer.set_volume(volume_to_mixer(volume));
                 *mixer_holder.lock() = Some(mixer.clone());
@@ -349,17 +399,32 @@ pub async fn spawn_librespot_daemon(
                     ..Default::default()
                 };
 
-                let (_spirc, spirc_task) =
-                    Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;
+                // `Spirc::new` logs in to the access point before registering the device. That
+                // await has no internal deadline, so an unreachable or unresponsive AP parks the
+                // task forever: no device, no error, nothing in the log. A timeout converts that
+                // silence into a retryable error.
+                log_daemon("spirc connecting...");
+                let (_spirc, spirc_task) = match tokio::time::timeout(
+                    SPIRC_CONNECT_TIMEOUT,
+                    Spirc::new(connect_config, session.clone(), credentials, player, mixer),
+                )
+                .await
+                {
+                    Ok(result) => result?,
+                    Err(_) => {
+                        return Err(format!(
+                            "Spirc::new timed out after {}s",
+                            SPIRC_CONNECT_TIMEOUT.as_secs()
+                        )
+                        .into());
+                    }
+                };
 
-                let _ = std::fs::write(
-                    crate::config::debug_log_path("echo-debug-fallback.log"),
-                    format!(
-                        "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
-                    ),
-                );
+                log_daemon(&format!(
+                    "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
+                ));
                 spirc_task.await;
-                let _ = std::fs::write(crate::config::debug_log_path("echo-debug-fallback.log"), "Spirc Daemon task exited!");
+                log_daemon("Spirc Daemon task exited!");
 
                 Ok(())
             }
@@ -368,21 +433,63 @@ pub async fn spawn_librespot_daemon(
             if let Err(e) = result {
                 let err_msg = format!("{:?}", e);
                 let _ = std::fs::write(
-                    "echo-librespot-fatal.log",
+                    crate::config::debug_log_path("echo-librespot-fatal.log"),
                     format!("Librespot Daemon crashed: {}", err_msg),
                 );
+                log_daemon(&format!(
+                    "daemon attempt={attempt} failed: {err_msg}"
+                ));
 
-                // If the error was caused by invalid/expired credentials, delete the cache and retry immediately.
-                if err_msg.contains("BadCredentials") || err_msg.contains("PermissionDenied") {
-                    let cache_dir = crate::config::echo_config_root();
-                    let _ = std::fs::remove_file(cache_dir.join("credentials.json"));
-                    continue; // Loop back and trigger the browser re-auth flow
+                // A stale cached blob is the likeliest cause and it cannot recover on its own,
+                // so drop it once and let the next pass take the browser re-auth branch. The
+                // old `contains("BadCredentials")` test was too narrow to catch a timeout or a
+                // renamed error variant, and any miss left the app with no device for the whole
+                // session. Only reset once: re-auth opens a browser window.
+                // A freshly authorized login that still fails is not a stale-credential problem,
+                // so clearing the blob and prompting again would only cost the user another
+                // browser window for the same outcome.
+                if browser_auth_used.load(Ordering::SeqCst) {
+                    log_daemon("interactive login already used and still failing; not retrying");
+                    let _ = err_tx
+                        .send(WorkerEvent::ApiRequestFailed {
+                            label: "playback".to_string(),
+                            message: format!(
+                                "Spotify rejected the playback device login. ({err_msg})"
+                            ),
+                        })
+                        .await;
+                    break;
                 }
 
-                break; // Unrecoverable error, break the loop
+                if !credentials_reset {
+                    credentials_reset = true;
+                    let cache_dir = crate::config::echo_config_root();
+                    let _ = std::fs::remove_file(cache_dir.join("credentials.json"));
+                    log_daemon("cleared cached credentials; retrying with browser re-auth");
+                    continue;
+                }
+
+                attempt += 1;
+                if attempt >= DAEMON_MAX_ATTEMPTS {
+                    log_daemon("giving up; no Connect device for this session");
+                    let _ = err_tx
+                        .send(WorkerEvent::ApiRequestFailed {
+                            label: "playback".to_string(),
+                            message: format!(
+                                "Playback device failed to start after {DAEMON_MAX_ATTEMPTS} attempts. Restart echo to retry. ({err_msg})"
+                            ),
+                        })
+                        .await;
+                    break;
+                }
+
+                let backoff = Duration::from_secs(2u64.pow(attempt));
+                log_daemon(&format!("retrying in {}s", backoff.as_secs()));
+                tokio::time::sleep(backoff).await;
+                continue;
             } else {
                 let _ = std::fs::write(
-                    "echo-librespot-fatal.log",
+                    crate::config::debug_log_path("echo-librespot-fatal.log"),
                     "Librespot Daemon exited normally.",
                 );
                 break;

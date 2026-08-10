@@ -16,6 +16,22 @@ pub(crate) fn api_request_error_message(err: &anyhow::Error) -> String {
     err.to_string()
 }
 
+/// User-facing message for a failed play request.
+///
+/// The dominant failure is echo's own librespot Connect device not being registered, which
+/// Spotify reports as a bare HTTP 404 on `/v1/me/player/play`. Surfaced verbatim that reads
+/// like a bad track id, so it gets named for what it is and points at the daemon log.
+pub(crate) fn playback_error_message(err: &anyhow::Error) -> String {
+    let rendered = format!("{err:?}");
+    if rendered.contains(super::api::playback::NO_DEVICE_ERROR)
+        || rendered.contains("status: 404")
+        || rendered.contains("status code 404")
+    {
+        return "no playback device. echo's Spotify Connect device isn't running — see echo-debug-fallback.log.".to_string();
+    }
+    api_request_error_message(err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -44,5 +60,24 @@ mod tests {
             api_request_error_message(&err),
             "rate limited. Try again in 43s."
         );
+    }
+
+    #[test]
+    fn missing_device_is_named_rather_than_shown_as_a_404() {
+        let err = anyhow::anyhow!(crate::worker::api::playback::NO_DEVICE_ERROR);
+        assert!(playback_error_message(&err).starts_with("no playback device"));
+
+        // Spotify's own 404 for the same condition maps to the same message.
+        let http = anyhow::anyhow!(
+            "Http(StatusCode(Response {{ url: \"https://api.spotify.com/v1/me/player/play\", status: 404 }}))"
+        );
+        assert!(playback_error_message(&http).starts_with("no playback device"));
+    }
+
+    #[test]
+    fn unrelated_errors_keep_their_own_message() {
+        // A 404 appearing in a track id or URL must not be read as a missing device.
+        let err = anyhow::anyhow!("bad track id 404abc404def");
+        assert_eq!(playback_error_message(&err), "bad track id 404abc404def");
     }
 }

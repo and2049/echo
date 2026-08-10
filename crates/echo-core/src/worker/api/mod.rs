@@ -243,6 +243,8 @@ fn spotify_scopes() -> HashSet<String> {
         "user-library-modify",
         "user-modify-playback-state",
         "user-read-playback-state",
+        // Required by the `current_playing` fallback in `playback.rs`, which 403s without it.
+        "user-read-currently-playing",
         "streaming",
         "app-remote-control",
         "playlist-modify-public",
