@@ -149,6 +149,11 @@ install_linux() {
 
 # Menu entry and icons for the desktop app. Icons ride along in the archive so this script
 # needs exactly one download.
+#
+# The file's basename, `Icon=`, and `StartupWMClass=` all have to agree with the `app_id` the
+# window sets (crates/echo-desktop/src/main.rs) — that is the string a Linux desktop matches a
+# running window against to find its icon and name. Disagree and the launcher entry still looks
+# right while the running window shows a blank icon labelled "Unknown".
 install_desktop_entry() {
     mkdir -p "$(dirname "$DESKTOP_FILE")"
     for size in 32x32 64x64 128x128; do
@@ -171,7 +176,7 @@ Icon=echo
 Terminal=false
 Type=Application
 Categories=Audio;Music;Player;
-StartupWMClass=echo-desktop
+StartupWMClass=echo
 EOF
 
     command -v update-desktop-database >/dev/null 2>&1 &&
