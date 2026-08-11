@@ -87,7 +87,14 @@ actions!(
         EnterVisual,
         MoveTrackUp,
         MoveTrackDown,
-        ToggleLike
+        ToggleLike,
+        // macOS menu-bar entries. No keybinding of their own beyond the standard chords bound
+        // in `main`; they exist so the application and Window menus have actions to invoke.
+        Hide,
+        HideOthers,
+        ShowAll,
+        MinimizeWindow,
+        ZoomWindow
     ]
 );
 
@@ -279,6 +286,50 @@ pub(crate) struct EchoApp {
     /// thread happening to be inside the runtime context — true for GPUI's foreground
     /// executor today, false for anything moved to a background one.
     tokio: tokio::runtime::Handle,
+}
+
+/// The macOS menu bar — the strip along the top of the screen, which is a separate surface from
+/// the app's own titlebar and is built only from what an app hands to `set_menus`. gpui installs
+/// no default, so without this the bar beside the Apple menu is empty: no Quit item, no Hide, and
+/// none of the Window-menu entries macOS expects every app to have. Deliberately small — echo's
+/// keymap mirrors the TUI's and lives in the app itself, so this covers the system chords rather
+/// than mirroring the whole feature set.
+///
+/// AppKit fills in the rest of the Window menu (window list, Bring All to Front, the tiling
+/// items) once gpui hands it a menu named "Window".
+///
+/// Not `#[cfg]`-gated, and its caller branches on `cfg!` rather than `#[cfg]`, so this stays
+/// type-checked on the platform it is actually developed on. `set_menus` is a no-op off macOS.
+fn mac_menus() -> Vec<gpui::Menu> {
+    use gpui::{Menu, MenuItem};
+
+    vec![
+        Menu {
+            name: "echo".into(),
+            disabled: false,
+            items: vec![
+                MenuItem::action("Settings…", ToggleSettings),
+                MenuItem::action("Keyboard Shortcuts", ToggleHelp),
+                MenuItem::separator(),
+                MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Hide echo", Hide),
+                MenuItem::action("Hide Others", HideOthers),
+                MenuItem::action("Show All", ShowAll),
+                MenuItem::separator(),
+                MenuItem::action("Quit echo", Quit),
+            ],
+        },
+        Menu {
+            name: "Window".into(),
+            disabled: false,
+            items: vec![
+                MenuItem::action("Minimize", MinimizeWindow),
+                MenuItem::action("Zoom", ZoomWindow),
+                MenuItem::separator(),
+            ],
+        },
+    ]
 }
 
 /// Whether a keystroke's modifiers mean "paste" for the hand-rolled text fields.
@@ -2863,6 +2914,11 @@ impl Render for EchoApp {
                 this.persist_window_bounds(window);
                 cx.quit();
             }))
+            // The macOS Window menu's two entries. Handled here rather than app-wide because
+            // both need the window; `Hide`/`HideOthers`/`ShowAll` do not, so those stay in
+            // `main` alongside the menu itself.
+            .on_action(cx.listener(|_, _: &MinimizeWindow, window, _cx| window.minimize_window()))
+            .on_action(cx.listener(|_, _: &ZoomWindow, window, _cx| window.zoom_window()))
             .on_action(cx.listener(|this, _: &SelectFirst, _window, cx| this.set_selection(0, cx)))
             .on_action(cx.listener(|this, _: &SelectLast, _window, cx| this.select_last(cx)))
             .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
@@ -3072,11 +3128,19 @@ fn main() {
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
         cx.set_app_identity("com.echo.app", "echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
-        // The keymap mirrors the TUI's, so it is ctrl-based everywhere. cmd-q is the one chord
-        // a Mac user will reach for without thinking, and nothing else provides it — the app
-        // installs no application menu.
+        // The keymap mirrors the TUI's, so it is ctrl-based everywhere. These are the chords a
+        // Mac user reaches for without thinking, and they are what the menu bar below shows as
+        // its accelerators — gpui reads them back out of the keymap when it builds the menu.
         if cfg!(target_os = "macos") {
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+            cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-h", Hide, None),
+                KeyBinding::new("cmd-m", MinimizeWindow, None),
+            ]);
+            cx.on_action(|_: &Hide, cx| cx.hide());
+            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+            cx.set_menus(mac_menus());
         }
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
@@ -3202,6 +3266,15 @@ fn main() {
                 // Client means the app owns moving and resizing: see views::window_frame.
                 window_decorations: cfg!(target_os = "linux")
                     .then_some(gpui::WindowDecorations::Client),
+                // How a Linux desktop finds the window's identity: the compositor matches this
+                // against a .desktop file's basename to get the icon and the visible app name.
+                // It must stay equal to install.sh's `echo.desktop` (and to its StartupWMClass,
+                // which is the X11 half of the same match). Without it the window has no app_id
+                // at all, so the shell falls back to a blank icon and "Unknown" — the hicolor
+                // icons install.sh lays down only ever reach the app grid, never the window.
+                // `set_app_identity` above does not cover this; on Linux it only names
+                // notifications.
+                app_id: Some("echo".to_string()),
                 // macOS: the app moves the window itself via start_window_move, which also
                 // avoids AppKit's titlebar-click delay. No-op elsewhere.
                 app_owns_titlebar_drag: true,
