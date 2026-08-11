@@ -2858,8 +2858,15 @@ impl Render for EchoApp {
             .then(|| views::playlist_add_modal(self, cx).into_any_element());
         let prompt_modal = echo_core::intent::prompt_active(&self.state)
             .then(|| views::prompt_modal(self, cx).into_any_element());
-        let titlebar = views::titlebar(self, window, cx).into_any_element();
         let frame_palette = crate::theme::DesktopPalette::resolve(&self.state.ui.active_theme);
+        // Resolved before the chain so the style closure below borrows this rather than `window`.
+        let corners = views::client_corners(window);
+        // Windows and macOS hide the native bar (`appears_transparent`) and always want ours.
+        // Linux only gets it when the app actually owns the frame: the `Client` decorations
+        // requested at open are downgraded to `Server` on an X11 session with no compositor, and
+        // there the window manager draws a real titlebar that ours would sit underneath.
+        let owns_frame = !cfg!(target_os = "linux") || corners.is_some();
+        let titlebar = owns_frame.then(|| views::titlebar(self, window, cx).into_any_element());
 
         let root = div()
             .key_context(LIST_CONTEXT)
@@ -3062,7 +3069,9 @@ impl Render for EchoApp {
             .flex_col()
             .size_full()
             .bg(bg)
-            .child(titlebar)
+            // The window's backdrop: the one fill covering every corner, so it rounds all four.
+            .map(|el| views::round_client_corners(el, corners, views::ClientCorners::All))
+            .when_some(titlebar, |el, bar| el.child(bar))
             .child(
                 div()
                     .flex_grow(1.0)
