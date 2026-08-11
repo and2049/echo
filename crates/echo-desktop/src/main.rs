@@ -267,15 +267,63 @@ pub(crate) struct EchoApp {
     /// A drag-to-resize of the library sidebar in progress; like scrubbing, the width updates
     /// optimistically from window-level pointer moves and settles on release.
     sidebar_resizing: Option<SidebarResize>,
-    /// macOS titlebar drag latch (Zed's pattern): armed on mouse-down, the first move
-    /// starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
+    /// macOS and Linux titlebar drag latch (Zed's pattern): armed on mouse-down, the first
+    /// move starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
     titlebar_should_move: bool,
+    /// A monospace family that actually exists on this machine, resolved once at startup.
+    /// The ECHO wordmark is box-drawing art and only lines up in a fixed-pitch font.
+    mono_font: SharedString,
     focus_handle: FocusHandle,
     /// Captured once on the main thread, where `main`'s runtime guard is active. Network work
     /// is spawned through this rather than `tokio::spawn`, which would depend on the calling
     /// thread happening to be inside the runtime context — true for GPUI's foreground
     /// executor today, false for anything moved to a background one.
     tokio: tokio::runtime::Handle,
+}
+
+/// Whether a keystroke's modifiers mean "paste" for the hand-rolled text fields.
+///
+/// `Modifiers::secondary` is cmd on macOS and ctrl elsewhere; a Mac that only matched `control`
+/// ignored cmd-v, which made the setup card — the first thing a new install shows, and a place
+/// where credentials are pasted rather than typed — impossible to paste into. ctrl-v is still
+/// accepted everywhere, since the desktop app mirrors the TUI's keymap.
+fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
+    modifiers.secondary() || modifiers.control
+}
+
+/// Picks a fixed-pitch family that is actually installed. gpui matches families by exact name
+/// against the system font database — there is no generic "monospace" alias and no substitution
+/// when the name misses, so naming one font hard-codes a platform: "Consolas" is Windows-only,
+/// and on Linux it silently fell through to the proportional UI font, which shears the ECHO
+/// wordmark's box-drawing rows out of alignment. Ordered platform-native first, then the
+/// families a desktop Linux install is likely to have; all of these cover U+2500–U+259F.
+fn resolve_mono_font(cx: &App) -> SharedString {
+    const CANDIDATES: &[&str] = &[
+        "Consolas",          // Windows
+        "Menlo",             // macOS
+        "DejaVu Sans Mono",  // Debian/Ubuntu default
+        "Liberation Mono",   // Fedora/RHEL default
+        "Noto Sans Mono",    // GNOME
+        "Ubuntu Mono",       // Ubuntu
+        "JetBrains Mono",    // common developer install
+        "Source Code Pro",   //
+        "Courier New",       //
+    ];
+
+    let available = cx.text_system().all_font_names();
+    CANDIDATES
+        .iter()
+        .find(|candidate| available.iter().any(|name| name == *candidate))
+        .map(|name| SharedString::from(*name))
+        // Nothing known is installed, so take anything self-describing as monospace rather
+        // than falling back to a proportional face and mangling the art.
+        .or_else(|| {
+            available
+                .iter()
+                .find(|name| name.to_ascii_lowercase().contains("mono"))
+                .map(|name| SharedString::from(name.clone()))
+        })
+        .unwrap_or_else(|| SharedString::from("monospace"))
 }
 
 impl EchoApp {
@@ -357,21 +405,7 @@ impl EchoApp {
         // while maximized still remembers a sensible windowed size.
         let this = cx.entity();
         window.on_window_should_close(cx, move |window, cx| {
-            let bounds = match window.window_bounds() {
-                WindowBounds::Windowed(bounds)
-                | WindowBounds::Maximized(bounds)
-                | WindowBounds::Fullscreen(bounds) => bounds,
-            };
-            this.update(cx, |this: &mut EchoApp, _cx| {
-                this.state.ui.library_config.window_bounds =
-                    Some(echo_core::config::WindowBoundsConfig {
-                        x: f32::from(bounds.origin.x),
-                        y: f32::from(bounds.origin.y),
-                        width: f32::from(bounds.size.width),
-                        height: f32::from(bounds.size.height),
-                    });
-                this.state.save_library_config();
-            });
+            this.update(cx, |this: &mut EchoApp, _cx| this.persist_window_bounds(window));
             true
         });
 
@@ -421,9 +455,30 @@ impl EchoApp {
             scrubbing: None,
             sidebar_resizing: None,
             titlebar_should_move: false,
+            mono_font: resolve_mono_font(cx),
             focus_handle,
             tokio: tokio::runtime::Handle::current(),
         }
+    }
+
+    /// Remembers the window rectangle so the next launch reopens the same size and place. All
+    /// three `WindowBounds` variants carry the restore bounds, so a window closed while
+    /// maximized still remembers a sensible windowed size. Called from every way out: the
+    /// platform's close request, and the `Quit` action the keybinding and the Linux caption
+    /// button both dispatch.
+    fn persist_window_bounds(&mut self, window: &Window) {
+        let bounds = match window.window_bounds() {
+            WindowBounds::Windowed(bounds)
+            | WindowBounds::Maximized(bounds)
+            | WindowBounds::Fullscreen(bounds) => bounds,
+        };
+        self.state.ui.library_config.window_bounds = Some(echo_core::config::WindowBoundsConfig {
+            x: f32::from(bounds.origin.x),
+            y: f32::from(bounds.origin.y),
+            width: f32::from(bounds.size.width),
+            height: f32::from(bounds.size.height),
+        });
+        self.state.save_library_config();
     }
 
     /// Rows in whatever currently has keyboard focus: the device modal when open, else the
@@ -1412,7 +1467,7 @@ impl EchoApp {
             "backspace" => {
                 self.settings_path_input.pop();
             }
-            "v" if event.keystroke.modifiers.control => {
+            "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     self.settings_path_input.push_str(text.trim());
                 }
@@ -1541,7 +1596,7 @@ impl EchoApp {
                 echo_core::commands::clear_suggestions(&mut self.state);
                 self.state.ui.command_buffer.pop();
             }
-            "v" if event.keystroke.modifiers.control => {
+            "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     echo_core::commands::clear_suggestions(&mut self.state);
                     self.state
@@ -1585,6 +1640,16 @@ impl EchoApp {
                 self.state.ui.search_query.pop();
                 echo_core::intent::update_search_matches(&mut self.state);
                 self.scroll_to_selected_track();
+            }
+            "v" if is_paste_chord(&event.keystroke.modifiers) => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.state
+                        .ui
+                        .search_query
+                        .extend(text.chars().filter(|c| *c != '\r' && *c != '\n'));
+                    echo_core::intent::update_search_matches(&mut self.state);
+                    self.scroll_to_selected_track();
+                }
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref() {
@@ -1815,7 +1880,7 @@ impl EchoApp {
             "backspace" => {
                 field.pop();
             }
-            "v" if event.keystroke.modifiers.control => {
+            "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     field.extend(text.chars().filter(|c| !c.is_whitespace()));
                 }
@@ -1850,6 +1915,14 @@ impl EchoApp {
             }
             "backspace" => {
                 self.search_input.pop();
+            }
+            // Spaces are kept — unlike the credential fields, a query is words — but newlines
+            // are dropped so a copied line does not smuggle one into the search term.
+            "v" if is_paste_chord(&event.keystroke.modifiers) => {
+                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                    self.search_input
+                        .extend(text.chars().filter(|c| *c != '\r' && *c != '\n'));
+                }
             }
             _ => {
                 if let Some(text) = event.keystroke.key_char.as_deref() {
@@ -2734,11 +2807,10 @@ impl Render for EchoApp {
             .then(|| views::playlist_add_modal(self, cx).into_any_element());
         let prompt_modal = echo_core::intent::prompt_active(&self.state)
             .then(|| views::prompt_modal(self, cx).into_any_element());
-        // Linux keeps the window manager's decorations; everywhere else the app draws its own.
-        let titlebar = (!cfg!(target_os = "linux"))
-            .then(|| views::titlebar(self, window, cx).into_any_element());
+        let titlebar = views::titlebar(self, window, cx).into_any_element();
+        let frame_palette = crate::theme::DesktopPalette::resolve(&self.state.ui.active_theme);
 
-        div()
+        let root = div()
             .key_context(LIST_CONTEXT)
             .track_focus(&self.focus_handle)
             // Scrubs track the pointer at the window level so dragging keeps working when the
@@ -2783,6 +2855,14 @@ impl Render for EchoApp {
             .on_action(
                 cx.listener(|this, _: &PageDown, _window, cx| this.move_selection(PAGE_ROWS, cx)),
             )
+            // Takes precedence over the app-level `Quit` handler registered in `main`, which
+            // cannot see the window. Both the ctrl-q binding and the Linux caption button's
+            // close arrive here, so every exit remembers the window rectangle the way the
+            // platform's own close request already did.
+            .on_action(cx.listener(|this, _: &Quit, window, cx| {
+                this.persist_window_bounds(window);
+                cx.quit();
+            }))
             .on_action(cx.listener(|this, _: &SelectFirst, _window, cx| this.set_selection(0, cx)))
             .on_action(cx.listener(|this, _: &SelectLast, _window, cx| this.select_last(cx)))
             .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
@@ -2926,7 +3006,7 @@ impl Render for EchoApp {
             .flex_col()
             .size_full()
             .bg(bg)
-            .when_some(titlebar, |el, bar| el.child(bar))
+            .child(titlebar)
             .child(
                 div()
                     .flex_grow(1.0)
@@ -2949,7 +3029,11 @@ impl Render for EchoApp {
             .when_some(help_modal, |el, modal| el.child(modal))
             .when_some(context_menu, |el, menu| el.child(menu))
             .when_some(track_menu, |el, menu| el.child(menu))
-            .when_some(prompt_modal, |el, modal| el.child(modal))
+            .when_some(prompt_modal, |el, modal| el.child(modal));
+
+        // Adds the border and resize edges when the compositor refuses to draw them; a
+        // pass-through when it does.
+        views::window_frame(root, window, frame_palette)
     }
 }
 
@@ -2988,6 +3072,12 @@ fn main() {
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
         cx.set_app_identity("com.echo.app", "echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
+        // The keymap mirrors the TUI's, so it is ctrl-based everywhere. cmd-q is the one chord
+        // a Mac user will reach for without thinking, and nothing else provides it — the app
+        // installs no application menu.
+        if cfg!(target_os = "macos") {
+            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        }
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
             // Everything else is scoped to the lists so plain letters can type into the
@@ -3098,14 +3188,20 @@ fn main() {
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                // The app draws its own themed titlebar (views::titlebar); the native one
-                // is hidden on Windows/macOS. Linux keeps server decorations, so there the
-                // custom bar is simply not rendered.
+                // The app draws its own themed titlebar (views::titlebar) on every platform;
+                // the native one is hidden on Windows/macOS.
                 titlebar: Some(gpui::TitlebarOptions {
                     title: Some("echo".into()),
                     appears_transparent: true,
                     traffic_light_position: Some(gpui::point(px(9.0), px(9.0))),
                 }),
+                // Asked for explicitly on Linux so the look is the same under every window
+                // manager. Leaving it to the platform gives a native bar on the compositors
+                // that implement xdg-decoration and none at all on the ones that don't
+                // (GNOME/Mutter) — a second titlebar on some machines, zero on others.
+                // Client means the app owns moving and resizing: see views::window_frame.
+                window_decorations: cfg!(target_os = "linux")
+                    .then_some(gpui::WindowDecorations::Client),
                 // macOS: the app moves the window itself via start_window_move, which also
                 // avoids AppKit's titlebar-click delay. No-op elsewhere.
                 app_owns_titlebar_drag: true,
