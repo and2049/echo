@@ -173,10 +173,17 @@ fn is_fixed_library_row(id: &str) -> bool {
 }
 
 /// The custom titlebar: themed like the rest of the window, draggable, with caption buttons
-/// on Windows. macOS keeps its native traffic lights (the bar just insets past them) and
-/// only needs the drag/double-click plumbing done in Rust; Windows gets drag, double-click
-/// and snap layouts for free from the `HTCAPTION`/`HTMAXBUTTON` hit-tests. On Linux the
-/// window manager draws server-side decorations, so this view isn't rendered at all.
+/// on Windows and Linux. macOS keeps its native traffic lights (the bar just insets past them)
+/// and only needs the drag/double-click plumbing done in Rust; Windows gets drag, double-click
+/// and snap layouts for free from the `HTCAPTION`/`HTMAXBUTTON` hit-tests.
+///
+/// Linux needs every one of those by hand. gpui's Linux backends leave
+/// `on_hit_test_window_control` unimplemented, so `window_control_area` does nothing there and
+/// the caption buttons have to call `minimize_window`/`zoom_window`/`remove_window` themselves.
+/// Dragging uses the same mouse-down latch as macOS. This used to be skipped on Linux on the
+/// assumption the window manager would draw its own bar, but GNOME/Mutter does not implement
+/// xdg-decoration and forces client-side decorations, which left the window with no titlebar
+/// and no way to move or resize it. See [`window_frame`] for the resize edges.
 pub fn titlebar(
     app: &mut EchoApp,
     window: &mut Window,
@@ -212,9 +219,10 @@ pub fn titlebar(
             }
         })
         // AppKit neither drags nor double-click-zooms a transparent titlebar for us
-        // (`app_owns_titlebar_drag`), so do both by hand — the Zed latch pattern: arm on
-        // mouse-down, and the first real move starts the native window drag.
-        .when(cfg!(target_os = "macos"), |el| {
+        // (`app_owns_titlebar_drag`), and Linux has no titlebar hit-testing at all, so both do
+        // it by hand — the Zed latch pattern: arm on mouse-down, and the first real move starts
+        // the native window drag.
+        .when(cfg!(any(target_os = "macos", target_os = "linux")), |el| {
             el.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _window, _cx| this.titlebar_should_move = true),
@@ -235,6 +243,13 @@ pub fn titlebar(
                 }
             })
         })
+        // The window manager's own menu (Move, Resize, Always on Top, …), which a server-side
+        // titlebar would have offered on right-click.
+        .when(cfg!(target_os = "linux"), |el| {
+            el.on_mouse_down(MouseButton::Right, |event, window, _cx| {
+                window.show_window_menu(event.position);
+            })
+        })
         .child(
             div()
                 .flex()
@@ -244,7 +259,7 @@ pub fn titlebar(
                 .child(svg().path("icons/music-note.svg").size(px(14.0)).text_color(fg))
                 .child(div().text_xs().text_color(fg).child("echo")),
         )
-        .when(cfg!(target_os = "windows") && !fullscreen, |el| {
+        .when(CAPTION_BUTTONS && !fullscreen, |el| {
             el.child(
                 div()
                     .flex()
@@ -279,10 +294,14 @@ pub fn titlebar(
         })
 }
 
-/// A Windows caption button. No click handler: the `window_control_area` tag routes the
-/// click through `WM_NCHITTEST`, and gpui + `DefWindowProc` do the minimize/maximize/close.
-/// `occlude` is load-bearing — without it the surrounding Drag hitbox wins the hit-test and
-/// the button is dead.
+/// Windows and Linux draw their own caption buttons; macOS uses the native traffic lights.
+const CAPTION_BUTTONS: bool = cfg!(any(target_os = "windows", target_os = "linux"));
+
+/// A caption button. On Windows there is no click handler: the `window_control_area` tag routes
+/// the click through `WM_NCHITTEST`, and gpui + `DefWindowProc` do the minimize/maximize/close.
+/// Linux ignores that tag (gpui's backends leave `on_hit_test_window_control` unimplemented),
+/// so there the button drives the window directly. `occlude` is load-bearing on both — without
+/// it the surrounding Drag hitbox wins the hit-test and the button is dead.
 fn caption_button(
     id: &'static str,
     icon: &'static str,
@@ -299,6 +318,18 @@ fn caption_button(
         .group(id)
         .occlude()
         .window_control_area(area)
+        .when(cfg!(target_os = "linux"), |el| {
+            el.on_click(move |_event, window, cx| match area {
+                gpui::WindowControlArea::Min => window.minimize_window(),
+                gpui::WindowControlArea::Max => window.zoom_window(),
+                // Not `remove_window`, which drops the window without running
+                // `on_window_should_close` and would lose the saved window rectangle.
+                gpui::WindowControlArea::Close => {
+                    window.dispatch_action(Box::new(crate::Quit), cx)
+                }
+                gpui::WindowControlArea::Drag => {}
+            })
+        })
         .w(px(46.0))
         .h_full()
         .flex()
@@ -313,6 +344,99 @@ fn caption_button(
                 .text_color(fg)
                 .when(close, |el| el.group_hover(id, |style| style.text_color(gpui::white()))),
         )
+}
+
+/// Width of the invisible grab band along each window edge, and the square at each corner.
+const RESIZE_BAND: f32 = 6.0;
+const RESIZE_CORNER: f32 = 14.0;
+
+/// Wraps the whole app in the edges a window manager would normally provide.
+///
+/// A compositor that does not implement xdg-decoration — GNOME/Mutter, notably, which is the
+/// Ubuntu default — hands the window back as [`Decorations::Client`] and draws nothing itself:
+/// no titlebar, no borders, and crucially no resize handles, leaving the window stuck at its
+/// opening size. [`titlebar`] covers moving and the caption buttons; this covers resizing, by
+/// laying transparent strips over the window's edges that each start a native resize.
+///
+/// A pass-through everywhere else: Windows, macOS, and any Linux WM that does draw its own
+/// decorations all report [`Decorations::Server`], and then the real edges already work.
+pub fn window_frame(
+    root: impl IntoElement,
+    window: &mut Window,
+    palette: DesktopPalette,
+) -> AnyElement {
+    let decorations = window.window_decorations();
+    if matches!(decorations, gpui::Decorations::Server) {
+        return root.into_any_element();
+    }
+    // The strips live inside the window rather than in an outset shadow margin, so there is no
+    // client inset to reserve. Clearing it also keeps a stale one from a previous frame from
+    // shifting the surface.
+    window.set_client_inset(px(0.0));
+
+    let tiling = match decorations {
+        gpui::Decorations::Client { tiling } => tiling,
+        gpui::Decorations::Server => gpui::Tiling::default(),
+    };
+    let resizable = window.is_resizable();
+
+    // Edges are laid down first and corners on top, so the corners win where they overlap.
+    let edges: [(&'static str, gpui::ResizeEdge, bool); 8] = [
+        ("resize-top", gpui::ResizeEdge::Top, tiling.top),
+        ("resize-bottom", gpui::ResizeEdge::Bottom, tiling.bottom),
+        ("resize-left", gpui::ResizeEdge::Left, tiling.left),
+        ("resize-right", gpui::ResizeEdge::Right, tiling.right),
+        ("resize-top-left", gpui::ResizeEdge::TopLeft, tiling.top || tiling.left),
+        ("resize-top-right", gpui::ResizeEdge::TopRight, tiling.top || tiling.right),
+        ("resize-bottom-left", gpui::ResizeEdge::BottomLeft, tiling.bottom || tiling.left),
+        ("resize-bottom-right", gpui::ResizeEdge::BottomRight, tiling.bottom || tiling.right),
+    ];
+
+    div()
+        .relative()
+        .size_full()
+        // A 1px outline stands in for the frame the compositor is not drawing, so the window
+        // still reads as a window against a same-coloured background behind it.
+        .border_1()
+        .border_color(palette.border)
+        .child(root)
+        .children(edges.into_iter().filter_map(|(id, edge, tiled)| {
+            // A tiled edge is flush against a screen or neighbour and cannot be dragged.
+            (resizable && !tiled).then(|| resize_handle(id, edge))
+        }))
+        .into_any_element()
+}
+
+/// One transparent grab strip. `occlude` is what puts it above the app's own hitboxes; without
+/// it a list row or the playback bar under the edge would swallow the press.
+fn resize_handle(id: &'static str, edge: gpui::ResizeEdge) -> impl IntoElement {
+    use gpui::ResizeEdge as E;
+    let band = px(RESIZE_BAND);
+    let corner = px(RESIZE_CORNER);
+
+    div()
+        .id(id)
+        .occlude()
+        .absolute()
+        .cursor(match edge {
+            E::Top | E::Bottom => gpui::CursorStyle::ResizeUpDown,
+            E::Left | E::Right => gpui::CursorStyle::ResizeLeftRight,
+            E::TopLeft | E::BottomRight => gpui::CursorStyle::ResizeUpLeftDownRight,
+            E::TopRight | E::BottomLeft => gpui::CursorStyle::ResizeUpRightDownLeft,
+        })
+        .map(|el| match edge {
+            E::Top => el.top_0().left_0().w_full().h(band),
+            E::Bottom => el.bottom_0().left_0().w_full().h(band),
+            E::Left => el.top_0().left_0().h_full().w(band),
+            E::Right => el.top_0().right_0().h_full().w(band),
+            E::TopLeft => el.top_0().left_0().w(corner).h(corner),
+            E::TopRight => el.top_0().right_0().w(corner).h(corner),
+            E::BottomLeft => el.bottom_0().left_0().w(corner).h(corner),
+            E::BottomRight => el.bottom_0().right_0().w(corner).h(corner),
+        })
+        .on_mouse_down(MouseButton::Left, move |_event, window, _cx| {
+            window.start_window_resize(edge);
+        })
 }
 
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
@@ -4072,7 +4196,7 @@ fn library_placeholder(app: &EchoApp) -> AnyElement {
                 .flex()
                 .flex_col()
                 .items_center()
-                .font_family("Consolas")
+                .font_family(app.mono_font.clone())
                 .text_sm()
                 .line_height(relative(1.0))
                 .children(ECHO_LOGO.iter().enumerate().map(|(index, line)| {
