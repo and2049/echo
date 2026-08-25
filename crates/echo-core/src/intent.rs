@@ -79,9 +79,18 @@ pub fn play_library_entry(state: &mut AppState, index: usize) -> Option<AppEvent
             .tracks_for_playlist(&playlist.id, &state.data.local_library);
         return play_local_collection(tracks);
     }
+    let current_track_id = state.playback.playing_track_id.clone();
+    restore_or_snapshot_playlist_pref(state, &playlist.id);
+    // Note the context optimistically (the poll confirms later) so a shuffle/repeat toggle
+    // issued right after starting the play is attributed to this playlist, not the previous one.
+    state.playback.playing_context = Some(PlayingContext {
+        context_id: playlist.id.clone(),
+        is_album: false,
+    });
     Some(AppEvent::PlayContext {
         context_id: playlist.id,
         is_album: false,
+        current_track_id,
     })
 }
 
@@ -89,9 +98,15 @@ pub fn play_library_entry(state: &mut AppState, index: usize) -> Option<AppEvent
 pub fn play_album_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
     let album = state.data.saved_albums.get(index)?;
     state.ui.selected_playlist_index = index;
+    let current_track_id = state.playback.playing_track_id.clone();
+    state.playback.playing_context = Some(PlayingContext {
+        context_id: album.id.clone(),
+        is_album: true,
+    });
     Some(AppEvent::PlayContext {
         context_id: album.id.clone(),
         is_album: true,
+        current_track_id,
     })
 }
 
@@ -159,6 +174,14 @@ pub fn play_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
         context.playback_target_for_track(&track)?
     };
     note_playing_context(state, &target);
+    if let PlaybackTarget::SpotifyContext {
+        context_id,
+        is_album: false,
+    } = &target
+    {
+        let context_id = context_id.clone();
+        restore_or_snapshot_playlist_pref(state, &context_id);
+    }
     play_event_with_target(&track, target)
 }
 
@@ -268,6 +291,7 @@ pub fn previous_track(state: &AppState) -> AppEvent {
 
 pub fn toggle_shuffle(state: &mut AppState) -> AppEvent {
     state.playback.is_shuffled = !state.playback.is_shuffled;
+    persist_playlist_playback_pref(state);
     AppEvent::ToggleShuffle(state.playback.is_shuffled)
 }
 
@@ -279,7 +303,50 @@ pub fn cycle_repeat(state: &mut AppState) -> AppEvent {
         _ => "Off",
     };
     state.playback.repeat_mode = mode.to_string();
+    persist_playlist_playback_pref(state);
     AppEvent::SetRepeatMode(mode.to_string())
+}
+
+/// Records the current shuffle/repeat as the playing playlist's preference. No-op unless a
+/// non-album Spotify context is playing; Liked Songs is excluded because it can appear as an
+/// optimistic playing context without being a real playlist.
+fn persist_playlist_playback_pref(state: &mut AppState) {
+    let Some(context) = state.playback.playing_context.clone() else {
+        return;
+    };
+    if context.is_album || context.context_id == "LIKED_SONGS" {
+        return;
+    }
+    state.ui.library_config.playlist_playback.insert(
+        context.context_id,
+        crate::config::PlaylistPlaybackPref {
+            shuffle: state.playback.is_shuffled,
+            repeat: state.playback.repeat_mode.clone(),
+        },
+    );
+    state.save_library_config();
+}
+
+/// On playlist start: an existing preference is applied optimistically (the worker pushes it to
+/// the device once play succeeds); a playlist with no entry snapshots the current shuffle/repeat
+/// as its preference, mimicking Spotify's implicit per-playlist stickiness.
+fn restore_or_snapshot_playlist_pref(state: &mut AppState, context_id: &str) {
+    if context_id == "LIKED_SONGS" {
+        return;
+    }
+    if let Some(pref) = state.ui.library_config.playlist_playback.get(context_id) {
+        state.playback.is_shuffled = pref.shuffle;
+        state.playback.repeat_mode = pref.repeat.clone();
+    } else {
+        state.ui.library_config.playlist_playback.insert(
+            context_id.to_string(),
+            crate::config::PlaylistPlaybackPref {
+                shuffle: state.playback.is_shuffled,
+                repeat: state.playback.repeat_mode.clone(),
+            },
+        );
+        state.save_library_config();
+    }
 }
 
 /// Seeks to an absolute position; `None` when nothing seekable is playing.
@@ -2196,6 +2263,172 @@ mod tests {
             Some(TrackListContext::generated("TOP_TRACKS", "Top Tracks"));
         assert!(play_track_at(&mut state, 0).is_some());
         assert_eq!(state.playback.playing_context, None);
+    }
+
+    fn playlist_tracklist_state(context_id: &str) -> AppState {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.active_tracklist_context = Some(TrackListContext::playlist(
+            context_id.to_string(),
+            "Playlist".to_string(),
+            "owner".to_string(),
+            "owner-id".to_string(),
+            None,
+        ));
+        state.data.tracks = vec![spotify_track("track:a")];
+        state
+    }
+
+    #[test]
+    fn shuffle_and_repeat_toggles_record_the_playing_playlists_pref() {
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.playback.playing_context = Some(PlayingContext {
+            context_id: "playlist-1".to_string(),
+            is_album: false,
+        });
+
+        toggle_shuffle(&mut state);
+        cycle_repeat(&mut state);
+
+        assert_eq!(
+            state.ui.library_config.playlist_playback.get("playlist-1"),
+            Some(&crate::config::PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Context".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn toggles_record_nothing_for_albums_liked_songs_or_no_context() {
+        for context in [
+            None,
+            Some(PlayingContext {
+                context_id: "album-1".to_string(),
+                is_album: true,
+            }),
+            Some(PlayingContext {
+                context_id: "LIKED_SONGS".to_string(),
+                is_album: false,
+            }),
+        ] {
+            let mut state = AppState::new();
+            state.ui.library_config = crate::config::LibraryConfig::default();
+            state.playback.playing_context = context;
+            toggle_shuffle(&mut state);
+            cycle_repeat(&mut state);
+            assert!(state.ui.library_config.playlist_playback.is_empty());
+        }
+    }
+
+    #[test]
+    fn playlist_play_applies_the_saved_pref_optimistically() {
+        let mut state = playlist_tracklist_state("playlist-1");
+        state.ui.library_config.playlist_playback.insert(
+            "playlist-1".to_string(),
+            crate::config::PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Context".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            play_track_at(&mut state, 0),
+            Some(AppEvent::PlayTrack { .. })
+        ));
+        assert!(state.playback.is_shuffled);
+        assert_eq!(state.playback.repeat_mode, "Context");
+    }
+
+    #[test]
+    fn playlist_play_snapshots_current_state_when_no_pref_exists() {
+        let mut state = library_with(vec![library_playlist("playlist-1")]);
+        state.playback.is_shuffled = true;
+        let index = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(
+                node,
+                LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
+            ))
+            .expect("row exists");
+
+        assert!(matches!(
+            play_library_entry(&mut state, index),
+            Some(AppEvent::PlayContext { is_album: false, .. })
+        ));
+        assert_eq!(
+            state.ui.library_config.playlist_playback.get("playlist-1"),
+            Some(&crate::config::PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Off".to_string(),
+            })
+        );
+        assert_eq!(
+            state.playback.playing_context,
+            Some(PlayingContext {
+                context_id: "playlist-1".to_string(),
+                is_album: false,
+            })
+        );
+    }
+
+    #[test]
+    fn context_plays_carry_the_ui_track_id_for_the_post_play_sync() {
+        let mut state = library_with(vec![library_playlist("playlist-1")]);
+        state.playback.playing_track_id = Some("old-track".to_string());
+        let index = state
+            .data
+            .library_view
+            .iter()
+            .position(|node| matches!(
+                node,
+                LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
+            ))
+            .expect("row exists");
+        assert!(matches!(
+            play_library_entry(&mut state, index),
+            Some(AppEvent::PlayContext { current_track_id: Some(ref id), .. }) if id == "old-track"
+        ));
+
+        let mut state = AppState::new();
+        state.playback.playing_track_id = Some("old-track".to_string());
+        state.data.saved_albums = vec![crate::models::Album {
+            id: "album-1".to_string(),
+            name: "Album".to_string(),
+            artists: "Artist".to_string(),
+            image_url: None,
+            thumb_url: None,
+            release_year: "2024".to_string(),
+            release_date: None,
+            track_count: None,
+        }];
+        assert!(matches!(
+            play_album_at(&mut state, 0),
+            Some(AppEvent::PlayContext { current_track_id: Some(ref id), is_album: true, .. }) if id == "old-track"
+        ));
+    }
+
+    #[test]
+    fn liked_songs_play_neither_applies_nor_snapshots_a_pref() {
+        let mut state = playlist_tracklist_state("LIKED_SONGS");
+        state.ui.library_config.playlist_playback.insert(
+            "LIKED_SONGS".to_string(),
+            crate::config::PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Track".to_string(),
+            },
+        );
+
+        assert!(play_track_at(&mut state, 0).is_some());
+        assert!(!state.playback.is_shuffled);
+        assert_eq!(state.playback.repeat_mode, "Off");
+
+        let mut state = playlist_tracklist_state("LIKED_SONGS");
+        assert!(play_track_at(&mut state, 0).is_some());
+        assert!(state.ui.library_config.playlist_playback.is_empty());
     }
 
     #[test]

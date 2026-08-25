@@ -1,0 +1,19 @@
+[default]
+primary = "Cyan"
+secondary = "Yellow"
+background = "Reset"
+text = "White"
+text_muted = "DarkGray"
+highlight_bg = "White"
+highlight_fg = "Black"
+error = "Red"
+
+[custom]
+primary = "#ff00ff"
+secondary = "#00ffff"
+background = "Reset"
+text = "#ffffff"
+text_muted = "#888888"
+highlight_bg = "#ff00ff"
+highlight_fg = "Black"
+error = "Red"

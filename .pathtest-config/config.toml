@@ -1,0 +1,88 @@
+[spotify_credentials]
+client_id = "b446d87a27894d3ea1bdbe1b78ea999b"
+client_secret = "ffa52a9baeff4f20be3021ab0cc2d587"
+
+[auth_tokens]
+access_token = "BQAFh2X6jhsgjF7lYXLtrsP_BxXSjZc5k0DvuFXLD5Q-s1Dgd5Lc1GZK9u8Hvvozt_18BTO7XX8H2k_5iDhtX4S7Ud3nwQ1ayUe8SwEDT-p6eGQkoNpzg8WUX-GLhUyEB_g5Rknsyt6ZGgZnaBhGktRond6ev8lJsUKc1nejl1sMVOnbHP1FXvdisP7Sncj3660gNN0kxGhOCDrESJaaUuotfyrnzqMeZMzvMieomtQTotKSpxoHe9h756dZi_OjC4zhOOHHEH_8Hhk93TDqFHkrlUOXTekM0egzR2VxW9JVHKV0xLWDQ4qd9A2j5wqsQ39dCoPJ3NsxQUCPaDHAW5C2s7LwrDWhyqxx3QO94sbJwpaKtWGdtGkpo6kvONhKbI8"
+refresh_token = "AQAghhojCC-Qkftlr8YlbxyslYjjcyNEKcr5s3Kg6WdYzNSec6n6mpJ7q07V1f_SbOr95YqsV-zrXT-CkcerOnBtFCYgFkZrRYT99R6wAZWToJpGN9xdD0q1Io73F_vFnDg"
+
+[library]
+pinned = []
+sort_mode = "Default"
+playlist_order = [
+    "local-playlist:ee52d428a04337fd",
+    "67aTlEgmG0YHusLkk3sidZ",
+    "6ASe0X7g2m3m5N4fkfhT92",
+    "5QjCelFwWsQRe2pzbU8Nke",
+    "64fdvez5SPHHG9BR4rXD4h",
+    "00J5O3GfvfVN4LUNXuN77y",
+    "7ecZ66khmJUqPwzW2l8hbm",
+    "0NnnhQP0BvJKxNxnmvVjBL",
+    "6Tv2KDjDJhbPUvf393SGnF",
+    "4opRztcgX33JZZRjx9Shfl",
+    "2bANagNa8TpeYN0viyScGn",
+    "2z46ilyIXiGYgQ18AtPGkc",
+]
+active_theme = "gruvbox"
+track_index_base = 1
+language = "en"
+cover_img_pixels = 0
+condensed_lyrics_enabled = true
+vis_bins = 9
+enable_visualizer = false
+volume = 81
+relative_line_numbers = false
+library_thumbnails = false
+bitrate = 320
+normalisation = true
+normalisation_pregain = 3.0
+sidebar_width = 254.0
+top_items_range = "medium"
+
+[[library.folders]]
+name = "."
+is_open = true
+playlists = [
+    "2gbEDMlwCdB6djG87UcnzZ",
+    "1LeYRLFsOSIsCht3FjF1bR",
+    "0dhOJtlL6v5mL5oUOUv3z9",
+    "5WxfMJ7XrfhZ8Z1rI00pga",
+    "3KbTiTcd9PaRTLtt3aDq68",
+    "4y0bKtOl3d4GRrSJmGi9rR",
+]
+
+[[library.folders]]
+name = "2"
+is_open = true
+playlists = [
+    "23n3IEUhxhok6rYJwdkELs",
+    "4SOFMpIBAjNGUVJJKpXGcQ",
+    "2kSgZiMJVBCOcw57h4IYhG",
+    "4DZV8zC96sJoFoD17JVWe2",
+    "52lBuwXTABC3pHSyTi6zjq",
+    "2m9U4wsTRxGzjWguWXokF7",
+    "6Vek5e2QUXsfvr8Bkad7LY",
+    "6BAKg0sS15XR5MJgluMbL4",
+    "7mEy1XYXOfbSxU0ZsAFHgg",
+]
+
+[[library.folders]]
+name = "a"
+is_open = true
+playlists = [
+    "62JQVCEqXczBIXFdCF08GD",
+    "1WAa27kP9PQUvBI9vsRNe0",
+    "30sH8nBuQbe6ai0EQ0s29U",
+    "6th8ccN1ny4zeUGi4as5GT",
+    "4UUpWlZfQB33oxVaTFO6pe",
+    "5xhnzwxGnPxxuSbJxB6aBV",
+    "02GDBOIZ4v9XR43wkWnMCV",
+]
+
+[library.keybindings]
+
+[library.window_bounds]
+x = 100.0
+y = 100.0
+width = 1200.0
+height = 800.0
