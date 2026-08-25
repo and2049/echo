@@ -24,6 +24,10 @@ pub enum AppEvent {
     PlayContext {
         context_id: String,
         is_album: bool,
+        /// The UI's playing track id at dispatch time — the post-play sync's reference for
+        /// telling a real track change apart from Spotify's eventually-consistent echo of the
+        /// pre-command track.
+        current_track_id: Option<String>,
     },
     StartAuth,
     Quit,
