@@ -198,6 +198,12 @@ pub fn titlebar(
     let fullscreen = window.is_fullscreen();
     let maximized = window.is_maximized();
     let corners = client_corners(window);
+    // The close button's hover fill reaches the window's top-right corner, so it rounds
+    // itself too — DWM's radius on Windows 11, ours on a client-decorated Linux window.
+    let close_radius = match corners {
+        Some(tiling) => (!tiling.top && !tiling.right).then(|| px(CLIENT_CORNER_RADIUS)),
+        None => (cfg!(target_os = "windows") && !maximized).then(|| px(WIN_CORNER_RADIUS)),
+    };
 
     div()
         .id("titlebar")
@@ -275,6 +281,7 @@ pub fn titlebar(
                         gpui::WindowControlArea::Min,
                         fg,
                         palette,
+                        None,
                     ))
                     .child(caption_button(
                         "caption-max",
@@ -286,6 +293,7 @@ pub fn titlebar(
                         gpui::WindowControlArea::Max,
                         fg,
                         palette,
+                        None,
                     ))
                     .child(caption_button(
                         "caption-close",
@@ -293,6 +301,7 @@ pub fn titlebar(
                         gpui::WindowControlArea::Close,
                         fg,
                         palette,
+                        close_radius,
                     )),
             )
         })
@@ -312,6 +321,7 @@ fn caption_button(
     area: gpui::WindowControlArea,
     fg: gpui::Hsla,
     palette: DesktopPalette,
+    top_right_radius: Option<gpui::Pixels>,
 ) -> impl IntoElement {
     let close = matches!(area, gpui::WindowControlArea::Close);
     // The close button hovers Windows-red with a white glyph; the rest get a faint wash.
@@ -339,6 +349,7 @@ fn caption_button(
         .flex()
         .items_center()
         .justify_center()
+        .when_some(top_right_radius, |el, r| el.rounded_tr(r))
         .hover(|style| style.bg(hover_bg))
         .active(|style| style.bg(hover_bg))
         .child(
@@ -353,6 +364,8 @@ fn caption_button(
 /// Corner radius and drop-shadow depth for a client-decorated window, matching what GNOME and
 /// Zed use so echo sits alongside them without looking off.
 const CLIENT_CORNER_RADIUS: f32 = 10.0;
+/// The radius DWM clips an unmaximized window to on Windows 11.
+const WIN_CORNER_RADIUS: f32 = 8.0;
 const CLIENT_SHADOW: f32 = 10.0;
 /// Grab bands, sized to the transparent shadow margin so they sit beside the visible window
 /// rather than over its content. The corners reach a little further in, as window managers' do.
