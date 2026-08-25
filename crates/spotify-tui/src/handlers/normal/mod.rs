@@ -456,8 +456,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         }
         KeyCode::Char('s') => {
-            state.playback.is_shuffled = !state.playback.is_shuffled;
-            return Some(AppEvent::ToggleShuffle(state.playback.is_shuffled));
+            return Some(echo_core::intent::toggle_shuffle(state));
         }
         KeyCode::Char('v') => {
             state.ui.mode = echo_core::app::AppMode::Visual;

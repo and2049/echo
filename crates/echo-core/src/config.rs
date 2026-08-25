@@ -407,6 +407,23 @@ pub struct LibraryConfig {
     /// The `time_range` window used by the Top Tracks / Top Artists browse lists.
     #[serde(default)]
     pub top_items_range: crate::models::TopItemsRange,
+    /// Remembered shuffle/repeat per Spotify playlist id, restored when that playlist starts
+    /// playing. Kept last so the TOML tables serialize after the scalar fields.
+    #[serde(default)]
+    pub playlist_playback: std::collections::HashMap<String, PlaylistPlaybackPref>,
+}
+
+/// One playlist's remembered shuffle/repeat, applied to the device when it starts playing.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PlaylistPlaybackPref {
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default = "default_repeat_off")]
+    pub repeat: String, // "Off" | "Context" | "Track"
+}
+
+fn default_repeat_off() -> String {
+    "Off".to_string()
 }
 
 /// A saved desktop window rectangle, in logical pixels.
@@ -467,6 +484,7 @@ impl Default for LibraryConfig {
             sidebar_width: None,
             window_bounds: None,
             top_items_range: crate::models::TopItemsRange::default(),
+            playlist_playback: Default::default(),
         }
     }
 }
@@ -789,6 +807,29 @@ mod tests {
             .expect("system time should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("echo-{}-{}-{}", name, std::process::id(), nanos))
+    }
+
+    #[test]
+    fn playlist_playback_prefs_survive_a_toml_round_trip() {
+        let mut config = AppConfig::default();
+        config.library.playlist_playback.insert(
+            "playlist-1".to_string(),
+            PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Context".to_string(),
+            },
+        );
+
+        let serialized = toml::to_string_pretty(&config).expect("config serializes");
+        let parsed: AppConfig = toml::from_str(&serialized).expect("config parses back");
+
+        assert_eq!(
+            parsed.library.playlist_playback.get("playlist-1"),
+            Some(&PlaylistPlaybackPref {
+                shuffle: true,
+                repeat: "Context".to_string(),
+            })
+        );
     }
 
     #[test]

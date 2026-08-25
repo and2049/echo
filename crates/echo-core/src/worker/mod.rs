@@ -13,8 +13,8 @@ pub mod volume;
 use crate::config::AppConfig;
 use crate::events::{AppEvent, WorkerEvent};
 use crate::models::{
-    LocalLibrary, LocalPlaylist, LocalPlaylistEntry, PlaybackItem, PlaybackTarget, Track,
-    TrackSource, stable_local_playlist_id,
+    LocalLibrary, LocalPlaylist, LocalPlaylistEntry, PlaybackItem, PlaybackTarget, PlayingContext,
+    Track, TrackSource, stable_local_playlist_id,
 };
 use api::SpotifyWorker;
 use local_playback::{
@@ -154,6 +154,99 @@ async fn emit_audio_output_unavailable(
 
 async fn emit_audio_output_recovered(tx: &mpsc::Sender<WorkerEvent>) {
     let _ = tx.send(WorkerEvent::AudioOutputRecovered).await;
+}
+
+/// One `playback_snapshot_from_client` result: (is_playing, is_shuffled, repeat_mode, volume,
+/// device_name, progress_ms, item, context).
+type PlaybackSyncSnapshot = (
+    bool,
+    bool,
+    String,
+    Option<u32>,
+    String,
+    u32,
+    Option<PlaybackItem>,
+    Option<PlayingContext>,
+);
+
+const SYNC_RETRY_ATTEMPTS: u32 = 8;
+
+/// Delay before retry `attempt` of the post-command playback sync. Attempt 0 fires immediately;
+/// the total sleep budget is ≈7s — Spotify's /me/player usually converges within a couple of
+/// seconds of a play command, but slow devices have been observed taking noticeably longer.
+fn sync_retry_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(250 * u64::from(attempt))
+}
+
+/// Appends one sync task's report to the sync debug log, recreating the file when it grows
+/// past ~1MB. Appending (rather than overwriting per task) keeps failed syncs inspectable
+/// after later successful ones.
+fn write_sync_log(log: &str) {
+    use std::io::Write;
+    let path = crate::config::debug_log_path("echo-debug-sync.log");
+    if std::fs::metadata(&path).map(|meta| meta.len() > 1_000_000).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{log}");
+    }
+}
+
+/// Whether a post-command sync snapshot represents the new playback state, as opposed to
+/// Spotify's eventually-consistent echo of the pre-command track (which must be retried, not
+/// published — publishing it re-seeds the progress ticker and freezes the bar on the old song).
+fn should_publish_sync_snapshot(
+    previous_track_id: Option<&str>,
+    item_id: Option<&str>,
+    progress_ms: u32,
+    allow_same_track_reset: bool,
+) -> bool {
+    let track_changed = previous_track_id != item_id;
+    let same_track_reset = allow_same_track_reset && item_id.is_some() && progress_ms <= 3_000;
+    item_id.is_some() && (track_changed || same_track_reset || previous_track_id.is_none())
+}
+
+async fn send_sync_snapshot(
+    tx: &mpsc::Sender<WorkerEvent>,
+    output_available: &Arc<AtomicBool>,
+    snapshot: PlaybackSyncSnapshot,
+) {
+    let (is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item, context) =
+        snapshot;
+    let _ = tx
+        .send(WorkerEvent::SyncPlaybackState {
+            is_playing: is_playing && output_available.load(Ordering::SeqCst),
+            is_shuffled,
+            repeat_mode,
+            volume,
+            device_name,
+            progress_ms,
+            item,
+            context,
+        })
+        .await;
+}
+
+/// After a playlist starts playing, pushes its remembered shuffle/repeat to the device. The
+/// intents write the preference into config before dispatching the play event, so a fresh load
+/// here always sees it; playlists without an entry (and albums/sentinels, which are never
+/// written) are a no-op. Errors are swallowed like the interactive shuffle/repeat arms — the
+/// next status poll shows the truth.
+async fn apply_playlist_playback_pref(sp: &mut SpotifyWorker, context_id: &str) {
+    let Some(pref) = AppConfig::load()
+        .library
+        .playlist_playback
+        .remove(context_id)
+    else {
+        return;
+    };
+    let _ = sp.toggle_shuffle(pref.shuffle).await;
+    let repeat = match pref.repeat.as_str() {
+        "Track" => rspotify::model::RepeatState::Track,
+        "Context" => rspotify::model::RepeatState::Context,
+        _ => rspotify::model::RepeatState::Off,
+    };
+    let _ = sp.set_repeat_mode(repeat).await;
 }
 
 fn resolve_local_queue_tracks(track_ids: &[String], library: &LocalLibrary) -> Vec<Track> {
@@ -305,6 +398,53 @@ pub(crate) fn reorder_insert_before(from: usize, to: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_snapshot_publish_gate_rejects_the_stale_pre_command_track() {
+        // Track actually changed → publish.
+        assert!(should_publish_sync_snapshot(
+            Some("old"),
+            Some("new"),
+            60_000,
+            true
+        ));
+        // Same track restarted from the top → publish only when the caller allows it.
+        assert!(should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            1_000,
+            true
+        ));
+        assert!(!should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            1_000,
+            false
+        ));
+        // Same track mid-song: Spotify's eventually-consistent echo → retry, never publish.
+        assert!(!should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            60_000,
+            true
+        ));
+        // Nothing was playing before → the first snapshot is truth.
+        assert!(should_publish_sync_snapshot(None, Some("new"), 60_000, false));
+        // No item in the snapshot → nothing to show yet.
+        assert!(!should_publish_sync_snapshot(Some("old"), None, 0, true));
+    }
+
+    #[test]
+    fn sync_retry_budget_covers_spotify_propagation() {
+        assert_eq!(sync_retry_delay(0), std::time::Duration::ZERO);
+        for attempt in 1..SYNC_RETRY_ATTEMPTS {
+            assert!(sync_retry_delay(attempt) > sync_retry_delay(attempt - 1));
+        }
+        let total: std::time::Duration = (0..SYNC_RETRY_ATTEMPTS).map(sync_retry_delay).sum();
+        // A shorter budget than Spotify's /me/player propagation window re-introduces the
+        // stale now-playing bar; keep at least ~5s of total retry sleep.
+        assert!(total >= std::time::Duration::from_secs(5));
+    }
 
     #[test]
     fn reorder_insert_before_maps_post_move_indices() {
@@ -487,32 +627,46 @@ impl Worker {
         allow_same_track_reset: bool,
         output_available: Arc<AtomicBool>,
     ) {
-        if sync_inflight.swap(true, Ordering::SeqCst) {
-            return;
-        }
-
         tokio::spawn(async move {
-            let mut log = String::from("=== spawn_playback_sync started ===\n");
+            // Wait for the flag instead of dropping the sync: a periodic-poll task in flight at
+            // play time would otherwise swallow the one sync that can show the new track. The
+            // bound covers a concurrent post-command sync's full retry budget.
+            let mut acquired = false;
+            for _ in 0..40 {
+                if !sync_inflight.swap(true, Ordering::SeqCst) {
+                    acquired = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            if !acquired {
+                write_sync_log(&format!(
+                    "=== spawn_playback_sync at epoch {}s: DROPPED — inflight flag held >10s ===",
+                    crate::config::now_epoch_secs()
+                ));
+                return;
+            }
 
-            for attempt in 0..3u32 {
+            let mut log = format!(
+                "=== spawn_playback_sync at epoch {}s (previous_track_id={:?}, allow_same_track_reset={}) ===\n",
+                crate::config::now_epoch_secs(),
+                previous_track_id,
+                allow_same_track_reset
+            );
+            let mut last_snapshot = None;
+
+            for attempt in 0..SYNC_RETRY_ATTEMPTS {
                 if attempt > 0 {
-                    log.push_str(&format!("Attempt {}: waiting 500ms...\n", attempt));
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    let delay = sync_retry_delay(attempt);
+                    log.push_str(&format!("Attempt {}: waiting {:?}...\n", attempt, delay));
+                    tokio::time::sleep(delay).await;
                 }
 
                 let result = SpotifyWorker::playback_snapshot_from_client(&client).await;
 
                 match result {
-                    Ok(Some((
-                        is_playing,
-                        is_shuffled,
-                        repeat_mode,
-                        volume,
-                        device_name,
-                        progress_ms,
-                        item,
-                        context,
-                    ))) => {
+                    Ok(Some(snapshot)) => {
+                        let (is_playing, _, _, _, _, progress_ms, ref item, _) = snapshot;
                         let item_id = item.as_ref().map(|item| item.id.clone());
                         if let Some(item) = item.as_ref() {
                             log.push_str(&format!(
@@ -523,35 +677,24 @@ impl Worker {
                             log.push_str("  → playback.item is missing or unparseable\n");
                         }
 
-                        let track_changed = previous_track_id.as_ref() != item_id.as_ref();
-                        let same_track_reset =
-                            allow_same_track_reset && item_id.is_some() && progress_ms <= 3_000;
-
-                        if item.is_some()
-                            && (track_changed || same_track_reset || previous_track_id.is_none())
-                        {
+                        let publish = should_publish_sync_snapshot(
+                            previous_track_id.as_deref(),
+                            item_id.as_deref(),
+                            progress_ms,
+                            allow_same_track_reset,
+                        );
+                        last_snapshot = Some(snapshot);
+                        if publish {
                             log.push_str(&format!(
                                 "  → Sending SyncPlaybackState (track_id={:?})\n",
                                 item_id
                             ));
-                            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-sync.log"), &log);
+                            write_sync_log(&log);
                             sync_inflight.store(false, Ordering::SeqCst);
-                            let _ = tx
-                                .send(WorkerEvent::SyncPlaybackState {
-                                    is_playing: is_playing
-                                        && output_available.load(Ordering::SeqCst),
-                                    is_shuffled,
-                                    repeat_mode,
-                                    volume,
-                                    device_name,
-                                    progress_ms,
-                                    item,
-                                    context,
-                                })
-                                .await;
+                            send_sync_snapshot(&tx, &output_available, last_snapshot.take().expect("snapshot just stored")).await;
                             return;
                         }
-                        // Missing item or Spotify still reported the previous track - retry
+                        // Spotify still reported the previous track - retry
                     }
                     Ok(None) => {
                         log.push_str(
@@ -564,8 +707,18 @@ impl Worker {
                 }
             }
 
-            log.push_str("All 3 attempts exhausted without a valid duration_ms. Giving up.\n");
-            let _ = std::fs::write(crate::config::debug_log_path("echo-debug-sync.log"), &log);
+            // Exhausted: if we ever got a snapshot, publish it anyway. At this point the API's
+            // report is the best truth available — a frozen pre-command bar for the next 30s
+            // (until the periodic poll) would be strictly worse.
+            if let Some(snapshot) = last_snapshot {
+                log.push_str("All attempts exhausted; publishing the last snapshot as fallback.\n");
+                write_sync_log(&log);
+                sync_inflight.store(false, Ordering::SeqCst);
+                send_sync_snapshot(&tx, &output_available, snapshot).await;
+                return;
+            }
+            log.push_str("All attempts exhausted without any playback snapshot. Giving up.\n");
+            write_sync_log(&log);
             sync_inflight.store(false, Ordering::SeqCst);
         });
     }
@@ -1125,6 +1278,9 @@ impl Worker {
                                                 duration_ms,
                                                 cover_url: image_url.clone(),
                                             }).await;
+                                            if let PlaybackTarget::SpotifyContext { context_id, is_album: false } = &target {
+                                                apply_playlist_playback_pref(sp, context_id).await;
+                                            }
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayTrack failed: {:?}", e));
@@ -1136,7 +1292,7 @@ impl Worker {
                                     }
                                 }
                             }
-                            AppEvent::PlayContext { context_id, is_album } => {
+                            AppEvent::PlayContext { context_id, is_album, current_track_id: ui_current_track_id } => {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let now = Instant::now();
                                     let debounce_key = PlayDebounceKey::PlayContext(context_id.clone());
@@ -1164,9 +1320,19 @@ impl Worker {
                                             if self.spotify_output_available.load(Ordering::SeqCst) {
                                                 emit_audio_output_recovered(&self.tx).await;
                                             }
+                                            if !is_album {
+                                                apply_playlist_playback_pref(sp, &context_id).await;
+                                            }
                                             // No track metadata here — the status sync fills in
-                                            // the now-playing item.
-                                            Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), current_track_id.clone(), true, self.spotify_output_available.clone());
+                                            // the now-playing item. The UI's track id is the
+                                            // sync's reference for spotting the real change; the
+                                            // worker-local id can be stale after context plays.
+                                            Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), ui_current_track_id.or_else(|| current_track_id.clone()), true, self.spotify_output_available.clone());
+                                            // Backstop: pull the next periodic poll forward so
+                                            // that even if the sync above exhausts its budget on
+                                            // a slow /me/player, the bar is corrected in ~12s
+                                            // instead of the normal 30s cadence.
+                                            sync_interval.reset_after(std::time::Duration::from_secs(12));
                                         }
                                         Err(e) => {
                                             let _ = std::fs::write(crate::config::debug_log_path("echo-debug-worker.log"), format!("Worker PlayContext failed: {:?}", e));
