@@ -11,19 +11,23 @@
     <a href="README.zht.md">繁體中文</a>
 </p>
 
-echo is a terminal-based music player and Spotify client written in Rust. echo brings your local files and entire Spotify library, liked songs, playlists, and playback controls directly to your terminal with a beautiful, dynamic TUI featuring native image rendering.
+echo is a native desktop music player and Spotify client written in Rust. echo brings your entire Spotify library — liked songs, playlists, albums, and the artists you follow — plus your local music files into one fast, keyboard-friendly app, with full playback control, synced lyrics, and dynamic theming. A companion terminal client (`spotify`) ships in the same install for when you'd rather live in the terminal.
 
-![demo](demo.png)
+![echo desktop app](assets/echo-desktop.png)
 
 ## Features
 
-- **Terminal Image Support**: Renders high-quality album art and playlist covers directly in your terminal (supports Kitty, Sixel, and block fallbacks).
-- **Blazing Fast Liked Songs**: Uses a global caching architecture. Your entire Liked Songs library is cached locally (`~/.config/echo/cache.json`) for zero-latency, rate-limit-free scrolling, even with thousands of saved tracks.
-- **Library Management**: Create, rename, delete, and organize playlists into folders.
-- **Local Music Support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
-- **Responsive Playback Controls**: Full control over playback, queue, shuffle, repeat, and volume.
-- **Search**: Fast global search for Spotify catalog items and scanned local tracks.
-- **What's New**: A feed of recent albums and singles from the artists you follow, built from cached artist data and refreshed at most every 6 hours.
+- **Native desktop app**: Built on GPUI (Zed's UI framework) for a fast, GPU-accelerated interface that runs on Windows, macOS, and Linux. Drive it with the mouse or entirely from the keyboard.
+- **Your whole library**: Playlists, albums, and followed artists in one sidebar, with Top Tracks, Recently Played, and Top Artists views.
+- **Full playback control**: Play/pause, next/previous, seek, shuffle, repeat, volume, queue, and device switching from the now-playing bar.
+- **Synced lyrics**: Time-synced lyrics inline in the player bar or as a full-screen view.
+- **What's New**: A feed of recent albums and singles from the artists you follow, refreshed at most every 6 hours.
+- **Blazing fast Liked Songs**: Your entire Liked Songs library is cached locally (`~/.config/echo/cache.json`) for zero-latency, rate-limit-free scrolling, even with thousands of saved tracks.
+- **Library management**: Create, rename, delete, and organize playlists into folders; reorder tracks in your own playlists.
+- **Local music support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
+- **Search**: Fast global search (`ctrl-k`) across the Spotify catalog and your scanned local tracks.
+- **Dynamic theming**: Ship-with themes plus live theme editing — see [Themes](#themes).
+- **Terminal client**: The same install also puts a full-featured `spotify` TUI on your `PATH` — see [Terminal client (TUI)](#terminal-client-tui).
 
 ## Setup
 
@@ -109,20 +113,44 @@ sudo apt-get install -y --no-install-recommends \
 ```bash
 git clone https://github.com/and2049/echo.git
 cd echo
-cargo build --release
+cargo build --release -p echo-desktop -p spotify-tui
 ```
 
-Run the binary:
+Run the desktop app or the terminal client:
 
 ```bash
-./target/release/spotify
+./target/release/echo-desktop   # desktop app
+./target/release/spotify        # terminal client
 ```
+
+A bare `cargo build --release` (or `cargo run`) builds only the `spotify` terminal client — the workspace's default member — so name `-p echo-desktop` to build the desktop app.
 
 > The terminal command is `spotify` — the previous name collided with the shell builtin `echo`. Configuration and caches still live in `~/.config/echo/`, so existing setups keep working after the rename. On Windows, if the official Spotify client's directory happens to be on your `PATH`, make sure `%USERPROFILE%\.cargo\bin` (or wherever you installed this binary) comes first.
 
 On first run, echo will prompt you to enter your `Client ID` and `Client Secret`, then open your browser to authenticate with Spotify.
 
-## Navigation & Keybindings
+## Desktop App
+
+The desktop app works with the mouse — click a playlist, artist, or track to open it, use the controls in the now-playing bar, and drag tracks to reorder your own playlists. It's also fully keyboard-driven. Press `?` at any time for the in-app shortcut overlay, `ctrl-,` for settings, and `t` to switch themes. The keybindings mirror the terminal client below.
+
+**Navigation**: `j` / `k` / `↓` / `↑` to move, `gg` / `G` to jump to first / last, `ctrl-b` / `ctrl-f` to page, `ctrl-u` / `ctrl-d` for half a page, `enter` / `z` to open, `h` / `esc` to go back, `←` / `→` to move focus between panes, `tab` to switch tabs, `gc` to jump to the playing track.
+
+**Playback**: `space` play/pause, `[` / `]` (or `ctrl-←` / `ctrl-→`) previous / next, `,` / `.` seek, `-` / `=` volume, `shift-M` mute, `s` / `r` shuffle / repeat, `shift-D` device menu, `shift-L` full-screen lyrics, `ctrl-shift-L` lyrics in the player bar.
+
+**Library**: `l` like/unlike, `a` add to playlist, `shift-A` track actions, `q` / `shift-Q` queue, `shift-J` / `shift-K` move a track within your own playlist, `dd` delete, `v` select a range, `m` pin, `c` / `e` create / rename.
+
+**Finding things**: `ctrl-k` global search, `/` filter the current list, `n` / `shift-N` next / previous match, `:` command bar, `t` themes, `?` help, `ctrl-q` quit.
+
+The `:` command bar accepts the same commands as the terminal client — see [Commands](#commands).
+
+## Terminal client (TUI)
+
+The same install also ships `spotify`, a full-featured terminal client with native in-terminal image rendering. It shares echo's cache, config, playback engine, and commands with the desktop app.
+
+![echo terminal client](assets/echo-tui.png)
+
+- **Terminal image support**: Renders high-quality album art and playlist covers directly in your terminal (supports Kitty, Sixel, and half-block fallbacks).
+- **Everything the desktop app does**: the same library, search, local music, playback, and `:` commands, driven entirely from the keyboard.
 
 echo is heavily keyboard-driven. 
 
