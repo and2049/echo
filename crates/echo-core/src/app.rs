@@ -15,6 +15,7 @@ pub struct UIState {
     pub active_view: ActiveView,
     pub is_running: bool,
     pub view_history: Vec<NavigationSnapshot>,
+    pub forward_history: Vec<NavigationSnapshot>,
     pub active_library_tab: LibraryTab,
     pub active_search_tab: SearchTab,
     pub active_browse_node: BrowseNode,
@@ -97,6 +98,7 @@ impl UIState {
             active_view: ActiveView::Library,
             is_running: true,
             view_history: Vec::new(),
+            forward_history: Vec::new(),
             active_library_tab: LibraryTab::Playlists,
             active_search_tab: SearchTab::Tracks,
             active_browse_node: BrowseNode::TopTracks,
@@ -338,6 +340,8 @@ pub enum ActiveView {
     WhatsNew,
 }
 
+const HISTORY_LIMIT: usize = 20;
+
 #[derive(Clone)]
 pub struct NavigationSnapshot {
     active_view: ActiveView,
@@ -508,9 +512,8 @@ impl AppState {
             .unwrap_or(0);
     }
 
-    pub fn push_view_history(&mut self) {
-        const HISTORY_LIMIT: usize = 20;
-        let snapshot = NavigationSnapshot {
+    fn navigation_snapshot(&self) -> NavigationSnapshot {
+        NavigationSnapshot {
             active_view: self.ui.active_view,
             selected_playlist_index: self.ui.selected_playlist_index,
             selected_track_index: self.ui.selected_track_index,
@@ -528,17 +531,10 @@ impl AppState {
             tracklist_image_url: self.data.tracklist_image_url.clone(),
             search_results: self.data.search_results.clone(),
             artist_page_data: self.data.artist_page_data.clone(),
-        };
-        if self.ui.view_history.len() == HISTORY_LIMIT {
-            self.ui.view_history.remove(0);
         }
-        self.ui.view_history.push(snapshot);
     }
 
-    pub fn pop_view_history(&mut self) -> bool {
-        let Some(snapshot) = self.ui.view_history.pop() else {
-            return false;
-        };
+    fn restore_navigation_snapshot(&mut self, snapshot: NavigationSnapshot) {
         self.ui.active_view = snapshot.active_view;
         self.ui.selected_playlist_index = snapshot.selected_playlist_index;
         self.ui.selected_track_index = snapshot.selected_track_index;
@@ -556,6 +552,38 @@ impl AppState {
         self.data.tracklist_image_url = snapshot.tracklist_image_url;
         self.data.search_results = snapshot.search_results;
         self.data.artist_page_data = snapshot.artist_page_data;
+    }
+
+    fn push_capped(stack: &mut Vec<NavigationSnapshot>, snapshot: NavigationSnapshot) {
+        if stack.len() == HISTORY_LIMIT {
+            stack.remove(0);
+        }
+        stack.push(snapshot);
+    }
+
+    pub fn push_view_history(&mut self) {
+        let snapshot = self.navigation_snapshot();
+        Self::push_capped(&mut self.ui.view_history, snapshot);
+        self.ui.forward_history.clear();
+    }
+
+    pub fn pop_view_history(&mut self) -> bool {
+        let Some(snapshot) = self.ui.view_history.pop() else {
+            return false;
+        };
+        let current = self.navigation_snapshot();
+        Self::push_capped(&mut self.ui.forward_history, current);
+        self.restore_navigation_snapshot(snapshot);
+        true
+    }
+
+    pub fn forward_view_history(&mut self) -> bool {
+        let Some(snapshot) = self.ui.forward_history.pop() else {
+            return false;
+        };
+        let current = self.navigation_snapshot();
+        Self::push_capped(&mut self.ui.view_history, current);
+        self.restore_navigation_snapshot(snapshot);
         true
     }
 
@@ -1103,6 +1131,57 @@ mod tests {
         assert!(state.pop_view_history());
         assert_eq!(state.ui.active_view, ActiveView::TrackList);
         assert_eq!(state.data.tracks[0].id, "track");
+    }
+
+    #[test]
+    fn forward_history_restores_after_back() {
+        let mut state = AppState::new();
+        state.show_generated_tracks(
+            vec![crate::models::Track {
+                id: "track".to_string(),
+                source: crate::models::TrackSource::Spotify,
+                local_path: None,
+                name: "Track".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                added_at: None,
+                duration_ms: 0,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+                artists: Vec::new(),
+            }],
+            TrackListContext::generated("one", "One"),
+        );
+        state.push_view_history();
+        state.ui.active_view = ActiveView::Queue;
+        state.data.tracks.clear();
+
+        assert!(state.pop_view_history());
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+
+        assert!(state.forward_view_history());
+        assert_eq!(state.ui.active_view, ActiveView::Queue);
+        assert!(state.data.tracks.is_empty());
+
+        assert!(state.pop_view_history());
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+        assert_eq!(state.data.tracks[0].id, "track");
+        assert!(state.forward_view_history());
+        assert_eq!(state.ui.active_view, ActiveView::Queue);
+    }
+
+    #[test]
+    fn new_navigation_clears_forward_history() {
+        let mut state = AppState::new();
+        state.push_view_history();
+        state.ui.active_view = ActiveView::Queue;
+        assert!(state.pop_view_history());
+        assert!(!state.ui.forward_history.is_empty());
+
+        state.push_view_history();
+        assert!(state.ui.forward_history.is_empty());
+        assert!(!state.forward_view_history());
     }
 }
 
