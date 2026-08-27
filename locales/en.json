@@ -209,7 +209,9 @@
     "setup": {
       "title": "Connect to Spotify",
       "step1": "1. Create an app in the Spotify Developer Dashboard.",
-      "step2": "2. Add http://127.0.0.1:8888/callback as a Redirect URI.",
+      "step2": "2. Add this Redirect URI to the app:",
+      "copy": "copy",
+      "copied": "copied",
       "step3": "3. Paste the app's Client ID and Secret below (ctrl-v).",
       "dashboard": "Open the Spotify Developer Dashboard ↗",
       "client_id": "Client ID",

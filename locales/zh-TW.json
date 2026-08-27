@@ -209,7 +209,9 @@
     "setup": {
       "title": "連接 Spotify",
       "step1": "1. 在 Spotify 開發者面板中建立一個應用程式。",
-      "step2": "2. 新增 http://127.0.0.1:8888/callback 為 Redirect URI。",
+      "step2": "2. 將下方 Redirect URI 新增到應用程式：",
+      "copy": "複製",
+      "copied": "已複製",
       "step3": "3. 在下方貼上應用程式的 Client ID 和 Secret（ctrl-v）。",
       "dashboard": "開啟 Spotify 開發者面板 ↗",
       "client_id": "Client ID",
