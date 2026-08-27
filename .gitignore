@@ -30,3 +30,6 @@ target
 echo-config.toml
 
 /vendor/opentui/
+
+# Local test config/credentials — must never be committed
+.pathtest-config/
