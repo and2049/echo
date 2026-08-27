@@ -525,6 +525,60 @@ fn resize_handle(id: &'static str, edge: gpui::ResizeEdge) -> impl IntoElement {
         })
 }
 
+fn nav_button_cluster(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let can_back = !app.state.ui.view_history.is_empty();
+    let can_forward = !app.state.ui.forward_history.is_empty();
+
+    let history_button = |id: &'static str,
+                          icon: &'static str,
+                          enabled: bool,
+                          cx: &mut Context<EchoApp>,
+                          go: fn(&mut EchoApp, &mut Context<EchoApp>)| {
+        if enabled {
+            crate::icon_button(id, icon, muted, palette.wash, cx, go).into_any_element()
+        } else {
+            // `border` rather than `wash`: at icon-glyph size the 15% wash all but vanishes.
+            crate::icon_button(id, icon, palette.border, gpui::transparent_black(), cx, |_, _| {})
+                .into_any_element()
+        }
+    };
+
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_1()
+        .child(crate::icon_button(
+            "sidebar-toggle",
+            "icons/sidebar-left.svg",
+            muted,
+            palette.wash,
+            cx,
+            |this, cx| this.toggle_sidebar(cx),
+        ))
+        .child(history_button(
+            "history-back",
+            "icons/arrow-left.svg",
+            can_back,
+            cx,
+            |this, cx| {
+                this.history_back(cx);
+            },
+        ))
+        .child(history_button(
+            "history-forward",
+            "icons/arrow-right.svg",
+            can_forward,
+            cx,
+            |this, cx| {
+                this.history_forward(cx);
+            },
+        ))
+}
+
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
@@ -537,6 +591,14 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         LibraryTab::Artists => app.state.data.followed_artists.len(),
         _ => app.state.data.library_view.len(),
     };
+
+    let nav_row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .px_2()
+        .pt_2()
+        .child(nav_button_cluster(app, cx));
 
     let tab_button = |id: &'static str, label: SharedString, target: LibraryTab, active: bool| {
         div()
@@ -567,6 +629,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .flex_col()
         .border_r_1()
         .border_color(palette.border)
+        .child(nav_row)
         .child(
             div()
                 .flex()
@@ -669,7 +732,11 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
                     let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
+                    let selected_bg = if this.state.ui.active_view == ActiveView::Library {
+                        palette.row_selected
+                    } else {
+                        palette.row_hover
+                    };
                     let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
@@ -997,11 +1064,15 @@ pub fn main_area(
         ActiveView::TrackList => track_list(app, cx).into_any_element(),
         ActiveView::Queue => queue_list(app, cx).into_any_element(),
         ActiveView::SearchResults => search_results(app, cx).into_any_element(),
-        // Reached via the "Top Artists" browse link (and back-navigation); the sidebar's
-        // Artists tab still covers followed artists.
         ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
         ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
         ActiveView::WhatsNew => whats_new(app, cx).into_any_element(),
+            _ if app.state.ui.mode != AppMode::Authenticating
+                && (app.state.data.active_tracklist_context.is_some()
+                    || !app.state.data.tracks.is_empty()) =>
+            {
+                track_list(app, cx).into_any_element()
+            }
             _ => library_placeholder(app),
         }
     };
@@ -1184,16 +1255,26 @@ fn search_bar(
     let accent = theme.primary.gpui(WINDOW_FG());
     let focused = app.search_focus.is_focused(window);
     let query = app.search_input.clone();
+    let collapsed = app.sidebar_collapsed;
+    let nav_cluster = collapsed.then(|| nav_button_cluster(app, cx).into_any_element());
 
     div()
         .flex_none()
-        .px_4()
-        .pt_3()
+        // pl_2/pt_2 mirror the sidebar header's metrics so the button cluster lands on the
+        // same pixels whether it renders here (collapsed) or in the sidebar (expanded).
+        .pl_2()
+        .pr_4()
+        .pt_2()
         .flex()
         .flex_row()
         .items_center()
-        // Invisible stand-in for the theme button so the search box centers exactly.
-        .child(div().flex_none().w(px(32.0)))
+        // With the sidebar collapsed its button cluster moves here; otherwise an invisible
+        // stand-in balancing the right-side buttons (72 = themes + settings + pr_4 - pl_2)
+        // so the search box centers exactly.
+        .map(|el| match nav_cluster {
+            Some(cluster) => el.child(cluster),
+            None => el.child(div().flex_none().w(px(72.0))),
+        })
         .child(div().flex_grow(1.0))
         .child(
         div()
@@ -1455,7 +1536,11 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let muted = theme.text_muted.gpui(WINDOW_FG());
                     let accent = theme.primary.gpui(WINDOW_FG());
                     let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
+                    let selected_bg = if this.state.ui.active_view == ActiveView::TrackList {
+                        palette.row_selected
+                    } else {
+                        palette.row_hover
+                    };
                     let selected = this.state.ui.selected_track_index;
                     let visual = visual_range_in(&this.state, ActiveView::TrackList);
                     let playing_id = this.state.playback.playing_track_id.clone();
@@ -1539,6 +1624,7 @@ fn track_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         return;
                                     }
                                     this.state.ui.selected_track_index = ix;
+                                    this.state.ui.active_view = ActiveView::TrackList;
                                     if event.click_count() >= 2
                                         && let Some(event) =
                                             echo_core::intent::play_track_at(&mut this.state, ix)
@@ -3228,8 +3314,10 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
             ("ctrl-u / ctrl-d", "desktop.help.half_page"),
             ("enter / z", "desktop.help.open"),
             ("h / esc", "desktop.help.back"),
+            ("alt-← / alt-→", "desktop.help.history"),
             ("← / →", "desktop.help.pane_focus"),
             ("backspace", "desktop.help.to_sidebar"),
+            ("ctrl-\\", "desktop.help.toggle_sidebar"),
             ("tab", "desktop.help.tabs"),
             ("gc", "desktop.help.jump_playing"),
             ("1-9", "desktop.help.count"),
