@@ -88,8 +88,6 @@ actions!(
         MoveTrackUp,
         MoveTrackDown,
         ToggleLike,
-        // macOS menu-bar entries. No keybinding of their own beyond the standard chords bound
-        // in `main`; they exist so the application and Window menus have actions to invoke.
         Hide,
         HideOthers,
         ShowAll,
@@ -98,64 +96,44 @@ actions!(
     ]
 );
 
-/// Key context for the list bindings; the search input carries [`SEARCH_CONTEXT`] instead, and
-/// every list binding is predicated on `list && !search` so plain letters type into the box.
 const LIST_CONTEXT: &str = "list";
 const SEARCH_CONTEXT: &str = "search";
 const LIST_KEYS: Option<&str> = Some("list && !search");
 
-/// Keyboard page distance; the TUI uses a similar fixed stride.
 const PAGE_ROWS: isize = 10;
 
-/// A right-click menu anchored where the click landed, over sidebar row `index` (of the
-/// active library tab's list).
 #[derive(Clone)]
 pub(crate) struct ContextMenuState {
     pub index: usize,
     pub position: gpui::Point<Pixels>,
 }
 
-/// Which bar a pointer drag is currently scrubbing.
 #[derive(Clone, Copy, PartialEq)]
 enum Scrub {
     Seek,
     Volume,
 }
 
-/// A drag-to-resize of the library sidebar: the pointer's x at mouse-down and the width it
-/// started at, so moves become a new width.
 #[derive(Clone, Copy)]
 struct SidebarResize {
     start_x: Pixels,
     start_width: f32,
 }
 
-/// The track action menu. Kept separate from [`ContextMenuState`]: items and execution share
-/// nothing with the sidebar menu.
-///
-/// It holds the resolved context rather than a row index because `shift-a` can open it over
-/// the *playing* track when no track row is focused, which no row index describes.
 #[derive(Clone)]
 pub(crate) struct TrackMenuState {
     pub ctx: echo_core::models::ActionMenuContext,
-    /// Where the right-click landed. `None` when opened from the keyboard, which centers it.
     pub position: Option<gpui::Point<Pixels>>,
-    /// Keyboard selection within the item list.
     pub selected: usize,
-    /// The add-to-playlist flyout hanging off the "Add to playlist" row, and its own selection.
-    /// `None` while closed; while open, j/k and Enter address the flyout instead of the items.
     pub submenu: Option<usize>,
 }
 
-/// What a track-menu item does. Most entries are the shared action-menu actions; remove is
-/// desktop-menu-only (the TUI reaches it through `dd`).
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum TrackMenuItem {
     Action(echo_core::models::ActionMenuAction),
     RemoveFromPlaylist,
 }
 
-/// What a context-menu item does; resolved against the row the menu was opened on.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MenuAction {
     Open,
@@ -167,12 +145,6 @@ pub(crate) enum MenuAction {
     RemoveAlbum,
 }
 
-/// Lifecycle of the settings sheet's update control.
-///
-/// [`UpdateState::Blocked`] is separated from [`UpdateState::Failed`] because the two need
-/// different offers: a failure is worth retrying in place, whereas a blocked install (system
-/// directory, distro package, no build for the platform) can only be resolved by downloading
-/// an installer, so the button becomes a link to the releases page.
 #[derive(Clone)]
 pub(crate) enum UpdateState {
     Idle,
@@ -205,8 +177,8 @@ pub(crate) struct EchoApp {
     pub(crate) worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
     pub(crate) images: images::ImageCache,
     pub(crate) search_input: String,
+    pub(crate) search_cursor: usize,
     pub(crate) search_focus: FocusHandle,
-    /// Focus target for the vim-style `:` command bar and `/` filter bar.
     command_focus: FocusHandle,
     pub(crate) setup_id_focus: FocusHandle,
     pub(crate) setup_secret_focus: FocusHandle,
@@ -219,87 +191,39 @@ pub(crate) struct EchoApp {
     pub(crate) artist_list_scroll: UniformListScrollHandle,
     pub(crate) whats_new_scroll: UniformListScrollHandle,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
-    /// The modal pickers' lists. Plain scroll handles rather than uniform-list ones: their rows
-    /// are laid out by content, not at a fixed height. Without these the lists overflow their
-    /// panel's `max_h` with no way to reach the rest.
     pub(crate) playlist_modal_scroll: ScrollHandle,
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
-    /// Width of the library sidebar; a drag on its right edge changes it.
     pub(crate) sidebar_width: f32,
-    /// Desktop-only modal; the TUI picks themes through the `:theme` command instead.
     pub(crate) theme_modal_open: bool,
-    /// Keyboard selection within the theme picker, indexing [`views::sorted_theme_names`].
-    /// Desktop-local because the modal itself is.
     pub(crate) theme_modal_index: usize,
-    /// The track-list sort picker. The TUI reaches the same sorts through `:sort`.
     pub(crate) sort_menu_open: bool,
     pub(crate) sort_menu_index: usize,
-    /// Settings sheet. Everything it changes is otherwise only reachable by typing a `:`
-    /// command or editing `config.toml` by hand.
     pub(crate) settings_open: bool,
-    /// Edit buffer for the local-music folder field, seeded from the config when the sheet
-    /// opens. A hand-rolled field like the setup card's, so no native dialog dependency.
     pub(crate) settings_path_input: String,
+    pub(crate) settings_path_cursor: usize,
     pub(crate) settings_path_focus: FocusHandle,
     pub(crate) settings_scroll: ScrollHandle,
-    /// Where the settings sheet's update control is in its lifecycle. Desktop-only: the TUI
-    /// upgrades through `spotify upgrade`, so this never belongs in the shared `AppState`.
     pub(crate) update_state: UpdateState,
-    /// The `?` cheat sheet. Nothing else in the GUI reveals the `:` commands or vim motions.
     pub(crate) help_open: bool,
     pub(crate) help_scroll: ScrollHandle,
-    /// Right-click menu over a sidebar row; the TUI reaches these through keys instead.
     pub(crate) context_menu: Option<ContextMenuState>,
-    /// Right-click menu over a track row; mutually exclusive with `context_menu`.
     pub(crate) track_menu: Option<TrackMenuState>,
-    /// The add-to-playlist flyout's list. A plain scroll handle like the modal pickers': the
-    /// flyout holds every writable playlist, so it has to scroll past its `max_h`.
     pub(crate) submenu_scroll: ScrollHandle,
-    /// Written each paint: the "Add to playlist" row's rectangle (the flyout hangs off its
-    /// side) and the flyout panel's own, which is the base of the hover triangle.
     pub(crate) submenu_row_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) submenu_bounds: Rc<Cell<Bounds<Pixels>>>,
-    /// Last pointer position seen over the "Add to playlist" row — the apex of that triangle.
     submenu_apex: gpui::Point<Pixels>,
-    /// Vim-style count prefix for j/k, accumulated from bare digit keys.
     pending_count: Option<usize>,
-    /// Written by a canvas overlay each paint; read by the scrub handlers to turn a pointer's
-    /// window position into a fraction of the bar.
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
     volume_bounds: Rc<Cell<Bounds<Pixels>>>,
-    /// A drag-to-scrub in progress on the seek or volume bar; pointer moves update the state
-    /// optimistically and the worker event fires on release.
     scrubbing: Option<Scrub>,
-    /// A drag-to-resize of the library sidebar in progress; like scrubbing, the width updates
-    /// optimistically from window-level pointer moves and settles on release.
     sidebar_resizing: Option<SidebarResize>,
-    /// macOS and Linux titlebar drag latch (Zed's pattern): armed on mouse-down, the first
-    /// move starts the native window drag. Unused on Windows, where `HTCAPTION` handles it.
     titlebar_should_move: bool,
-    /// A monospace family that actually exists on this machine, resolved once at startup.
-    /// The ECHO wordmark is box-drawing art and only lines up in a fixed-pitch font.
     mono_font: SharedString,
     focus_handle: FocusHandle,
-    /// Captured once on the main thread, where `main`'s runtime guard is active. Network work
-    /// is spawned through this rather than `tokio::spawn`, which would depend on the calling
-    /// thread happening to be inside the runtime context — true for GPUI's foreground
-    /// executor today, false for anything moved to a background one.
     tokio: tokio::runtime::Handle,
 }
 
-/// The macOS menu bar — the strip along the top of the screen, which is a separate surface from
-/// the app's own titlebar and is built only from what an app hands to `set_menus`. gpui installs
-/// no default, so without this the bar beside the Apple menu is empty: no Quit item, no Hide, and
-/// none of the Window-menu entries macOS expects every app to have. Deliberately small — echo's
-/// keymap mirrors the TUI's and lives in the app itself, so this covers the system chords rather
-/// than mirroring the whole feature set.
-///
-/// AppKit fills in the rest of the Window menu (window list, Bring All to Front, the tiling
-/// items) once gpui hands it a menu named "Window".
-///
-/// Not `#[cfg]`-gated, and its caller branches on `cfg!` rather than `#[cfg]`, so this stays
-/// type-checked on the platform it is actually developed on. `set_menus` is a no-op off macOS.
 fn mac_menus() -> Vec<gpui::Menu> {
     use gpui::{Menu, MenuItem};
 
@@ -340,6 +264,88 @@ fn mac_menus() -> Vec<gpui::Menu> {
 /// accepted everywhere, since the desktop app mirrors the TUI's keymap.
 fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
     modifiers.secondary() || modifiers.control
+}
+
+/// Byte index of the char boundary one character before `cursor` (or `cursor` at the start).
+fn prev_char_boundary(value: &str, cursor: usize) -> usize {
+    value[..cursor.min(value.len())]
+        .char_indices()
+        .next_back()
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+/// Byte index of the char boundary one character after `cursor` (or `cursor` at the end).
+fn next_char_boundary(value: &str, cursor: usize) -> usize {
+    let cursor = cursor.min(value.len());
+    value[cursor..]
+        .chars()
+        .next()
+        .map(|c| cursor + c.len_utf8())
+        .unwrap_or(cursor)
+}
+
+/// Insert `text` into `value` at the byte offset `cursor`, advancing the cursor past it. The
+/// shared insertion path for both typed characters and pastes in the hand-rolled fields.
+fn insert_at_cursor(value: &mut String, cursor: &mut usize, text: &str) {
+    *cursor = (*cursor).min(value.len());
+    value.insert_str(*cursor, text);
+    *cursor += text.len();
+}
+
+/// Apply the cursor-aware editing keys shared by the hand-rolled text fields — arrow keys,
+/// Home/End, Backspace, Delete, and printable character insertion — to `value`/`cursor`.
+///
+/// Returns `true` when the event was one of those keys (so the caller can stop). Enter, Escape,
+/// Tab, and paste stay with the caller: each field submits, cancels, and filters pasted text
+/// differently. Cursor positions are byte offsets kept on char boundaries so multi-byte queries
+/// (e.g. CJK search terms) navigate a character at a time rather than splitting a codepoint.
+fn apply_text_edit(value: &mut String, cursor: &mut usize, event: &gpui::KeyDownEvent) -> bool {
+    *cursor = (*cursor).min(value.len());
+    match event.keystroke.key.as_str() {
+        "left" => *cursor = prev_char_boundary(value, *cursor),
+        "right" => *cursor = next_char_boundary(value, *cursor),
+        "home" => *cursor = 0,
+        "end" => *cursor = value.len(),
+        "backspace" => {
+            if *cursor > 0 {
+                let start = prev_char_boundary(value, *cursor);
+                value.replace_range(start..*cursor, "");
+                *cursor = start;
+            }
+        }
+        "delete" => {
+            if *cursor < value.len() {
+                let end = next_char_boundary(value, *cursor);
+                value.replace_range(*cursor..end, "");
+            }
+        }
+        _ => {
+            // Insert only genuine typed text: a modifier chord (ctrl-v, cmd-a) is not input, and
+            // named keys with no glyph report no `key_char`.
+            let modifiers = &event.keystroke.modifiers;
+            if modifiers.control || modifiers.platform {
+                return false;
+            }
+            match event.keystroke.key_char.as_deref() {
+                Some(text) if !text.is_empty() && !text.chars().any(char::is_control) => {
+                    insert_at_cursor(value, cursor, text);
+                }
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
+/// Render a field's text with the block caret drawn at `cursor` (a byte offset), so the hand-rolled
+/// inputs show where the next edit lands instead of pinning the caret to the end.
+pub(crate) fn text_with_cursor(value: &str, cursor: usize) -> String {
+    let mut cursor = cursor.min(value.len());
+    while cursor > 0 && !value.is_char_boundary(cursor) {
+        cursor -= 1;
+    }
+    format!("{}▏{}", &value[..cursor], &value[cursor..])
 }
 
 /// Picks a fixed-pitch family that is actually installed. gpui matches families by exact name
@@ -466,6 +472,7 @@ impl EchoApp {
             worker_tx,
             images: images::ImageCache::default(),
             search_input: String::new(),
+            search_cursor: 0,
             search_focus: cx.focus_handle(),
             command_focus: cx.focus_handle(),
             setup_id_focus: cx.focus_handle(),
@@ -489,6 +496,7 @@ impl EchoApp {
             sort_menu_index: 0,
             settings_open: false,
             settings_path_input: String::new(),
+            settings_path_cursor: 0,
             settings_path_focus: cx.focus_handle(),
             settings_scroll: ScrollHandle::new(),
             update_state: UpdateState::Idle,
@@ -1371,6 +1379,7 @@ impl EchoApp {
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default();
+            self.settings_path_cursor = self.settings_path_input.len();
         }
         cx.notify();
     }
@@ -1515,18 +1524,21 @@ impl EchoApp {
                 window.focus(&self.focus_handle.clone(), cx);
             }
             "escape" => window.focus(&self.focus_handle.clone(), cx),
-            "backspace" => {
-                self.settings_path_input.pop();
-            }
             "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    self.settings_path_input.push_str(text.trim());
+                    insert_at_cursor(
+                        &mut self.settings_path_input,
+                        &mut self.settings_path_cursor,
+                        text.trim(),
+                    );
                 }
             }
             _ => {
-                if let Some(text) = event.keystroke.key_char.as_deref() {
-                    self.settings_path_input.push_str(text);
-                }
+                apply_text_edit(
+                    &mut self.settings_path_input,
+                    &mut self.settings_path_cursor,
+                    event,
+                );
             }
         }
         cx.notify();
@@ -1962,23 +1974,20 @@ impl EchoApp {
             }
             "escape" => {
                 self.search_input.clear();
+                self.search_cursor = 0;
                 window.focus(&self.focus_handle, cx);
-            }
-            "backspace" => {
-                self.search_input.pop();
             }
             // Spaces are kept — unlike the credential fields, a query is words — but newlines
             // are dropped so a copied line does not smuggle one into the search term.
             "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    self.search_input
-                        .extend(text.chars().filter(|c| *c != '\r' && *c != '\n'));
+                    let filtered: String =
+                        text.chars().filter(|c| *c != '\r' && *c != '\n').collect();
+                    insert_at_cursor(&mut self.search_input, &mut self.search_cursor, &filtered);
                 }
             }
             _ => {
-                if let Some(text) = event.keystroke.key_char.as_deref() {
-                    self.search_input.push_str(text);
-                }
+                apply_text_edit(&mut self.search_input, &mut self.search_cursor, event);
             }
         }
         cx.notify();
@@ -3295,4 +3304,51 @@ fn main() {
         .expect("failed to open window");
         cx.activate(true);
     });
+}
+
+#[cfg(test)]
+mod text_edit_tests {
+    use super::{insert_at_cursor, next_char_boundary, prev_char_boundary, text_with_cursor};
+
+    #[test]
+    fn boundaries_step_over_multibyte_chars() {
+        // "é" is two bytes, "中" is three: navigation must land on char boundaries, not bytes.
+        let value = "aé中b"; // bytes: a(1) é(2) 中(3) b(1)
+        assert_eq!(next_char_boundary(value, 0), 1); // past 'a'
+        assert_eq!(next_char_boundary(value, 1), 3); // past 'é'
+        assert_eq!(next_char_boundary(value, 3), 6); // past '中'
+        assert_eq!(next_char_boundary(value, 6), 7); // past 'b'
+        assert_eq!(next_char_boundary(value, 7), 7); // clamped at end
+
+        assert_eq!(prev_char_boundary(value, 7), 6);
+        assert_eq!(prev_char_boundary(value, 6), 3);
+        assert_eq!(prev_char_boundary(value, 3), 1);
+        assert_eq!(prev_char_boundary(value, 1), 0);
+        assert_eq!(prev_char_boundary(value, 0), 0); // clamped at start
+    }
+
+    #[test]
+    fn insert_advances_cursor_past_inserted_text() {
+        let mut value = "cd".to_string();
+        let mut cursor = 0;
+        insert_at_cursor(&mut value, &mut cursor, "ab");
+        assert_eq!(value, "abcd");
+        assert_eq!(cursor, 2);
+
+        // Insert a multi-byte char at the caret; the cursor moves by its byte length.
+        insert_at_cursor(&mut value, &mut cursor, "é");
+        assert_eq!(value, "abécd");
+        assert_eq!(cursor, 4);
+    }
+
+    #[test]
+    fn caret_renders_at_cursor_and_survives_stale_index() {
+        assert_eq!(text_with_cursor("abc", 0), "▏abc");
+        assert_eq!(text_with_cursor("abc", 1), "a▏bc");
+        assert_eq!(text_with_cursor("abc", 3), "abc▏");
+        // A byte index past the end is clamped rather than panicking.
+        assert_eq!(text_with_cursor("abc", 9), "abc▏");
+        // An index landing mid-codepoint snaps back to a boundary.
+        assert_eq!(text_with_cursor("é", 1), "▏é");
+    }
 }
