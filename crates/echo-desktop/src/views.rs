@@ -1239,7 +1239,7 @@ fn search_bar(
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .child(SharedString::from(if focused {
-                        format!("{query}▏")
+                        crate::text_with_cursor(&query, app.search_cursor)
                     } else {
                         query
                     }))
@@ -1265,9 +1265,6 @@ fn search_bar(
         ))
 }
 
-/// Track-list sort options, as `(label i18n key, `:sort` argument)`. The desktop runs them
-/// through the command registry so the behaviour and status messages match `:sort` and the TUI
-/// exactly.
 pub const SORT_OPTIONS: &[(&str, &str)] = &[
     ("desktop.sort.original", "original"),
     ("desktop.sort.title", "title"),
@@ -3767,7 +3764,7 @@ pub fn settings_modal(
             cx.notify();
         }))
         .child(SharedString::from(if path_focused {
-            format!("{path_value}▏")
+            crate::text_with_cursor(&path_value, app.settings_path_cursor)
         } else if path_value.is_empty() {
             s("desktop.settings.folder_empty").to_string()
         } else {
