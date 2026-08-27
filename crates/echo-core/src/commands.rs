@@ -171,12 +171,21 @@ pub fn submit(state: &mut AppState) -> Option<AppEvent> {
     execute(state, &cmd)
 }
 
-/// Run a command by name, as if it had been typed into the `:` bar.
-///
-/// Lets non-textual UI — the desktop's settings and sort controls — reuse the registry rather
-/// than duplicating the config mutation and status messages each command already performs.
 pub fn run(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
     execute(state, cmd)
+}
+
+fn unquote_path(text: &str) -> &str {
+    let text = text.trim();
+    let unquoted = text
+        .strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .or_else(|| {
+            text.strip_prefix('\'')
+                .and_then(|inner| inner.strip_suffix('\''))
+        })
+        .unwrap_or(text);
+    unquoted.trim()
 }
 
 fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
@@ -672,7 +681,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 }
             }
             "localpath" => {
-                let path_text = command_remainder(cmd, "localpath");
+                let path_text = unquote_path(command_remainder(cmd, "localpath"));
                 if path_text.is_empty() {
                     state.ui.status_message =
                         Some("Usage: localpath <absolute-folder-path>".to_string());
@@ -846,6 +855,20 @@ mod tests {
             command_remainder("  localpath   /Users/sun/Music Library  ", "localpath"),
             "/Users/sun/Music Library"
         );
+    }
+
+    #[test]
+    fn unquote_path_strips_surrounding_quotes_and_whitespace() {
+        assert_eq!(
+            unquote_path("\"C:\\Users\\user\\Music\""),
+            "C:\\Users\\user\\Music"
+        );
+        assert_eq!(
+            unquote_path("'/Users/user/Music Library'"),
+            "/Users/user/Music Library"
+        );
+        assert_eq!(unquote_path("  /Users/user/Music  "), "/Users/user/Music");
+        assert_eq!(unquote_path("\"/Users/user/Music"), "\"/Users/user/Music");
     }
 
     #[test]
