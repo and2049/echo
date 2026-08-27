@@ -21,6 +21,7 @@ use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const CALLBACK_ADDRESS: &str = "127.0.0.1:8888";
+pub const REDIRECT_URI: &str = "http://127.0.0.1:8888/callback";
 const CALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Debug, Error)]
@@ -65,7 +66,7 @@ impl SpotifyWorker {
         let credentials = Credentials::new(&creds.client_id, &creds.client_secret);
         let scopes = spotify_scopes();
         let oauth = OAuth {
-            redirect_uri: format!("http://{CALLBACK_ADDRESS}/callback"),
+            redirect_uri: REDIRECT_URI.to_string(),
             scopes,
             ..Default::default()
         };
@@ -318,6 +319,11 @@ mod tests {
             Some("invalid_client".to_string())
         );
         assert_eq!(oauth_error_code("not json"), None);
+    }
+
+    #[test]
+    fn redirect_uri_matches_callback_address() {
+        assert_eq!(REDIRECT_URI, format!("http://{CALLBACK_ADDRESS}/callback"));
     }
 
     #[test]

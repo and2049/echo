@@ -46,3 +46,23 @@ pub fn t(key: &str, lang: &str) -> String {
         key.to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_uri_keys_present_in_all_locales() {
+        init();
+        let map = TRANSLATIONS.get().unwrap();
+        for lang in ["en", "zh-CN", "zh-TW"] {
+            let setup = &map[lang]["desktop"]["setup"];
+            for key in ["step2", "copy", "copied"] {
+                assert!(
+                    setup[key].is_string(),
+                    "{lang} missing desktop.setup.{key}"
+                );
+            }
+        }
+    }
+}

@@ -1106,6 +1106,7 @@ fn setup_view(
     let secret_masked = "•".repeat(app.state.ui.setup_client_secret.chars().count());
     let ready =
         !app.state.ui.setup_client_id.is_empty() && !app.state.ui.setup_client_secret.is_empty();
+    let uri_copied = app.setup_uri_copied;
 
     let field = |id: &'static str,
                  label: SharedString,
@@ -1177,6 +1178,50 @@ fn setup_view(
                         .text_color(muted)
                         .child(tr(&app.state, "desktop.setup.step1"))
                         .child(tr(&app.state, "desktop.setup.step2"))
+                        .child(
+                            div()
+                                .id("setup-redirect-uri")
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(palette.border)
+                                .bg(palette.wash)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap_2()
+                                .cursor_pointer()
+                                .hover(|style| style.border_color(accent))
+                                .on_click(cx.listener(
+                                    |this: &mut EchoApp, _event, _window, cx| {
+                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                            echo_core::worker::api::REDIRECT_URI.to_string(),
+                                        ));
+                                        this.setup_uri_copied = true;
+                                        cx.notify();
+                                    },
+                                ))
+                                .child(
+                                    div()
+                                        .text_color(fg)
+                                        .whitespace_nowrap()
+                                        .overflow_hidden()
+                                        .child(echo_core::worker::api::REDIRECT_URI),
+                                )
+                                .child(div().text_xs().text_color(if uri_copied {
+                                    accent
+                                } else {
+                                    muted
+                                }).child(tr(
+                                    &app.state,
+                                    if uri_copied {
+                                        "desktop.setup.copied"
+                                    } else {
+                                        "desktop.setup.copy"
+                                    },
+                                ))),
+                        )
                         .child(tr(&app.state, "desktop.setup.step3")),
                 )
                 .child(
