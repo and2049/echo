@@ -46,6 +46,9 @@ actions!(
         Activate,
         FocusLibrary,
         FocusTracks,
+        ToggleSidebar,
+        HistoryBack,
+        HistoryForward,
         NextTrack,
         PreviousTrack,
         ToggleShuffle,
@@ -195,6 +198,7 @@ pub(crate) struct EchoApp {
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
     pub(crate) sidebar_width: f32,
+    pub(crate) sidebar_collapsed: bool,
     pub(crate) theme_modal_open: bool,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
@@ -456,6 +460,7 @@ impl EchoApp {
             .library_config
             .sidebar_width
             .unwrap_or(views::SIDEBAR_WIDTH);
+        let sidebar_collapsed = state.ui.library_config.sidebar_collapsed.unwrap_or(false);
 
         // Save the window rectangle on close so the next launch reopens the same size and
         // place. All three `WindowBounds` variants carry the restore bounds, so a window closed
@@ -490,6 +495,7 @@ impl EchoApp {
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
             sidebar_width: sidebar_width.clamp(180.0, 480.0),
+            sidebar_collapsed,
             theme_modal_open: false,
             theme_modal_index: 0,
             sort_menu_open: false,
@@ -911,11 +917,7 @@ impl EchoApp {
             self.help_open = false;
         } else if self.state.ui.lyrics_modal_open {
             self.state.ui.lyrics_modal_open = false;
-        } else if self.state.pop_view_history() {
-            self.state.clear_pending_artist_page();
-            if self.state.data.tracklist_image_url.is_some() {
-                self.dispatch(AppEvent::ReloadHeaderImage);
-            }
+        } else if self.history_back(cx) {
         } else if self.state.ui.active_view == ActiveView::TrackList {
             self.state.ui.active_view = if self.search_has_results() {
                 ActiveView::SearchResults
@@ -2001,6 +2003,10 @@ impl EchoApp {
             return;
         }
         self.state.ui.pending_d_press = false;
+        if self.sidebar_collapsed {
+            // Focusing an invisible pane would strand the cursor; bring the sidebar back.
+            self.set_sidebar_collapsed(false, cx);
+        }
         self.state.ui.active_view = ActiveView::Library;
         cx.notify();
     }
@@ -2162,8 +2168,42 @@ impl EchoApp {
         }
     }
 
-    /// Closes the artist page back to the library — the sidebar's Artists tab replaces the
-    /// TUI's full-page artist list, so there is no ArtistList view to return to.
+    pub(crate) fn set_sidebar_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = collapsed;
+        self.state.ui.library_config.sidebar_collapsed = Some(collapsed);
+        self.state.save_library_config();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.set_sidebar_collapsed(!self.sidebar_collapsed, cx);
+    }
+
+    pub(crate) fn history_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.state.pop_view_history() {
+            return false;
+        }
+        self.state.clear_pending_artist_page();
+        if self.state.data.tracklist_image_url.is_some() {
+            self.dispatch(AppEvent::ReloadHeaderImage);
+        }
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn history_forward(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.state.forward_view_history() {
+            return false;
+        }
+        self.state.clear_pending_artist_page();
+        if self.state.data.tracklist_image_url.is_some() {
+            self.dispatch(AppEvent::ReloadHeaderImage);
+        }
+        cx.notify();
+        true
+    }
+
+
     pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {
         self.state.ui.active_view = ActiveView::Library;
         self.state.clear_pending_artist_page();
@@ -2171,8 +2211,9 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Sends an intent-produced event to the worker, with the same side channel the TUI's main
-    /// loop has: a LoadContextTracks with cover art also kicks off the header image fetch.
+    /// Sends an intent-produced event to the worker, with the same side channels the TUI's main
+    /// loop has: a LoadContextTracks with cover art also kicks off the header image fetch, and
+    /// ReloadHeaderImage is handled entirely here (the worker has no handler for it).
     pub(crate) fn dispatch(&mut self, event: AppEvent) {
         if let AppEvent::LoadContextTracks(ref context) = event
             && let Some(url) = context.image_url.as_ref()
@@ -2183,6 +2224,16 @@ impl EchoApp {
                 self.worker_tx.clone(),
                 self.state.ui.library_config.cover_img_pixels,
             );
+        }
+        if let AppEvent::ReloadHeaderImage = event {
+            if let Some(url) = self.state.data.tracklist_image_url.as_ref() {
+                echo_core::image_tasks::spawn_header_for_url(
+                    url,
+                    self.worker_tx.clone(),
+                    self.state.ui.library_config.cover_img_pixels,
+                );
+            }
+            return;
         }
         let _ = self.app_tx.send(event);
     }
@@ -2973,6 +3024,18 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &ToggleLike, _window, cx| this.toggle_like(cx)))
             .on_action(cx.listener(|this, _: &FocusLibrary, _window, cx| this.focus_library(cx)))
             .on_action(cx.listener(|this, _: &FocusTracks, _window, cx| this.focus_tracks(cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _window, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &HistoryBack, _window, cx| {
+                // Global binding, so keep the view still while an overlay is on top.
+                if !this.overlay_open() {
+                    this.history_back(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &HistoryForward, _window, cx| {
+                if !this.overlay_open() {
+                    this.history_forward(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &NextTrack, _window, cx| this.play_next(cx)))
             .on_action(cx.listener(|this, _: &PreviousTrack, _window, cx| this.play_previous(cx)))
             .on_action(cx.listener(|this, _: &ToggleShuffle, _window, cx| this.toggle_shuffle(cx)))
@@ -3087,7 +3150,9 @@ impl Render for EchoApp {
                     .flex()
                     .flex_row()
                     .overflow_hidden()
-                    .child(views::sidebar(self, cx))
+                    .when(!self.sidebar_collapsed, |el| {
+                        el.child(views::sidebar(self, cx))
+                    })
                     .child(views::main_area(self, window, cx)),
             )
             .when_some(status_line, |el, line| el.child(line))
@@ -3241,6 +3306,10 @@ fn main() {
             // The platform-conventional preferences shortcut; global so it also works while
             // the search box has focus.
             KeyBinding::new("ctrl-,", ToggleSettings, None),
+            // Global like ctrl-,: chords type nothing, so they're safe while inputs focus.
+            KeyBinding::new("ctrl-\\", ToggleSidebar, None),
+            KeyBinding::new("alt-left", HistoryBack, None),
+            KeyBinding::new("alt-right", HistoryForward, None),
             KeyBinding::new("?", ToggleHelp, LIST_KEYS),
             KeyBinding::new("v", EnterVisual, LIST_KEYS),
             KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),

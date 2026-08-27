@@ -44,6 +44,7 @@ icons!(
     // Sliders rather than a gear — hand-drawn in the same stroke style, like the win-* icons.
     "settings",
     "shuffle",
+    "sidebar-left",
     "sparkles",
     "star",
     "volume-high",

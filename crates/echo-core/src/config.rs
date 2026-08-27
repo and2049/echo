@@ -403,6 +403,8 @@ pub struct LibraryConfig {
     #[serde(default)]
     pub sidebar_width: Option<f32>,
     #[serde(default)]
+    pub sidebar_collapsed: Option<bool>,
+    #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
     /// The `time_range` window used by the Top Tracks / Top Artists browse lists.
     #[serde(default)]
@@ -482,6 +484,7 @@ impl Default for LibraryConfig {
             normalisation: true,
             normalisation_pregain: default_normalisation_pregain(),
             sidebar_width: None,
+            sidebar_collapsed: None,
             window_bounds: None,
             top_items_range: crate::models::TopItemsRange::default(),
             playlist_playback: Default::default(),
