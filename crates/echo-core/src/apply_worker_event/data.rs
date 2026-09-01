@@ -59,8 +59,12 @@ pub fn handle_search_results_loaded(state: &mut AppState, results: SearchResults
 }
 
 pub fn handle_queue_loaded(state: &mut AppState, tracks: Vec<Track>) {
+    reconcile_manual_queue(&mut state.data.manual_queue, &tracks);
+    state.ui.selected_queue_index = state
+        .ui
+        .selected_queue_index
+        .min(tracks.len().saturating_sub(1));
     state.data.queue = tracks;
-    state.ui.selected_queue_index = 0;
 }
 
 pub fn handle_devices_loaded(state: &mut AppState, devices: Vec<crate::models::Device>) {
@@ -70,7 +74,18 @@ pub fn handle_devices_loaded(state: &mut AppState, devices: Vec<crate::models::D
     }
 }
 
-pub fn handle_tracks_queued(state: &mut AppState, count: usize) {
+/// Drops the leading ids that no longer head the fetched queue, so what survives is exactly the
+/// manually queued tracks still upcoming. `zip` tolerates the Web API's 20-item cap.
+pub fn reconcile_manual_queue(manual: &mut Vec<String>, queue: &[Track]) {
+    let keep_from = (0..=manual.len())
+        .find(|&skip| manual[skip..].iter().zip(queue).all(|(id, track)| *id == track.id))
+        .unwrap_or(manual.len());
+    manual.drain(..keep_from);
+}
+
+pub fn handle_tracks_queued(state: &mut AppState, track_ids: Vec<String>) {
+    let count = track_ids.len();
+    state.data.manual_queue.extend(track_ids);
     state.ui.recent_queue_count += count;
     set_timed_status(
         state,
@@ -184,6 +199,57 @@ mod tests {
             artist_id: None,
             artists: Vec::new(),
         }
+    }
+
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn manual_queue_keeps_the_ids_still_heading_the_fetched_queue() {
+        let mut manual = ids(&["a", "b", "c"]);
+        reconcile_manual_queue(
+            &mut manual,
+            &[sample_track("b"), sample_track("c"), sample_track("ctx")],
+        );
+        assert_eq!(manual, ids(&["b", "c"]));
+    }
+
+    #[test]
+    fn manual_queue_clears_when_nothing_heads_the_fetched_queue() {
+        let mut manual = ids(&["a", "b"]);
+        reconcile_manual_queue(&mut manual, &[sample_track("ctx")]);
+        assert!(manual.is_empty());
+    }
+
+    #[test]
+    fn manual_queue_survives_the_fetch_cap() {
+        let all: Vec<String> = (0..25).map(|i| i.to_string()).collect();
+        let mut manual = all.clone();
+        let fetched: Vec<Track> = all.iter().take(20).map(|id| sample_track(id)).collect();
+        reconcile_manual_queue(&mut manual, &fetched);
+        assert_eq!(manual, all);
+    }
+
+    #[test]
+    fn queue_load_reconciles_what_tracks_queued_recorded() {
+        crate::i18n::init();
+        let mut state = AppState::new();
+        handle_tracks_queued(&mut state, ids(&["a", "b"]));
+        assert_eq!(state.ui.recent_queue_count, 2);
+        handle_queue_loaded(&mut state, vec![sample_track("b"), sample_track("ctx")]);
+        assert_eq!(state.data.manual_queue, ids(&["b"]));
+        assert_eq!(state.data.queue.len(), 2);
+    }
+
+    #[test]
+    fn queue_reload_keeps_the_cursor_in_range_instead_of_resetting_it() {
+        let mut state = AppState::new();
+        state.ui.selected_queue_index = 5;
+        handle_queue_loaded(&mut state, vec![sample_track("a"), sample_track("b")]);
+        assert_eq!(state.ui.selected_queue_index, 1);
+        handle_queue_loaded(&mut state, vec![sample_track("a"), sample_track("b"), sample_track("c")]);
+        assert_eq!(state.ui.selected_queue_index, 1);
     }
 
     #[test]

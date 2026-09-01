@@ -20,11 +20,12 @@ futures-util = "0.3.32"
 image = "0.25.10"
 # Pinned: librespot has no compatible crates.io release, and an unpinned git dep
 # means any fresh build can break independently of this repo's history.
-librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "33bf3a77ed4b549df67e8347d7d6e55b007b3ec2" }
-librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "33bf3a77ed4b549df67e8347d7d6e55b007b3ec2" }
-librespot-discovery = { git = "https://github.com/librespot-org/librespot", rev = "33bf3a77ed4b549df67e8347d7d6e55b007b3ec2" }
-librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "33bf3a77ed4b549df67e8347d7d6e55b007b3ec2" }
-librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "33bf3a77ed4b549df67e8347d7d6e55b007b3ec2", features = ["rodio-backend"] }
+# The fork's `echo` branch is upstream 33bf3a7 plus one commit adding `Spirc::clear_queue`.
+librespot-connect = { git = "https://github.com/and2049/librespot", rev = "3c8d876704028a903e411ec2139ef46f9334e147" }
+librespot-core = { git = "https://github.com/and2049/librespot", rev = "3c8d876704028a903e411ec2139ef46f9334e147" }
+librespot-discovery = { git = "https://github.com/and2049/librespot", rev = "3c8d876704028a903e411ec2139ef46f9334e147" }
+librespot-oauth = { git = "https://github.com/and2049/librespot", rev = "3c8d876704028a903e411ec2139ef46f9334e147" }
+librespot-playback = { git = "https://github.com/and2049/librespot", rev = "3c8d876704028a903e411ec2139ef46f9334e147", features = ["rodio-backend"] }
 lofty = "0.24.0"
 notify = "8.2.0"
 parking_lot = "0.12.5"

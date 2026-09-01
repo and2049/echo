@@ -1,4 +1,4 @@
-use echo_core::app::AppState;
+use echo_core::app::{AppState, QueueRow};
 use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     format_duration_text, format_time, stabilize_terminal_emoji_width,
@@ -51,50 +51,55 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let sel = state.ui.selected_queue_index;
-    let rows: Vec<Row> = state.data
-        .queue
-        .iter()
-        .enumerate()
-        .map(|(i, track)| {
-            let is_in_visual = if let Some((start, end)) = visual_range {
-                i >= start && i <= end
-            } else {
-                false
-            };
+    let queue_rows = state.queue_rows();
+    let selected_row = state.queue_row_of(sel);
+    let rows: Vec<Row> = queue_rows
+        .into_iter()
+        .map(|row| match row {
+            QueueRow::Header(text) => {
+                Row::new(vec![Cell::from(""), Cell::from(text)]).style(header_style)
+            }
+            QueueRow::Track(i, track) => {
+                let is_in_visual = if let Some((start, end)) = visual_range {
+                    i >= start && i <= end
+                } else {
+                    false
+                };
 
-            let style = if is_in_visual {
-                state.ui
-                    .active_theme
-                    .selected_style()
-                    .bg(state.ui.active_theme.primary.rat())
-            } else if i == sel {
-                state.ui.active_theme.selected_style()
-            } else {
-                state.ui.active_theme.base_style()
-            };
-            let name = truncate_to_width_with_ellipsis(
-                &stabilize_terminal_emoji_width(&track.name),
-                w_track,
-            );
-            let artist = truncate_to_width_with_ellipsis(
-                &stabilize_terminal_emoji_width(&track.artist),
-                w_artist,
-            );
-            let dur = format_duration_text(format_time(track.duration_ms / 1000));
-            let liked_str = if state.data.liked_tracks.contains(&track.id) {
-                "♥"
-            } else {
-                " "
-            };
-            let liked_cell = Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
+                let style = if is_in_visual {
+                    state.ui
+                        .active_theme
+                        .selected_style()
+                        .bg(state.ui.active_theme.primary.rat())
+                } else if i == sel {
+                    state.ui.active_theme.selected_style()
+                } else {
+                    state.ui.active_theme.base_style()
+                };
+                let name = truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&track.name),
+                    w_track,
+                );
+                let artist = truncate_to_width_with_ellipsis(
+                    &stabilize_terminal_emoji_width(&track.artist),
+                    w_artist,
+                );
+                let dur = format_duration_text(format_time(track.duration_ms / 1000));
+                let liked_str = if state.data.liked_tracks.contains(&track.id) {
+                    "♥"
+                } else {
+                    " "
+                };
+                let liked_cell = Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
 
-            Row::new(vec![
-                liked_cell,
-                Cell::from(name),
-                Cell::from(artist).style(style.fg(state.ui.active_theme.text_muted.rat())),
-                Cell::from(dur).style(style.fg(state.ui.active_theme.text_muted.rat())),
-            ])
-            .style(style)
+                Row::new(vec![
+                    liked_cell,
+                    Cell::from(name),
+                    Cell::from(artist).style(style.fg(state.ui.active_theme.text_muted.rat())),
+                    Cell::from(dur).style(style.fg(state.ui.active_theme.text_muted.rat())),
+                ])
+                .style(style)
+            }
         })
         .collect();
 
@@ -114,6 +119,6 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
     .highlight_spacing(HighlightSpacing::Always);
 
     let mut ts = TableState::default();
-    ts.select(Some(sel));
+    ts.select(selected_row);
     frame.render_stateful_widget(table, inner, &mut ts);
 }

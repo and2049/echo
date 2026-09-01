@@ -70,6 +70,7 @@ pub struct Worker {
     first_party: Option<api::first_party::SpotifyWebApi>,
     artist_page_generation: Arc<AtomicU64>,
     spotify_mixer: Arc<parking_lot::Mutex<Option<Arc<dyn librespot_playback::mixer::Mixer>>>>,
+    spotify_spirc: Arc<parking_lot::Mutex<Option<librespot_connect::Spirc>>>,
     spotify_output_available: Arc<AtomicBool>,
     play_debounce: Option<(PlayDebounceKey, Instant)>,
     play_in_flight: Arc<AtomicBool>,
@@ -613,6 +614,7 @@ impl Worker {
             first_party,
             artist_page_generation: Arc::new(AtomicU64::new(0)),
             spotify_mixer: Arc::new(parking_lot::Mutex::new(None)),
+            spotify_spirc: Arc::new(parking_lot::Mutex::new(None)),
             spotify_output_available: Arc::new(AtomicBool::new(true)),
             play_debounce: None,
             play_in_flight: Arc::new(AtomicBool::new(false)),
@@ -988,9 +990,10 @@ impl Worker {
 
                                         audio::spawn_librespot_daemon(
                                             String::new(),
-                                            "echo-rs".to_string(),
+                                            audio::DEVICE_NAME.to_string(),
                                             self.tx.clone(),
                                             self.spotify_mixer.clone(),
+                                            self.spotify_spirc.clone(),
                                             self.spotify_output_available.clone(),
                                             is_playing.clone(),
                                             config.library.bitrate,
@@ -1576,19 +1579,18 @@ impl Worker {
                                         }).await;
                                         continue;
                                     }
-                                    let count = tracks.len();
+                                    let ids = tracks.iter().map(|track| track.id.clone()).collect();
                                     let snapshot = local_playback.add_to_queue(tracks);
                                     emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
-                                    let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                    let _ = self.tx.send(WorkerEvent::TracksQueued(ids)).await;
                                 } else if track_ids.iter().any(|id| id.starts_with("local:")) {
                                     let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
                                         label: "Spotify queue".to_string(),
                                         message: "local tracks can only be queued while local playback is active".to_string(),
                                     }).await;
                                 } else if let Some(ref sp) = spotify_opt {
-                                    let count = track_ids.len();
-                                    let _ = sp.add_to_queue(track_ids).await;
-                                    let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
+                                    let _ = sp.add_to_queue(track_ids.clone()).await;
+                                    let _ = self.tx.send(WorkerEvent::TracksQueued(track_ids)).await;
                                 }
                             }
                             AppEvent::AddTracksToPlaylist(playlist_id, track_ids) => {
@@ -1599,12 +1601,10 @@ impl Worker {
                                             .iter()
                                             .filter_map(LocalPlaylistEntry::from_track)
                                             .collect();
-                                        let count = entries.len();
                                         playlist.entries.extend(entries);
                                         playlist.updated_unix_secs = current_unix_secs();
                                         let _ = AppConfig::save_local_playlists(&local_playlists);
                                         let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
-                                        let _ = self.tx.send(WorkerEvent::TracksQueued(count)).await;
                                     } else {
                                         let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
                                             label: "Local playlist".to_string(),
@@ -1891,6 +1891,19 @@ impl Worker {
                                             let _ = self.tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
                                         }
                                     }
+                                }
+                            }
+                            AppEvent::ClearQueue => {
+                                let cleared = self
+                                    .spotify_spirc
+                                    .lock()
+                                    .as_ref()
+                                    .is_some_and(|spirc| spirc.clear_queue().is_ok());
+                                if !cleared {
+                                    let _ = self.tx.send(WorkerEvent::ApiRequestFailed {
+                                        label: "Clear queue".to_string(),
+                                        message: "the Spotify playback device is not running".to_string(),
+                                    }).await;
                                 }
                             }
                             AppEvent::FetchQueue => {

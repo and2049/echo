@@ -171,6 +171,9 @@ fn apply_synced_playback_item(
 
     if track_changed {
         state.playback.previous_track_image = state.playback.playing_track_image.take();
+        if state.ui.active_view == crate::app::ActiveView::Queue {
+            let _ = app_tx.send(AppEvent::FetchQueue);
+        }
 
         if state.playback.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
             state.playback.current_lyric_track_id = Some(item.id.clone());
@@ -202,5 +205,42 @@ fn apply_synced_playback_item(
         }
     } else if track_changed || state.playback.playing_track_artist.is_empty() {
         let _ = app_tx.send(AppEvent::LoadTrackMetadata(item.id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::TrackSource;
+
+    fn item(id: &str) -> PlaybackItem {
+        PlaybackItem {
+            id: id.to_string(),
+            source: TrackSource::Spotify,
+            local_path: None,
+            title: id.to_string(),
+            artist: "artist".to_string(),
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+            artist_id: None,
+        }
+    }
+
+    #[test]
+    fn a_track_change_refetches_the_queue_only_while_that_view_is_open() {
+        let mut state = AppState::new();
+        let (app_tx, mut app_rx) = mpsc::unbounded_channel();
+        let (worker_tx, _worker_rx) = mpsc::channel(8);
+
+        apply_synced_playback_item(item("a"), &mut state, &app_tx, &worker_tx);
+        state.ui.active_view = crate::app::ActiveView::Queue;
+        apply_synced_playback_item(item("a"), &mut state, &app_tx, &worker_tx);
+        apply_synced_playback_item(item("b"), &mut state, &app_tx, &worker_tx);
+
+        let fetches = std::iter::from_fn(|| app_rx.try_recv().ok())
+            .filter(|event| matches!(event, AppEvent::FetchQueue))
+            .count();
+        assert_eq!(fetches, 1);
     }
 }
