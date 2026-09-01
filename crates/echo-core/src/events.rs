@@ -46,6 +46,7 @@ pub enum AppEvent {
     GlobalSearch(String),
     AddToQueue(Vec<String>),
     FetchQueue,
+    ClearQueue,
     AddTracksToPlaylist(String, Vec<Track>),
     RemoveTracksFromPlaylist(String, Vec<String>),
     /// Arm (or with `None`, clear) the sleep timer that pauses playback when it fires.
@@ -156,7 +157,7 @@ pub enum WorkerEvent {
     },
     SearchResultsLoaded(SearchResults),
     QueueLoaded(Vec<Track>),
-    TracksQueued(usize),
+    TracksQueued(Vec<String>),
     HeaderImageProcessed(crate::artwork::SharedArtwork),
     ThumbnailProcessed {
         url: String,

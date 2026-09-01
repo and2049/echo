@@ -277,7 +277,16 @@ pub fn toggle_playback(state: &mut AppState) -> AppEvent {
     AppEvent::TogglePlayback(state.playback.is_playing)
 }
 
-pub fn next_track(state: &AppState) -> AppEvent {
+/// Pops the queue head optimistically so the queue view moves at once; the playback sync that
+/// follows a skip refetches the real queue while that view is open.
+pub fn next_track(state: &mut AppState) -> AppEvent {
+    if !state.data.queue.is_empty() {
+        state.data.queue.remove(0);
+        state.ui.selected_queue_index = state.ui.selected_queue_index.saturating_sub(1);
+        if !state.data.manual_queue.is_empty() {
+            state.data.manual_queue.remove(0);
+        }
+    }
     AppEvent::NextTrack {
         current_track_id: state.playback.playing_track_id.clone(),
     }
@@ -381,6 +390,28 @@ pub fn open_queue(state: &mut AppState) -> AppEvent {
     state.ui.active_view = crate::app::ActiveView::Queue;
     state.ui.selected_queue_index = 0;
     AppEvent::FetchQueue
+}
+
+/// Drops the manually queued tracks, keeping the current track and the rest of its context.
+/// Only echo's own Connect device can do this, so any other device gets a status message.
+pub fn clear_queue(state: &mut AppState) -> Option<AppEvent> {
+    if state.data.manual_queue.is_empty() {
+        return None;
+    }
+    let lang = state.ui.library_config.language.clone();
+    let cleared = state.playback.device_name == crate::worker::audio::DEVICE_NAME;
+    let key = if cleared { "messages.queue_cleared" } else { "messages.clear_queue_needs_device" };
+    state.ui.status_message = Some(crate::i18n::t(key, &lang));
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+    if !cleared {
+        return None;
+    }
+    let count = state.data.manual_queue.len().min(state.data.queue.len());
+    state.data.queue.drain(..count);
+    state.data.manual_queue.clear();
+    state.ui.selected_queue_index = 0;
+    Some(AppEvent::ClearQueue)
 }
 
 /// Opens the device-picker modal and asks the worker for the device list.
@@ -2136,6 +2167,48 @@ mod tests {
                 track_id: "track".to_string()
             }
         );
+    }
+
+    #[test]
+    fn skipping_pops_the_queue_head_and_keeps_the_cursor_on_its_track() {
+        let mut state = AppState::new();
+        state.data.queue = vec![spotify_track("q:a"), spotify_track("ctx:a"), spotify_track("ctx:b")];
+        state.data.manual_queue = vec!["q:a".to_string()];
+        state.ui.selected_queue_index = 2;
+
+        assert!(matches!(next_track(&mut state), AppEvent::NextTrack { .. }));
+        assert_eq!(state.data.queue[0].id, "ctx:a");
+        assert!(state.data.manual_queue.is_empty());
+        assert_eq!(state.ui.selected_queue_index, 1);
+    }
+
+    #[test]
+    fn clear_queue_drops_the_manual_head_and_emits_the_event() {
+        crate::i18n::init();
+        let mut state = AppState::new();
+        state.data.queue = vec![spotify_track("q:a"), spotify_track("ctx:a")];
+        state.data.manual_queue = vec!["q:a".to_string()];
+        state.ui.selected_queue_index = 1;
+
+        assert!(matches!(clear_queue(&mut state), Some(AppEvent::ClearQueue)));
+        assert!(state.data.manual_queue.is_empty());
+        assert_eq!(state.data.queue.len(), 1);
+        assert_eq!(state.ui.selected_queue_index, 0);
+    }
+
+    #[test]
+    fn clear_queue_is_a_no_op_without_manual_tracks_or_on_another_device() {
+        crate::i18n::init();
+        let mut state = AppState::new();
+        state.data.queue = vec![spotify_track("ctx:a")];
+        assert!(clear_queue(&mut state).is_none());
+        assert!(state.ui.status_message.is_none());
+
+        state.data.manual_queue = vec!["ctx:a".to_string()];
+        state.playback.device_name = "phone".to_string();
+        assert!(clear_queue(&mut state).is_none());
+        assert_eq!(state.data.queue.len(), 1);
+        assert!(state.ui.status_message.is_some());
     }
 
     #[test]

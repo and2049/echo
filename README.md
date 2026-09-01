@@ -225,6 +225,7 @@ While in Command Mode (`:`), you can use the following:
 - `:lang <en|zh|zh-CN>`: Switch language.
 - `:album`: Jump to the album of the currently selected track.
 - `:queue`: Open the Queue view.
+- `:clearqueue`: Clear the manually queued tracks (only while playing on this device).
 - `:vis`: Toggle the audio visualizer.
 - `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.

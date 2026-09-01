@@ -201,7 +201,7 @@ impl Default for PlaybackState {
             playing_track_image: None,
             previous_track_image: None,
             fetching_track_id: None,
-            device_name: "echo-rs".to_string(),
+            device_name: crate::worker::audio::DEVICE_NAME.to_string(),
             repeat_mode: "Off".to_string(),
             volume: 100,
             previous_volume: None,
@@ -274,6 +274,7 @@ pub struct DataState {
     pub tracklist_image_url: Option<String>,
     // Queue
     pub queue: Vec<Track>,
+    pub manual_queue: Vec<String>,
     // Devices
     pub devices: Vec<crate::models::Device>,
     // Artist page
@@ -306,6 +307,7 @@ impl DataState {
             active_tracklist_context: None,
             tracklist_image_url: None,
             queue: Vec::new(),
+            manual_queue: Vec::new(),
             devices: Vec::new(),
             artist_page_data: None,
             pending_artist_page_id: None,
@@ -338,6 +340,49 @@ pub enum ActiveView {
     ArtistList,
     ArtistPage,
     WhatsNew,
+}
+
+/// One line of the queue view: manually queued tracks lead under a "Next in queue" header, the
+/// rest of the playing context follows under "Next from". Track indices point into `data.queue`.
+pub enum QueueRow<'a> {
+    Header(String),
+    Track(usize, &'a Track),
+}
+
+impl AppState {
+    pub fn queue_rows(&self) -> Vec<QueueRow<'_>> {
+        let t = |key: &str| crate::i18n::t(key, &self.ui.library_config.language);
+        let manual = self.data.manual_queue.len().min(self.data.queue.len());
+        let mut rows = Vec::with_capacity(self.data.queue.len() + 2);
+        if manual > 0 {
+            rows.push(QueueRow::Header(t("ui.queue_next_in")));
+        }
+        for (ix, track) in self.data.queue.iter().enumerate() {
+            if ix == manual {
+                rows.push(QueueRow::Header(match self.playing_context_name() {
+                    Some(name) => t("ui.queue_next_from").replace("{}", &name),
+                    None => t("ui.queue_next_up"),
+                }));
+            }
+            rows.push(QueueRow::Track(ix, track));
+        }
+        rows
+    }
+
+    pub fn queue_row_of(&self, track_index: usize) -> Option<usize> {
+        self.queue_rows()
+            .iter()
+            .position(|row| matches!(row, QueueRow::Track(ix, _) if *ix == track_index))
+    }
+
+    fn playing_context_name(&self) -> Option<String> {
+        let context = self.playback.playing_context.as_ref()?;
+        if context.is_album {
+            self.data.saved_albums.iter().find(|a| a.id == context.context_id).map(|a| a.name.clone())
+        } else {
+            self.data.playlists.iter().find(|p| p.id == context.context_id).map(|p| p.name.clone())
+        }
+    }
 }
 
 const HISTORY_LIMIT: usize = 20;

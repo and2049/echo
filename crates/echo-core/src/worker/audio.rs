@@ -27,6 +27,9 @@ use tokio::sync::mpsc;
 /// retryable error rather than a permanently missing device.
 const SPIRC_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// Name under which echo registers itself as a Spotify Connect device.
+pub const DEVICE_NAME: &str = "echo-rs";
+
 /// Retries after the one-shot credential reset, backing off 2s → 4s → 8s → 16s.
 const DAEMON_MAX_ATTEMPTS: u32 = 4;
 
@@ -244,6 +247,7 @@ pub async fn spawn_librespot_daemon(
     device_name: String,
     tx: mpsc::Sender<WorkerEvent>,
     mixer_holder: Arc<parking_lot::Mutex<Option<Arc<dyn Mixer>>>>,
+    spirc_holder: Arc<parking_lot::Mutex<Option<Spirc>>>,
     output_available: Arc<AtomicBool>,
     playback_is_playing: Arc<AtomicBool>,
     bitrate: u32,
@@ -404,7 +408,7 @@ pub async fn spawn_librespot_daemon(
                 // task forever: no device, no error, nothing in the log. A timeout converts that
                 // silence into a retryable error.
                 log_daemon("spirc connecting...");
-                let (_spirc, spirc_task) = match tokio::time::timeout(
+                let (spirc, spirc_task) = match tokio::time::timeout(
                     SPIRC_CONNECT_TIMEOUT,
                     Spirc::new(connect_config, session.clone(), credentials, player, mixer),
                 )
@@ -420,10 +424,12 @@ pub async fn spawn_librespot_daemon(
                     }
                 };
 
+                *spirc_holder.lock() = Some(spirc);
                 log_daemon(&format!(
                     "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
                 ));
                 spirc_task.await;
+                *spirc_holder.lock() = None;
                 log_daemon("Spirc Daemon task exited!");
 
                 Ok(())

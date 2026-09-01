@@ -10,7 +10,7 @@
 //! that flag exists because thumbnails cost real estate and glitch on some terminals, neither of
 //! which applies here.
 
-use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
+use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::ThumbState;
 use gpui::{
@@ -1818,6 +1818,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
     let muted = theme.text_muted.gpui(WINDOW_FG());
 
     let count = app.state.data.queue.len();
+    let row_count = app.state.queue_rows().len();
 
     div()
         .flex_grow(1.0)
@@ -1853,7 +1854,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
         } else {
             uniform_list(
                 "queue-rows",
-                count,
+                row_count,
                 cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
                     let theme = &this.state.ui.active_theme;
                     let fg = theme.text.gpui(WINDOW_FG());
@@ -1863,10 +1864,20 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let secondary = theme.secondary.gpui(WINDOW_FG());
                     let selected = this.state.ui.selected_queue_index;
                     let visual = visual_range_in(&this.state, ActiveView::Queue);
+                    let has_manual = !this.state.data.manual_queue.is_empty();
+                    let rows = this.state.queue_rows();
 
                     range
-                        .map(|ix| {
-                            let track = &this.state.data.queue[ix];
+                        .map(|row_ix| match &rows[row_ix] {
+                            QueueRow::Header(text) => queue_header(
+                                text.clone(),
+                                (row_ix == 0 && has_manual).then(|| tr(&this.state, "actions.clear_queue")),
+                                fg,
+                                muted,
+                                cx,
+                            ),
+                            QueueRow::Track(ix, track) => {
+                            let (ix, track) = (*ix, *track);
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
 
                             pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover, |row| {
@@ -1947,6 +1958,8 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         .child(SharedString::from(format_time(track.duration_ms))),
                                 )
                             })
+                            .into_any_element()
+                            }
                         })
                         .collect()
                 }),
@@ -1955,6 +1968,42 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
             .flex_grow(1.0)
             .into_any_element()
         })
+}
+
+fn queue_header(
+    text: String,
+    clear_label: Option<SharedString>,
+    fg: Hsla,
+    muted: Hsla,
+    cx: &mut Context<EchoApp>,
+) -> gpui::AnyElement {
+    div()
+        .w_full()
+        .h(px(COMPACT_PILL.row_height))
+        .px_4()
+        .flex()
+        .items_center()
+        .justify_between()
+        .text_xs()
+        .text_color(muted)
+        .child(SharedString::from(text))
+        .when_some(clear_label, |el, label| {
+            el.child(
+                div()
+                    .id("clear-queue")
+                    .cursor_pointer()
+                    .text_color(fg)
+                    .hover(move |style| style.text_color(muted))
+                    .child(label)
+                    .on_click(cx.listener(|this: &mut EchoApp, _: &gpui::ClickEvent, _window, cx| {
+                        if let Some(event) = echo_core::intent::clear_queue(&mut this.state) {
+                            this.dispatch(event);
+                        }
+                        cx.notify();
+                    })),
+            )
+        })
+        .into_any_element()
 }
 
 /// "Playing from {}" label for the playback bar, resolving the playing context id to a

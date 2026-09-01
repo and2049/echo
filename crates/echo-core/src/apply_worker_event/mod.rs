@@ -81,7 +81,12 @@ pub fn apply_worker_event(
         WorkerEvent::SearchResultsLoaded(results) => data::handle_search_results_loaded(state, results),
         WorkerEvent::QueueLoaded(tracks) => data::handle_queue_loaded(state, tracks),
         WorkerEvent::DevicesLoaded(devices) => data::handle_devices_loaded(state, devices),
-        WorkerEvent::TracksQueued(count) => data::handle_tracks_queued(state, count),
+        WorkerEvent::TracksQueued(ids) => {
+            data::handle_tracks_queued(state, ids);
+            if state.ui.active_view == app::ActiveView::Queue {
+                let _ = app_tx.send(AppEvent::FetchQueue);
+            }
+        }
         WorkerEvent::TopTracksLoaded(tracks) => data::handle_top_tracks_loaded(state, tracks),
         WorkerEvent::TopArtistsLoaded(artists) => data::handle_top_artists_loaded(state, artists),
         WorkerEvent::RecentlyPlayedLoaded(tracks) => data::handle_recently_played_loaded(state, tracks),

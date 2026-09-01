@@ -642,7 +642,8 @@ impl EchoApp {
                 }
                 ActiveView::Queue => {
                     self.state.ui.selected_queue_index = index;
-                    self.queue_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                    let row = self.state.queue_row_of(index).unwrap_or(index);
+                    self.queue_scroll.scroll_to_item(row, ScrollStrategy::Nearest);
                 }
                 ActiveView::SearchResults => {
                     self.state.ui.selected_search_index = index;
@@ -2039,7 +2040,7 @@ impl EchoApp {
     }
 
     fn play_next(&mut self, cx: &mut Context<Self>) {
-        let event = echo_core::intent::next_track(&self.state);
+        let event = echo_core::intent::next_track(&mut self.state);
         self.dispatch(event);
         cx.notify();
     }
