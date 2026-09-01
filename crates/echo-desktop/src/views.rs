@@ -14,8 +14,9 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::ThumbState;
 use gpui::{
-    AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent, SharedString, Stateful, Window,
-    canvas, div, img, prelude::*, px, relative, svg, uniform_list,
+    Animation, AnimationExt, AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent,
+    SharedString, Stateful, Window, canvas, div, ease_out_quint, img, prelude::*, px, relative,
+    svg, uniform_list,
 };
 
 use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
@@ -1314,11 +1315,11 @@ fn search_bar(
         .flex_row()
         .items_center()
         // With the sidebar collapsed its button cluster moves here; otherwise an invisible
-        // stand-in balancing the right-side buttons (72 = themes + settings + pr_4 - pl_2)
-        // so the search box centers exactly.
+        // stand-in balancing the right-side buttons (104 = immersive + themes + settings +
+        // pr_4 - pl_2) so the search box centers exactly.
         .map(|el| match nav_cluster {
             Some(cluster) => el.child(cluster),
-            None => el.child(div().flex_none().w(px(72.0))),
+            None => el.child(div().flex_none().w(px(104.0))),
         })
         .child(div().flex_grow(1.0))
         .child(
@@ -1373,6 +1374,7 @@ fn search_bar(
             }),
         )
         .child(div().flex_grow(1.0))
+        .child(immersive_button(app, cx))
         .child(crate::icon_button(
             "themes",
             "icons/paint-board.svg",
@@ -3160,94 +3162,183 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
         .into_any_element()
 }
 
-/// The lyrics overlay: the current line (by playback position) highlighted and kept centered.
+/// Index of the lyric line playing at `progress_ms`: the last line that has started, or the
+/// first before any has.
+pub(crate) fn current_lyric_index(lines: &[echo_core::models::LyricLine], progress_ms: u32) -> usize {
+    lines
+        .iter()
+        .take_while(|line| line.start_ms <= progress_ms)
+        .count()
+        .saturating_sub(1)
+}
+
+/// The colors a lyric line takes by its place in the song: the current line accented, lines
+/// already sung in the text color, upcoming ones muted.
+struct LyricColors {
+    fg: Hsla,
+    muted: Hsla,
+    accent: Hsla,
+}
+
+impl LyricColors {
+    fn resolve(app: &EchoApp) -> Self {
+        let theme = &app.state.ui.active_theme;
+        Self {
+            fg: theme.text.gpui(WINDOW_FG()),
+            muted: theme.text_muted.gpui(WINDOW_FG()),
+            accent: theme.primary.gpui(WINDOW_FG()),
+        }
+    }
+
+    fn line(&self, ix: usize, current: usize) -> Hsla {
+        match ix.cmp(&current) {
+            std::cmp::Ordering::Equal => self.accent,
+            std::cmp::Ordering::Greater => self.muted,
+            std::cmp::Ordering::Less => self.fg,
+        }
+    }
+}
+
+/// One lyric line on a single row of `height` pixels, ellipsized if it is too long. A block
+/// with the line height set to the row, not a flex row: a flex item is measured at its
+/// max-content width, which defeats the ellipsis.
+fn lyric_row(text: SharedString, color: Hsla, height: f32, large: bool) -> Div {
+    div()
+        .w_full()
+        .h(px(height))
+        .px_4()
+        .overflow_hidden()
+        .text_ellipsis()
+        .whitespace_nowrap()
+        .map(|el| if large { el.text_xl() } else { el.text_sm() })
+        .line_height(px(height))
+        .text_color(color)
+        .child(text)
+}
+
+/// What stands in for the lyrics while they load or when the track has none; `None` once there
+/// are lines to show.
+fn lyric_status(app: &EchoApp) -> Option<AnyElement> {
+    let playback = &app.state.playback;
+    let key = if playback.is_fetching_lyrics {
+        "desktop.loading_lyrics"
+    } else if playback.current_lyrics.is_none() {
+        "desktop.no_lyrics"
+    } else {
+        return None;
+    };
+    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
+    Some(
+        div()
+            .py_8()
+            .flex()
+            .justify_center()
+            .text_color(muted)
+            .child(tr(&app.state, key))
+            .into_any_element(),
+    )
+}
+
+/// The modal's lyric list: every line, scrolled so the current one (by playback position) sits
+/// at the center whenever the list is long enough to allow it.
+fn lyric_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
+    let lines = app
+        .state
+        .playback
+        .current_lyrics
+        .as_ref()
+        .map(|lyrics| lyrics.lines.as_slice())
+        .unwrap_or_default();
+    let current = current_lyric_index(lines, app.state.playback.display_progress_ms());
+    app.lyrics_scroll
+        .scroll_to_item(current, gpui::ScrollStrategy::Center);
+
+    uniform_list(
+        "lyric-lines",
+        lines.len(),
+        cx.processor(|this: &mut EchoApp, range: std::ops::Range<usize>, _window, _cx| {
+            let colors = LyricColors::resolve(this);
+            let lines = this
+                .state
+                .playback
+                .current_lyrics
+                .as_ref()
+                .map(|lyrics| lyrics.lines.as_slice())
+                .unwrap_or_default();
+            let current = current_lyric_index(lines, this.state.playback.display_progress_ms());
+
+            range
+                .map(|ix| {
+                    let text = lines.get(ix).map(|line| line.text.clone()).unwrap_or_default();
+                    lyric_row(text.into(), colors.line(ix, current), MODAL_LYRIC_ROW, false).id(ix)
+                })
+                .collect()
+        }),
+    )
+    .track_scroll(&app.lyrics_scroll)
+    .flex_grow(1.0)
+    .into_any_element()
+}
+
+/// The immersive lyrics: a fixed window of `rows` (odd) whole lines with the current line
+/// pinned to the center row, so nothing is ever clipped and the first and last lines of a song
+/// sit exactly where the middle ones do. When the line advances the column glides up one row
+/// over [`LYRIC_GLIDE`]; the extra row above the window carries the line on its way out. Rows
+/// fade toward the edges (see [`lyric_opacity`]), the outermost still faintly legible.
+fn lyric_window(app: &EchoApp, rows: usize, row_height: f32) -> AnyElement {
+    let colors = LyricColors::resolve(app);
+    let lines = app
+        .state
+        .playback
+        .current_lyrics
+        .as_ref()
+        .map(|lyrics| lyrics.lines.as_slice())
+        .unwrap_or_default();
+    let current = current_lyric_index(lines, app.state.playback.display_progress_ms());
+    let half = (rows / 2) as isize;
+    let reach = (half + 1) as f32;
+    let column: Vec<(isize, SharedString, Hsla)> = (-half - 1..=half)
+        .map(|offset| {
+            let ix = current.checked_add_signed(offset);
+            let text = ix
+                .and_then(|ix| lines.get(ix))
+                .map(|line| SharedString::from(line.text.clone()))
+                .unwrap_or_default();
+            (offset, text, colors.line(ix.unwrap_or(current), current))
+        })
+        .collect();
+
+    div()
+        .relative()
+        .w_full()
+        .h(px(rows as f32 * row_height))
+        .overflow_hidden()
+        .child(
+            div().absolute().w_full().with_animation(
+                ("lyric-glide", current),
+                Animation::new(LYRIC_GLIDE).with_easing(ease_out_quint()),
+                move |el, t| {
+                    el.top(px(-row_height * t))
+                        .children(column.iter().map(|(offset, text, color)| {
+                            let distance = (*offset as f32 + 1.0 - t).abs();
+                            lyric_row(text.clone(), *color, row_height, true)
+                                .opacity(lyric_opacity(distance, reach))
+                        }))
+                },
+            ),
+        )
+        .into_any_element()
+}
+
+const MODAL_LYRIC_ROW: f32 = 26.0;
+const LYRIC_GLIDE: std::time::Duration = std::time::Duration::from_millis(240);
+
+/// The lyrics overlay: [`lyric_list`] in a centered panel titled with the track.
 pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-
-    let body = if app.state.playback.is_fetching_lyrics {
-        div()
-            .py_8()
-            .flex()
-            .justify_center()
-            .text_color(muted)
-            .child(tr(&app.state, "desktop.loading_lyrics"))
-            .into_any_element()
-    } else if let Some(lyrics) = app.state.playback.current_lyrics.clone() {
-        let progress_ms = app.state.playback.display_progress_ms();
-        let current = lyrics
-            .lines
-            .iter()
-            .take_while(|line| line.start_ms <= progress_ms)
-            .count()
-            .saturating_sub(1);
-        let count = lyrics.lines.len();
-        app.lyrics_scroll
-            .scroll_to_item(current, gpui::ScrollStrategy::Center);
-
-        uniform_list(
-            "lyric-lines",
-            count,
-            cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, _cx| {
-                let theme = &this.state.ui.active_theme;
-                let fg = theme.text.gpui(WINDOW_FG());
-                let muted = theme.text_muted.gpui(WINDOW_FG());
-                let accent = theme.primary.gpui(WINDOW_FG());
-                let progress_ms = this.state.playback.display_progress_ms();
-                let lines = this
-                    .state
-                    .playback
-                    .current_lyrics
-                    .as_ref()
-                    .map(|lyrics| lyrics.lines.clone())
-                    .unwrap_or_default();
-                let current = lines
-                    .iter()
-                    .take_while(|line| line.start_ms <= progress_ms)
-                    .count()
-                    .saturating_sub(1);
-
-                range
-                    .map(|ix| {
-                        let text = lines.get(ix).map(|line| line.text.clone()).unwrap_or_default();
-                        let color = if ix == current {
-                            accent
-                        } else if ix > current {
-                            muted
-                        } else {
-                            fg
-                        };
-                        div()
-                            .id(ix)
-                            .w_full()
-                            .h(px(26.0))
-                            .px_4()
-                            .flex()
-                            .items_center()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .text_sm()
-                            .text_color(color)
-                            .child(SharedString::from(text))
-                    })
-                    .collect()
-            }),
-        )
-        .track_scroll(&app.lyrics_scroll)
-        .flex_grow(1.0)
-        .into_any_element()
-    } else {
-        div()
-            .py_8()
-            .flex()
-            .justify_center()
-            .text_color(muted)
-            .child(tr(&app.state, "desktop.no_lyrics"))
-            .into_any_element()
-    };
+    let body = lyric_status(app).unwrap_or_else(|| lyric_list(app, cx));
 
     div()
         .id("lyrics-backdrop")
@@ -3286,6 +3377,195 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         )),
                 )
                 .child(body),
+        )
+}
+
+/// The immersive toggle, accented while the view is up. It is the one control the immersive
+/// view keeps, so it lives here rather than inline in the search bar.
+fn immersive_button(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let color = if app.immersive {
+        theme.primary.gpui(WINDOW_FG())
+    } else {
+        theme.text_muted.gpui(WINDOW_FG())
+    };
+    crate::icon_button(
+        "immersive",
+        "icons/full-screen.svg",
+        color,
+        DesktopPalette::resolve(theme).wash,
+        cx,
+        |this, cx| this.toggle_immersive(cx),
+    )
+}
+
+/// Edge of the immersive cover, in pixels, for a body of `width` x `height`: the largest square
+/// that, with the caption under it, fits the height inside the margins, bounded by the
+/// half-width; then scaled down to leave air around it, and capped for very tall windows.
+pub(crate) fn immersive_cover_edge(width: f32, height: f32) -> f32 {
+    let by_width = width * 0.5 - 2.0 * IMMERSIVE_MARGIN;
+    let by_height = height - 2.0 * IMMERSIVE_MARGIN - IMMERSIVE_CAPTION_HEIGHT;
+    (by_width.min(by_height) * IMMERSIVE_COVER_SCALE).clamp(0.0, IMMERSIVE_COVER_MAX)
+}
+
+/// Rows in the immersive lyric window for a panel `panel_height` tall: as many whole rows as
+/// fit, made odd so one row is the exact center, and at least one.
+pub(crate) fn lyric_window_rows(panel_height: f32, row_height: f32) -> usize {
+    let rows = (panel_height / row_height).max(1.0) as usize;
+    if rows % 2 == 0 { rows - 1 } else { rows }
+}
+
+/// Opacity of a lyric row `distance` rows from the center when the row just past the window's
+/// edge is `reach` rows away: full at the center, easing out so the neighbors stay readable and
+/// reaching transparent one row beyond the edge — the Apple Music fade. `distance` is
+/// fractional mid-glide.
+pub(crate) fn lyric_opacity(distance: f32, reach: f32) -> f32 {
+    let t = (distance / reach).min(1.0);
+    1.0 - t * t
+}
+
+const IMMERSIVE_MARGIN: f32 = 48.0;
+const ICON_BUTTON_EDGE: f32 = 32.0;
+/// The caption under the cover: the gap, then the title (text_2xl, 32px line) and artist
+/// (text_lg, 28px line) with gap_1 between. The lyrics column pads its bottom by this much so
+/// its centered panel lands on the cover's center rather than the block's — see
+/// [`immersive_view`].
+const IMMERSIVE_CAPTION_HEIGHT: f32 = IMMERSIVE_CAPTION_GAP + 32.0 + 4.0 + 28.0;
+const IMMERSIVE_CAPTION_GAP: f32 = 24.0;
+const IMMERSIVE_COVER_SCALE: f32 = 0.75;
+const IMMERSIVE_COVER_MAX: f32 = 480.0;
+/// The lyric window fills up to this share of the body height, centered on the cover.
+const IMMERSIVE_LYRICS_SHARE: f32 = 0.5;
+const IMMERSIVE_LYRIC_ROW: f32 = 40.0;
+
+/// The immersive view: the cover with the track's title and artist under it, that whole block
+/// centered in the left half; the synced lyrics in a half-height panel on the right, centered
+/// on the cover (not the block, which would read as off-center against the caption); and the
+/// toggle as the only control. Everything else — sidebar, navigation, search, playback bar —
+/// is gone until it is toggled off.
+pub fn immersive_view(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let playback = &app.state.playback;
+    let has_track = playback.playing_track_id.is_some();
+    let title: SharedString = if playback.playing_track_title.is_empty() {
+        tr(&app.state, "desktop.nothing_playing")
+    } else {
+        playback.playing_track_title.clone().into()
+    };
+    let artist: SharedString = playback.playing_track_artist.clone().into();
+    let viewport = window.viewport_size();
+    let body_height = f32::from(viewport.height) - TITLEBAR_HEIGHT;
+    let edge = immersive_cover_edge(f32::from(viewport.width), body_height);
+    let rows = lyric_window_rows(body_height * IMMERSIVE_LYRICS_SHARE, IMMERSIVE_LYRIC_ROW);
+    let cover = playback
+        .playing_track_image
+        .as_ref()
+        .or(playback.previous_track_image.as_ref())
+        .cloned()
+        .and_then(|artwork| app.images.get(&artwork));
+    let cover = match cover {
+        Some(image) => img(image)
+            .flex_none()
+            .w(px(edge))
+            .h(px(edge))
+            .rounded_lg()
+            .into_any_element(),
+        None => div()
+            .flex_none()
+            .w(px(edge))
+            .h(px(edge))
+            .rounded_lg()
+            .bg(palette.wash)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                svg()
+                    .path("icons/music-note.svg")
+                    .w(px(edge * 0.25))
+                    .h(px(edge * 0.25))
+                    .text_color(muted),
+            )
+            .into_any_element(),
+    };
+    let lyrics =
+        lyric_status(app).unwrap_or_else(|| lyric_window(app, rows, IMMERSIVE_LYRIC_ROW));
+
+    div()
+        .id("immersive")
+        .relative()
+        .flex_grow(1.0)
+        .flex()
+        .flex_row()
+        .overflow_hidden()
+        .child(
+            div()
+                .w(relative(0.5))
+                .h_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(px(IMMERSIVE_CAPTION_GAP))
+                .child(cover)
+                .child(
+                    div()
+                        .w(px(edge))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            crate::playing_track_link(
+                                "immersive-title",
+                                title,
+                                fg,
+                                has_track,
+                                ActionMenuAction::GoToAlbum,
+                                cx,
+                            )
+                            .text_2xl(),
+                        )
+                        .child(
+                            crate::playing_track_link(
+                                "immersive-artist",
+                                artist,
+                                muted,
+                                has_track,
+                                ActionMenuAction::GoToArtist,
+                                cx,
+                            )
+                            .text_lg(),
+                        ),
+                ),
+        )
+        .child(
+            div()
+                .w(relative(0.5))
+                .h_full()
+                .pr(px(IMMERSIVE_MARGIN))
+                // Centering inside a box shortened by the caption puts the panel's midpoint half
+                // a caption above the window's, exactly where the cover's midpoint is.
+                .pb(px(IMMERSIVE_CAPTION_HEIGHT))
+                .flex()
+                .flex_col()
+                .justify_center()
+                .child(lyrics),
+        )
+        // The exact pixels the search bar gives it (pr_4 plus the themes and settings buttons
+        // to its right), so toggling never moves the button out from under the pointer.
+        .child(
+            div()
+                .absolute()
+                .top_2()
+                .right(px(16.0 + 2.0 * ICON_BUTTON_EDGE))
+                .child(immersive_button(app, cx)),
         )
 }
 
@@ -3431,6 +3711,7 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
             ("shift-D", "desktop.help.devices"),
             ("shift-L", "desktop.help.lyrics"),
             ("ctrl-shift-L", "desktop.help.lyrics_bar"),
+            ("shift-F", "desktop.help.immersive"),
         ],
     ),
     (
@@ -5025,4 +5306,65 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         )),
                 ),
         )
+}
+
+#[cfg(test)]
+mod immersive_tests {
+    use super::*;
+    use echo_core::models::LyricLine;
+
+    fn line(start_ms: u32) -> LyricLine {
+        LyricLine {
+            start_ms,
+            text: String::new(),
+        }
+    }
+
+    #[test]
+    fn current_lyric_is_last_started_line() {
+        let lines = [line(0), line(1_000), line(2_000)];
+        assert_eq!(current_lyric_index(&lines, 0), 0);
+        assert_eq!(current_lyric_index(&lines, 1_500), 1);
+        assert_eq!(current_lyric_index(&lines, 9_000), 2);
+    }
+
+    #[test]
+    fn current_lyric_before_first_line_is_first() {
+        let lines = [line(500), line(1_000)];
+        assert_eq!(current_lyric_index(&lines, 100), 0);
+        assert_eq!(current_lyric_index(&[], 100), 0);
+    }
+
+    #[test]
+    fn cover_edge_fits_the_narrower_axis() {
+        // Wide body: the half-width minus margins bounds the square (504), scaled to 378.
+        assert_eq!(immersive_cover_edge(1200.0, 900.0), 378.0);
+        // Short body: the height minus margins and the caption bounds it (316), scaled to 237.
+        assert_eq!(immersive_cover_edge(1600.0, 500.0), 237.0);
+    }
+
+    #[test]
+    fn lyric_opacity_eases_to_transparent_past_the_edge() {
+        assert_eq!(lyric_opacity(0.0, 5.0), 1.0);
+        assert!(lyric_opacity(1.0, 5.0) > 0.9);
+        assert!(lyric_opacity(4.0, 5.0) < 0.4);
+        assert!(lyric_opacity(4.0, 5.0) > 0.3);
+        assert_eq!(lyric_opacity(5.0, 5.0), 0.0);
+        assert_eq!(lyric_opacity(9.0, 5.0), 0.0);
+    }
+
+    #[test]
+    fn lyric_window_holds_an_odd_number_of_whole_rows() {
+        assert_eq!(lyric_window_rows(360.0, 40.0), 9);
+        assert_eq!(lyric_window_rows(434.0, 40.0), 9);
+        assert_eq!(lyric_window_rows(479.0, 40.0), 11);
+        assert_eq!(lyric_window_rows(0.0, 40.0), 1);
+        assert_eq!(lyric_window_rows(80.0, 40.0), 1);
+    }
+
+    #[test]
+    fn cover_edge_is_capped_and_never_negative() {
+        assert_eq!(immersive_cover_edge(4000.0, 3000.0), IMMERSIVE_COVER_MAX);
+        assert_eq!(immersive_cover_edge(50.0, 50.0), 0.0);
+    }
 }

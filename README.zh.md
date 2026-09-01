@@ -135,7 +135,7 @@ cargo build --release -p echo-desktop -p spotify-tui
 
 **导航**：`j` / `k` / `↓` / `↑` 移动，`gg` / `G` 跳到开头 / 末尾，`ctrl-b` / `ctrl-f` 翻页，`ctrl-u` / `ctrl-d` 翻半页，`enter` / `z` 打开，`h` / `esc` 返回，`←` / `→` 在窗格间移动焦点，`tab` 切换标签页，`gc` 跳转到正在播放的曲目。
 
-**播放**：`space` 播放/暂停，`[` / `]`（或 `ctrl-←` / `ctrl-→`）上一曲 / 下一曲，`,` / `.` 跳转进度，`-` / `=` 音量，`shift-M` 静音，`s` / `r` 随机播放 / 重复，`shift-D` 设备菜单，`shift-L` 全屏歌词，`ctrl-shift-L` 播放栏内歌词。
+**播放**：`space` 播放/暂停，`[` / `]`（或 `ctrl-←` / `ctrl-→`）上一曲 / 下一曲，`,` / `.` 跳转进度，`-` / `=` 音量，`shift-M` 静音，`s` / `r` 随机播放 / 重复，`shift-D` 设备菜单，`shift-L` 全屏歌词，`ctrl-shift-L` 播放栏内歌词，`shift-F` 沉浸视图。
 
 **库操作**：`l` 喜欢/取消喜欢，`a` 添加到播放列表，`shift-A` 曲目操作，`q` / `shift-Q` 队列，`shift-J` / `shift-K` 在自己的播放列表中移动曲目，`dd` 删除，`v` 选择范围，`m` 固定，`c` / `e` 创建 / 重命名。
 

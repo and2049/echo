@@ -23,7 +23,7 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, Context, FocusHandle, Hsla, KeyBinding, Pixels, ScrollHandle, ScrollStrategy,
+    App, Bounds, Context, Div, FocusHandle, Hsla, KeyBinding, Pixels, ScrollHandle, ScrollStrategy,
     SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
     div, img, prelude::*, px, size, svg,
 };
@@ -68,6 +68,7 @@ actions!(
         ToggleLyrics,
         ToggleInlineLyrics,
         ToggleThemes,
+        ToggleImmersive,
         JumpToCurrent,
         OpenCommand,
         CommandSearch,
@@ -201,6 +202,7 @@ pub(crate) struct EchoApp {
     pub(crate) sidebar_width: f32,
     pub(crate) sidebar_collapsed: bool,
     pub(crate) theme_modal_open: bool,
+    pub(crate) immersive: bool,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
     pub(crate) sort_menu_index: usize,
@@ -499,6 +501,7 @@ impl EchoApp {
             sidebar_width: sidebar_width.clamp(180.0, 480.0),
             sidebar_collapsed,
             theme_modal_open: false,
+            immersive: false,
             theme_modal_index: 0,
             sort_menu_open: false,
             sort_menu_index: 0,
@@ -872,6 +875,11 @@ impl EchoApp {
         cx.notify();
     }
 
+    pub(crate) fn toggle_immersive(&mut self, cx: &mut Context<Self>) {
+        self.immersive = !self.immersive;
+        cx.notify();
+    }
+
     fn toggle_themes(&mut self, cx: &mut Context<Self>) {
         self.theme_modal_open = !self.theme_modal_open;
         if self.theme_modal_open {
@@ -920,6 +928,8 @@ impl EchoApp {
             self.help_open = false;
         } else if self.state.ui.lyrics_modal_open {
             self.state.ui.lyrics_modal_open = false;
+        } else if self.immersive {
+            self.immersive = false;
         } else if self.history_back(cx) {
         } else if self.state.ui.active_view == ActiveView::TrackList {
             self.state.ui.active_view = if self.search_has_results() {
@@ -2326,14 +2336,7 @@ impl EchoApp {
                         );
                     }
                     let progress = self.state.playback.display_progress_ms();
-                    let mut current = 0;
-                    for (index, line) in lyrics.lines.iter().enumerate() {
-                        if line.start_ms <= progress {
-                            current = index;
-                        } else {
-                            break;
-                        }
-                    }
+                    let current = views::current_lyric_index(&lyrics.lines, progress);
                     (
                         lyrics.lines[current].text.clone(),
                         lyrics
@@ -2420,58 +2423,26 @@ impl EchoApp {
                                     .flex_grow(1.0)
                                     .overflow_hidden()
                                     .child(
-                                        div()
-                                            .id("playing-title")
-                                            .text_color(fg)
-                                            .text_sm()
-                                            .whitespace_nowrap()
-                                            .text_ellipsis()
-                                            .overflow_hidden()
-                                            .when(has_track, |el| {
-                                                el.cursor_pointer()
-                                                    .hover(|style| style.underline())
-                                                    .on_click(cx.listener(
-                                                        |this, _event, _window, cx| {
-                                                            if let Some(ctx) =
-                                                                this.playing_track_context()
-                                                            {
-                                                                this.go_to(
-                                                                    ctx,
-                                                                    echo_core::models::ActionMenuAction::GoToAlbum,
-                                                                    cx,
-                                                                );
-                                                            }
-                                                        },
-                                                    ))
-                                            })
-                                            .child(title),
+                                        playing_track_link(
+                                            "playing-title",
+                                            title,
+                                            fg,
+                                            has_track,
+                                            echo_core::models::ActionMenuAction::GoToAlbum,
+                                            cx,
+                                        )
+                                        .text_sm(),
                                     )
                                     .child(
-                                        div()
-                                            .id("playing-artist")
-                                            .text_color(muted)
-                                            .text_xs()
-                                            .whitespace_nowrap()
-                                            .text_ellipsis()
-                                            .overflow_hidden()
-                                            .when(has_track, |el| {
-                                                el.cursor_pointer()
-                                                    .hover(|style| style.underline())
-                                                    .on_click(cx.listener(
-                                                        |this, _event, _window, cx| {
-                                                            if let Some(ctx) =
-                                                                this.playing_track_context()
-                                                            {
-                                                                this.go_to(
-                                                                    ctx,
-                                                                    echo_core::models::ActionMenuAction::GoToArtist,
-                                                                    cx,
-                                                                );
-                                                            }
-                                                        },
-                                                    ))
-                                            })
-                                            .child(artist),
+                                        playing_track_link(
+                                            "playing-artist",
+                                            artist,
+                                            muted,
+                                            has_track,
+                                            echo_core::models::ActionMenuAction::GoToArtist,
+                                            cx,
+                                        )
+                                        .text_xs(),
                                     ),
                             ),
                     )
@@ -2809,6 +2780,34 @@ pub(crate) fn sort_arg(sort: echo_core::app::TrackSort) -> &'static str {
     }
 }
 
+/// The playing track's title or artist as a link: clicking jumps to the album or artist page
+/// through the same action-menu path the context menu uses. Callers add the text size.
+pub(crate) fn playing_track_link(
+    id: &'static str,
+    text: SharedString,
+    color: Hsla,
+    has_track: bool,
+    action: echo_core::models::ActionMenuAction,
+    cx: &mut Context<EchoApp>,
+) -> gpui::Stateful<Div> {
+    div()
+        .id(id)
+        .text_color(color)
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .overflow_hidden()
+        .when(has_track, |el| {
+            el.cursor_pointer()
+                .hover(|style| style.underline())
+                .on_click(cx.listener(move |this, _event, _window, cx| {
+                    if let Some(ctx) = this.playing_track_context() {
+                        this.go_to(ctx, action, cx);
+                    }
+                }))
+        })
+        .child(text)
+}
+
 pub(crate) fn icon_button(
     id: &'static str,
     icon: &'static str,
@@ -3059,6 +3058,9 @@ impl Render for EchoApp {
             }))
             .on_action(cx.listener(|this, _: &ToggleLyrics, _window, cx| this.toggle_lyrics(cx)))
             .on_action(cx.listener(|this, _: &ToggleThemes, _window, cx| this.toggle_themes(cx)))
+            .on_action(cx.listener(|this, _: &ToggleImmersive, _window, cx| {
+                this.toggle_immersive(cx)
+            }))
             .on_action(cx.listener(|this, _: &HalfPageUp, _window, cx| {
                 this.move_selection(-PAGE_ROWS / 2, cx)
             }))
@@ -3147,21 +3149,27 @@ impl Render for EchoApp {
             // The window's backdrop: the one fill covering every corner, so it rounds all four.
             .map(|el| views::round_client_corners(el, corners, views::ClientCorners::All))
             .when_some(titlebar, |el, bar| el.child(bar))
-            .child(
-                div()
-                    .flex_grow(1.0)
-                    .flex()
-                    .flex_row()
-                    .overflow_hidden()
-                    .when(!self.sidebar_collapsed, |el| {
-                        el.child(views::sidebar(self, cx))
-                    })
-                    .child(views::main_area(self, window, cx)),
-            )
-            .when_some(status_line, |el, line| el.child(line))
+            .map(|el| {
+                if self.immersive {
+                    el.child(views::immersive_view(self, window, cx))
+                } else {
+                    el.child(
+                        div()
+                            .flex_grow(1.0)
+                            .flex()
+                            .flex_row()
+                            .overflow_hidden()
+                            .when(!self.sidebar_collapsed, |el| {
+                                el.child(views::sidebar(self, cx))
+                            })
+                            .child(views::main_area(self, window, cx)),
+                    )
+                    .when_some(status_line, |el, line| el.child(line))
+                }
+            })
             .when_some(command_bar, |el, bar| el.child(bar))
             .when_some(audio_banner, |el, banner| el.child(banner))
-            .child(self.render_playback_bar(cx))
+            .when(!self.immersive, |el| el.child(self.render_playback_bar(cx)))
             .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
@@ -3306,6 +3314,7 @@ fn main() {
             KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
             KeyBinding::new("ctrl-shift-l", ToggleInlineLyrics, LIST_KEYS),
             KeyBinding::new("t", ToggleThemes, LIST_KEYS),
+            KeyBinding::new("shift-f", ToggleImmersive, LIST_KEYS),
             // The platform-conventional preferences shortcut; global so it also works while
             // the search box has focus.
             KeyBinding::new("ctrl-,", ToggleSettings, None),
