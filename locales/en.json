@@ -145,6 +145,7 @@
       "devices": "Devices",
       "lyrics": "Lyrics",
       "lyrics_bar": "Lyrics in the playback bar",
+      "immersive": "Immersive view",
       "add_playlist": "Add to playlist (or save album)",
       "track_actions": "Track actions",
       "queue": "Queue track / open queue",

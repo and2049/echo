@@ -135,7 +135,7 @@ The desktop app works with the mouse — click a playlist, artist, or track to o
 
 **Navigation**: `j` / `k` / `↓` / `↑` to move, `gg` / `G` to jump to first / last, `ctrl-b` / `ctrl-f` to page, `ctrl-u` / `ctrl-d` for half a page, `enter` / `z` to open, `h` / `esc` to go back, `←` / `→` to move focus between panes, `tab` to switch tabs, `gc` to jump to the playing track.
 
-**Playback**: `space` play/pause, `[` / `]` (or `ctrl-←` / `ctrl-→`) previous / next, `,` / `.` seek, `-` / `=` volume, `shift-M` mute, `s` / `r` shuffle / repeat, `shift-D` device menu, `shift-L` full-screen lyrics, `ctrl-shift-L` lyrics in the player bar.
+**Playback**: `space` play/pause, `[` / `]` (or `ctrl-←` / `ctrl-→`) previous / next, `,` / `.` seek, `-` / `=` volume, `shift-M` mute, `s` / `r` shuffle / repeat, `shift-D` device menu, `shift-L` full-screen lyrics, `ctrl-shift-L` lyrics in the player bar, `shift-F` immersive view.
 
 **Library**: `l` like/unlike, `a` add to playlist, `shift-A` track actions, `q` / `shift-Q` queue, `shift-J` / `shift-K` move a track within your own playlist, `dd` delete, `v` select a range, `m` pin, `c` / `e` create / rename.
 
