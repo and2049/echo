@@ -1,6 +1,5 @@
 # Changelog
 
 ### Desktop App
- - Fix local path parsing for Windows
- - Add sidebar toggling and page navigation
- - Add cursor tracking to input boxes
+ - Create pill for onboarding callback link to allow write to clipboard
+ - Add clear queue feature from Spotify
