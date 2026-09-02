@@ -2,20 +2,22 @@
 //! point folded by octaves of travelling sines before it is weighed. The recipe follows the
 //! shader `for (z, d; i++ < 20;) { p = z * dir; d = 4; 6 times: d += d, p = p.yzx +
 //! sin(p * d - T) / d; z += .1 - len(p) / 9; O += z * z * (2 - sin(p * 5)) / len(p) }` with
-//! fewer steps and octaves, since a canvas of a few thousand pixels cannot show the fine ones,
-//! a bounded denominator (see [`NEAR`]), and the color term reduced to a hue so the palette
+//! the near steps skipped (see [`NEAR`]) and the color term reduced to a hue so the palette
 //! can supply the colors.
 
-const STEPS: usize = 12;
-const OCTAVES: usize = 4;
+const STEPS: usize = 20;
+const OCTAVES: usize = 6;
 /// Half the first octave's frequency; every octave doubles the one before.
-const SEED_FREQUENCY: f32 = 2.0;
+const SEED_FREQUENCY: f32 = 4.0;
 /// The hue is read from sines of the point at this frequency.
 const HUE_FREQUENCY: f32 = 5.0;
-/// A step's light is `z * z / (NEAR + len(p))`: the shader's `.001` lets the first steps, where
-/// every ray still sits at the fold's fixed point, flash the whole canvas whenever the sines'
-/// offset passes zero; a wider floor keeps the field's brightness steady around the loop.
-const NEAR: f32 = 0.3;
+/// The filaments: a fine sine of the point, folded into the distance the light divides by.
+const FILAMENT_FREQUENCY: f32 = 33.0;
+const FILAMENT_STRENGTH: f32 = 1.0 / 99.0;
+/// Steps closer to the eye than this shed no light: there every ray still sits at the fold's
+/// fixed point, so in the shader they flash the whole canvas whenever the sines' offset
+/// passes zero.
+const NEAR: f32 = 0.25;
 
 /// What one ray gathered: how much light, and where along the palette (in `0..1`).
 pub struct Sample {
@@ -60,7 +62,12 @@ pub fn march(u: f32, v: f32, time: f32) -> Sample {
         }
         let len = p.len();
         z += 0.1 - len / 9.0;
-        let weight = z * z / (NEAR + len);
+        if z < NEAR {
+            continue;
+        }
+        let filament = |v: f32| (v * FILAMENT_FREQUENCY).sin() * FILAMENT_STRENGTH;
+        let filaments = V3 { x: filament(p.x), y: filament(p.y), z: filament(p.z) }.len();
+        let weight = z * z / (0.001 + (len * len + filaments * filaments).sqrt());
         glow += weight;
         hue += weight * (p.x * HUE_FREQUENCY).sin();
     }

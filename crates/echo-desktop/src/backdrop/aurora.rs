@@ -9,10 +9,10 @@ use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
 use super::Tone;
 
-const SIZE: (usize, usize) = (128, 80);
+const SIZE: (usize, usize) = (192, 120);
 /// Every curtain leans this much: height gained from the left edge to the right.
 const LEAN: f32 = 0.12;
-const BLUR_RADIUS: usize = 6;
+const BLUR_RADIUS: usize = 4;
 const FADE: (f32, f32) = (0.55, 0.95);
 const FADE_DEPTH: f32 = 0.75;
 /// Per curtain, prominent color first: the height of its spine, how far the spine ripples,
