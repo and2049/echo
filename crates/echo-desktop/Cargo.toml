@@ -33,6 +33,15 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd
     "font-kit",
 ] }
 
+# The tray icon that stands in for the closed window. Target-gated: tray-icon's Linux side
+# would pull in gtk and libappindicator, so Linux uses ksni (StatusNotifierItem over D-Bus,
+# zbus is already in the tree) and macOS needs none — the Dock keeps the app alive there.
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.24"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.3"
+
 [build-dependencies]
 embed-resource = "3"
 

@@ -345,10 +345,10 @@ fn caption_button(
             el.on_click(move |_event, window, cx| match area {
                 gpui::WindowControlArea::Min => window.minimize_window(),
                 gpui::WindowControlArea::Max => window.zoom_window(),
-                // Not `remove_window`, which drops the window without running
-                // `on_window_should_close` and would lose the saved window rectangle.
+                // Not `remove_window` directly: that skips `on_window_should_close`, so the
+                // action persists the rectangle and decides tray-or-quit first.
                 gpui::WindowControlArea::Close => {
-                    window.dispatch_action(Box::new(crate::Quit), cx)
+                    window.dispatch_action(Box::new(crate::CloseWindow), cx)
                 }
                 gpui::WindowControlArea::Drag => {}
             })
@@ -4173,6 +4173,19 @@ pub fn settings_modal(
         ),
     );
 
+    let tray_row = row(
+        s("desktop.settings.tray"),
+        Some(s("desktop.settings.tray_desc")),
+        choices(
+            "tray",
+            vec![
+                (s("ui.on"), "tray on".into(), config.close_to_tray),
+                (s("ui.off"), "tray off".into(), !config.close_to_tray),
+            ],
+            cx,
+        ),
+    );
+
     let sort_row = row(
         s("desktop.settings.order"),
         Some(s("desktop.settings.order_desc")),
@@ -4530,6 +4543,9 @@ pub fn settings_modal(
                         .child(language_row)
                         .child(pixelate_row)
                         .child(backdrop_row)
+                        .when(!cfg!(target_os = "macos"), |el| {
+                            el.child(heading(s("desktop.settings.window"))).child(tray_row)
+                        })
                         .child(heading(s("desktop.settings.library")))
                         .child(sort_row)
                         .child(index_row)

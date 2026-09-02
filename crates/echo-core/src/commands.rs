@@ -39,6 +39,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
     ("backdrop <name>", "Immersive view backdrop (desktop)"),
     ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
+    ("tray [on|off]", "Close button hides echo to the tray (desktop)"),
     ("seek <s|+s|-s>", "Seek to, or by, a number of seconds"),
     ("sleep <30m|1h|off>", "Pause playback after a delay"),
     ("mute", "Mute, or restore the previous volume"),
@@ -628,6 +629,26 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 };
                 state.set_library_thumbnails(enabled);
             }
+            "tray" => {
+                state.ui.library_config.close_to_tray = match args.next() {
+                    Some("on") => true,
+                    Some("off") => false,
+                    None => !state.ui.library_config.close_to_tray,
+                    Some(_) => {
+                        set_status(state, "Usage: tray [on|off]");
+                        return None;
+                    }
+                };
+                state.save_library_config();
+                set_status(
+                    state,
+                    if state.ui.library_config.close_to_tray {
+                        "Close to tray on"
+                    } else {
+                        "Close to tray off"
+                    },
+                );
+            }
             "search" => {
                 let query = args.collect::<Vec<&str>>().join(" ");
                 if let Some(event) = crate::intent::global_search(state, &query) {
@@ -979,6 +1000,23 @@ mod tests {
     }
 
     #[test]
+    fn tray_command_toggles_and_takes_on_off() {
+        let mut state = AppState::new();
+        state.ui.library_config.close_to_tray = true;
+        assert!(submit_command(&mut state, "tray").is_none());
+        assert!(!state.ui.library_config.close_to_tray);
+        assert_eq!(state.ui.status_message.as_deref(), Some("Close to tray off"));
+        assert!(submit_command(&mut state, "tray on").is_none());
+        assert!(state.ui.library_config.close_to_tray);
+        assert_eq!(state.ui.status_message.as_deref(), Some("Close to tray on"));
+        assert!(submit_command(&mut state, "tray off").is_none());
+        assert!(!state.ui.library_config.close_to_tray);
+        assert!(submit_command(&mut state, "tray sideways").is_none());
+        assert!(!state.ui.library_config.close_to_tray);
+        assert_eq!(state.ui.status_message.as_deref(), Some("Usage: tray [on|off]"));
+    }
+
+    #[test]
     fn relative_command_status_expires() {
         let mut state = AppState::new();
 
@@ -992,7 +1030,13 @@ mod tests {
 
     #[test]
     fn added_command_errors_expire() {
-        for command in ["seek", "open invalid", "relative invalid", "sort invalid"] {
+        for command in [
+            "seek",
+            "open invalid",
+            "relative invalid",
+            "sort invalid",
+            "tray invalid",
+        ] {
             let mut state = AppState::new();
             assert!(submit_command(&mut state, command).is_none(), "{command}");
             assert!(state.ui.status_message.is_some(), "{command}");
