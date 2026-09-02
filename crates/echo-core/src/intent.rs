@@ -400,7 +400,11 @@ pub fn clear_queue(state: &mut AppState) -> Option<AppEvent> {
     }
     let lang = state.ui.library_config.language.clone();
     let cleared = state.playback.device_name == crate::worker::audio::DEVICE_NAME;
-    let key = if cleared { "messages.queue_cleared" } else { "messages.clear_queue_needs_device" };
+    let key = if cleared {
+        "messages.queue_cleared"
+    } else {
+        "messages.clear_queue_needs_device"
+    };
     state.ui.status_message = Some(crate::i18n::t(key, &lang));
     state.ui.status_message_expiry =
         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
@@ -602,9 +606,13 @@ pub fn open_top_artists(state: &mut AppState) -> Option<AppEvent> {
     state.ui.active_view = ActiveView::ArtistList;
     state.ui.artist_list_source = crate::app::ArtistListSource::Top;
     state.ui.selected_artist_index = 0;
-    state.data.top_artists.is_empty().then_some(AppEvent::FetchTopArtists {
-        range: state.ui.library_config.top_items_range,
-    })
+    state
+        .data
+        .top_artists
+        .is_empty()
+        .then_some(AppEvent::FetchTopArtists {
+            range: state.ui.library_config.top_items_range,
+        })
 }
 
 /// Opens the What's New feed (recent releases from followed artists), fetching in the
@@ -721,7 +729,6 @@ pub fn play_artist_top_track(state: &mut AppState, index: usize) -> Option<AppEv
     play_event_with_target(&track, target)
 }
 
-
 /// Backs out of an artist page to the artist list, cancelling any in-flight page load.
 pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     state.ui.active_view = ActiveView::ArtistList;
@@ -831,7 +838,11 @@ pub fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
         return None;
     };
     if state.ui.active_view == ActiveView::TrackList
-        && let Some(index) = state.data.tracks.iter().position(|track| track.id == track_id)
+        && let Some(index) = state
+            .data
+            .tracks
+            .iter()
+            .position(|track| track.id == track_id)
     {
         state.ui.selected_track_index = index;
         return None;
@@ -1053,10 +1064,10 @@ pub fn move_library_playlist(state: &mut AppState, src_id: &str, dest_index: usi
                 .library_view
                 .iter()
                 .filter_map(|node| match node {
-                    LibraryNode::Playlist { playlist, indent: 0 }
-                        if !is_fixed_library_row(&playlist.id)
-                            && !pinned.contains(&playlist.id) =>
-                    {
+                    LibraryNode::Playlist {
+                        playlist,
+                        indent: 0,
+                    } if !is_fixed_library_row(&playlist.id) && !pinned.contains(&playlist.id) => {
                         Some(playlist.id.clone())
                     }
                     _ => None,
@@ -1407,7 +1418,10 @@ pub fn mark_selected_for_delete(state: &mut AppState) {
         }
         ActiveView::Library => {
             if state.ui.active_library_tab == crate::app::LibraryTab::Albums {
-                let Some(album) = state.data.saved_albums.get(state.ui.selected_playlist_index)
+                let Some(album) = state
+                    .data
+                    .saved_albums
+                    .get(state.ui.selected_playlist_index)
                 else {
                     return;
                 };
@@ -1417,7 +1431,11 @@ pub fn mark_selected_for_delete(state: &mut AppState) {
                 });
                 return;
             }
-            let Some(node) = state.data.library_view.get(state.ui.selected_playlist_index).cloned()
+            let Some(node) = state
+                .data
+                .library_view
+                .get(state.ui.selected_playlist_index)
+                .cloned()
             else {
                 return;
             };
@@ -1596,9 +1614,7 @@ mod tests {
             .library_view
             .iter()
             .filter_map(|node| match node {
-                LibraryNode::Playlist { playlist, .. }
-                    if !is_fixed_library_row(&playlist.id) =>
-                {
+                LibraryNode::Playlist { playlist, .. } if !is_fixed_library_row(&playlist.id) => {
                     Some(playlist.id.clone())
                 }
                 _ => None,
@@ -1621,10 +1637,12 @@ mod tests {
             .data
             .library_view
             .iter()
-            .position(|node| matches!(
-                node,
-                LibraryNode::Playlist { playlist, .. } if playlist.id == id
-            ))
+            .position(|node| {
+                matches!(
+                    node,
+                    LibraryNode::Playlist { playlist, .. } if playlist.id == id
+                )
+            })
             .expect("row exists");
     }
 
@@ -1708,14 +1726,18 @@ mod tests {
     fn playlist_search_result_opens_a_playlist_context() {
         let mut state = AppState::new();
         state.ui.active_search_tab = SearchTab::Playlists;
-        state.data.search_results.playlists.push(crate::models::Playlist {
-            id: "pl".to_string(),
-            name: "Mix".to_string(),
-            owner: "Owner".to_string(),
-            owner_id: "owner-id".to_string(),
-            image_url: Some("cover".to_string()),
-            thumb_url: None,
-        });
+        state
+            .data
+            .search_results
+            .playlists
+            .push(crate::models::Playlist {
+                id: "pl".to_string(),
+                name: "Mix".to_string(),
+                owner: "Owner".to_string(),
+                owner_id: "owner-id".to_string(),
+                image_url: Some("cover".to_string()),
+                thumb_url: None,
+            });
 
         let event = activate_search_result(&mut state, 0);
 
@@ -1785,8 +1807,7 @@ mod tests {
         assert_eq!(state.ui.active_view, ActiveView::TrackList);
         let history_depth = state.ui.view_history.len();
 
-        let event =
-            set_top_items_range(&mut state, crate::models::TopItemsRange::Short);
+        let event = set_top_items_range(&mut state, crate::models::TopItemsRange::Short);
 
         assert!(matches!(
             event,
@@ -1803,9 +1824,7 @@ mod tests {
     fn switching_to_the_same_range_is_inert() {
         let mut state = AppState::new();
 
-        assert!(
-            set_top_items_range(&mut state, crate::models::TopItemsRange::Medium).is_none()
-        );
+        assert!(set_top_items_range(&mut state, crate::models::TopItemsRange::Medium).is_none());
     }
 
     fn tracklist_with(ids: &[&str]) -> AppState {
@@ -1932,10 +1951,12 @@ mod tests {
             .data
             .library_view
             .iter()
-            .position(|node| matches!(
-                node,
-                LibraryNode::Playlist { playlist, .. } if playlist.id == "a"
-            ))
+            .position(|node| {
+                matches!(
+                    node,
+                    LibraryNode::Playlist { playlist, .. } if playlist.id == "a"
+                )
+            })
             .expect("row for a");
         // Drop "c" onto "a" to move it before "a".
         assert!(move_library_playlist(&mut state, "c", row_of_a));
@@ -2109,8 +2130,18 @@ mod tests {
         };
         state.data.search_results.tracks = vec![
             search_track("spotify", "Spotify", TrackSource::Spotify, None),
-            search_track("local:a", "Local A", TrackSource::Local, Some("/music/a.wav")),
-            search_track("local:b", "Local B", TrackSource::Local, Some("/music/b.wav")),
+            search_track(
+                "local:a",
+                "Local A",
+                TrackSource::Local,
+                Some("/music/a.wav"),
+            ),
+            search_track(
+                "local:b",
+                "Local B",
+                TrackSource::Local,
+                Some("/music/b.wav"),
+            ),
         ];
 
         let Some(AppEvent::PlayTrack {
@@ -2172,7 +2203,11 @@ mod tests {
     #[test]
     fn skipping_pops_the_queue_head_and_keeps_the_cursor_on_its_track() {
         let mut state = AppState::new();
-        state.data.queue = vec![spotify_track("q:a"), spotify_track("ctx:a"), spotify_track("ctx:b")];
+        state.data.queue = vec![
+            spotify_track("q:a"),
+            spotify_track("ctx:a"),
+            spotify_track("ctx:b"),
+        ];
         state.data.manual_queue = vec!["q:a".to_string()];
         state.ui.selected_queue_index = 2;
 
@@ -2190,7 +2225,10 @@ mod tests {
         state.data.manual_queue = vec!["q:a".to_string()];
         state.ui.selected_queue_index = 1;
 
-        assert!(matches!(clear_queue(&mut state), Some(AppEvent::ClearQueue)));
+        assert!(matches!(
+            clear_queue(&mut state),
+            Some(AppEvent::ClearQueue)
+        ));
         assert!(state.data.manual_queue.is_empty());
         assert_eq!(state.data.queue.len(), 1);
         assert_eq!(state.ui.selected_queue_index, 0);
@@ -2422,15 +2460,20 @@ mod tests {
             .data
             .library_view
             .iter()
-            .position(|node| matches!(
-                node,
-                LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
-            ))
+            .position(|node| {
+                matches!(
+                    node,
+                    LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
+                )
+            })
             .expect("row exists");
 
         assert!(matches!(
             play_library_entry(&mut state, index),
-            Some(AppEvent::PlayContext { is_album: false, .. })
+            Some(AppEvent::PlayContext {
+                is_album: false,
+                ..
+            })
         ));
         assert_eq!(
             state.ui.library_config.playlist_playback.get("playlist-1"),
@@ -2456,10 +2499,12 @@ mod tests {
             .data
             .library_view
             .iter()
-            .position(|node| matches!(
-                node,
-                LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
-            ))
+            .position(|node| {
+                matches!(
+                    node,
+                    LibraryNode::Playlist { playlist, .. } if playlist.id == "playlist-1"
+                )
+            })
             .expect("row exists");
         assert!(matches!(
             play_library_entry(&mut state, index),

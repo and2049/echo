@@ -15,8 +15,16 @@ pub struct Rgb {
 }
 
 impl Rgb {
-    pub const BLACK: Rgb = Rgb { r: 0.0, g: 0.0, b: 0.0 };
-    pub const WHITE: Rgb = Rgb { r: 1.0, g: 1.0, b: 1.0 };
+    pub const BLACK: Rgb = Rgb {
+        r: 0.0,
+        g: 0.0,
+        b: 0.0,
+    };
+    pub const WHITE: Rgb = Rgb {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+    };
 
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
@@ -35,7 +43,11 @@ impl Rgb {
     pub fn saturation(self) -> f32 {
         let max = self.value();
         let min = self.r.min(self.g).min(self.b);
-        if max <= f32::EPSILON { 0.0 } else { (max - min) / max }
+        if max <= f32::EPSILON {
+            0.0
+        } else {
+            (max - min) / max
+        }
     }
 
     /// HSV value: the strongest channel.
@@ -98,12 +110,24 @@ impl Rgb {
         let lum = self.luminance();
         if lum < lo {
             let max = self.value();
-            let lifted = if max <= f32::EPSILON { self } else { self.scaled((lo / lum).min(1.0 / max)) };
+            let lifted = if max <= f32::EPSILON {
+                self
+            } else {
+                self.scaled((lo / lum).min(1.0 / max))
+            };
             let lum = lifted.luminance();
             let room = 1.0 - lum;
-            if lum >= lo || room <= f32::EPSILON { lifted } else { lifted.mix(Rgb::WHITE, (lo - lum) / room) }
+            if lum >= lo || room <= f32::EPSILON {
+                lifted
+            } else {
+                lifted.mix(Rgb::WHITE, (lo - lum) / room)
+            }
         } else if lum > hi {
-            if lum <= f32::EPSILON { self } else { self.mix(Rgb::BLACK, (lum - hi) / lum) }
+            if lum <= f32::EPSILON {
+                self
+            } else {
+                self.mix(Rgb::BLACK, (lum - hi) / lum)
+            }
         } else {
             self
         }
@@ -180,7 +204,11 @@ impl CoverPalette {
 
         let fingerprint = fingerprint.0;
         if sum.count == 0 {
-            return Self { colors: vec![Rgb::BLACK], average: Rgb::BLACK, fingerprint };
+            return Self {
+                colors: vec![Rgb::BLACK],
+                average: Rgb::BLACK,
+                fingerprint,
+            };
         }
         let mean = |bin: &Bin| {
             let n = bin.count as f32;
@@ -203,28 +231,43 @@ impl CoverPalette {
             if colors.len() == PALETTE_SIZE {
                 break;
             }
-            if colors.iter().all(|picked| picked.distance(color) >= MIN_DISTANCE) {
+            if colors
+                .iter()
+                .all(|picked| picked.distance(color) >= MIN_DISTANCE)
+            {
                 colors.push(color);
             }
         }
         if colors.is_empty() {
             colors.push(average);
         }
-        Self { colors, average, fingerprint }
+        Self {
+            colors,
+            average,
+            fingerprint,
+        }
     }
 
     /// A palette from colors already chosen by hand, for the no-cover fallback.
     pub fn from_colors(colors: Vec<Rgb>) -> Self {
         let n = colors.len().max(1) as f32;
-        let average = colors
-            .iter()
-            .fold(Rgb::BLACK, |acc, c| Rgb::new(acc.r + c.r / n, acc.g + c.g / n, acc.b + c.b / n));
+        let average = colors.iter().fold(Rgb::BLACK, |acc, c| {
+            Rgb::new(acc.r + c.r / n, acc.g + c.g / n, acc.b + c.b / n)
+        });
         let mut fingerprint = Fnv::default();
         for c in &colors {
             fingerprint.feed(&[c.r, c.g, c.b].map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8));
         }
-        let colors = if colors.is_empty() { vec![Rgb::BLACK] } else { colors };
-        Self { colors, average, fingerprint: fingerprint.0 }
+        let colors = if colors.is_empty() {
+            vec![Rgb::BLACK]
+        } else {
+            colors
+        };
+        Self {
+            colors,
+            average,
+            fingerprint: fingerprint.0,
+        }
     }
 
     /// The most prominent color.
@@ -246,7 +289,12 @@ impl CoverPalette {
     /// each other yet each keeps its look. The tints are at least moderately saturated, so a
     /// pastel cover still gets some life.
     pub fn with_variety(mut self) -> Self {
-        let colored: Vec<Rgb> = self.colors.iter().copied().filter(|c| c.saturation() >= GRAY).collect();
+        let colored: Vec<Rgb> = self
+            .colors
+            .iter()
+            .copied()
+            .filter(|c| c.saturation() >= GRAY)
+            .collect();
         match colored.first() {
             None => {
                 let hue = (self.fingerprint % 360) as f32;
@@ -254,7 +302,11 @@ impl CoverPalette {
                     .map(|offset| Rgb::from_hsv(hue + offset, TINT_SATURATION, TINT_VALUE))
                     .to_vec();
             }
-            Some(lead) if colored.iter().all(|c| hue_distance(c.hue(), lead.hue()) <= ONE_HUE) => {
+            Some(lead)
+                if colored
+                    .iter()
+                    .all(|c| hue_distance(c.hue(), lead.hue()) <= ONE_HUE) =>
+            {
                 let saturation = lead.saturation().max(TINT_SATURATION);
                 let tint = |offset| Rgb::from_hsv(lead.hue() + offset, saturation, lead.value());
                 self.colors.insert(1, tint(TINT_STEP));
@@ -293,7 +345,11 @@ impl Fnv {
 /// the cover's border and its background are seldom the color anyone remembers it by.
 fn vividness(color: Rgb) -> f32 {
     let lum = color.luminance();
-    let extremes = if !(0.08..=0.92).contains(&lum) { 0.25 } else { 1.0 };
+    let extremes = if !(0.08..=0.92).contains(&lum) {
+        0.25
+    } else {
+        1.0
+    };
     (0.15 + color.saturation()) * extremes
 }
 
@@ -323,27 +379,53 @@ mod tests {
 
     #[test]
     fn vivid_stripe_beats_a_larger_gray_field() {
-        let pixels = image(40, 10, |x, _| if x < 30 { [128, 128, 128, 255] } else { [30, 60, 230, 255] });
+        let pixels = image(40, 10, |x, _| {
+            if x < 30 {
+                [128, 128, 128, 255]
+            } else {
+                [30, 60, 230, 255]
+            }
+        });
         let palette = CoverPalette::from_pixels(40, 10, &pixels);
         assert!(close(palette.primary(), Rgb::from_u8(30, 60, 230)));
-        assert!(palette.colors.iter().any(|c| close(*c, Rgb::from_u8(128, 128, 128))));
+        assert!(
+            palette
+                .colors
+                .iter()
+                .any(|c| close(*c, Rgb::from_u8(128, 128, 128)))
+        );
     }
 
     #[test]
     fn similar_shades_collapse_into_one_slot() {
-        let pixels = image(40, 10, |x, _| if x % 2 == 0 { [30, 60, 230, 255] } else { [36, 66, 236, 255] });
+        let pixels = image(40, 10, |x, _| {
+            if x % 2 == 0 {
+                [30, 60, 230, 255]
+            } else {
+                [36, 66, 236, 255]
+            }
+        });
         let palette = CoverPalette::from_pixels(40, 10, &pixels);
         assert_eq!(palette.colors.len(), 1);
     }
 
     #[test]
     fn transparent_pixels_are_ignored() {
-        let pixels = image(8, 8, |x, _| if x < 4 { [255, 0, 0, 0] } else { [0, 200, 0, 255] });
+        let pixels = image(8, 8, |x, _| {
+            if x < 4 {
+                [255, 0, 0, 0]
+            } else {
+                [0, 200, 0, 255]
+            }
+        });
         let palette = CoverPalette::from_pixels(8, 8, &pixels);
         assert!(close(palette.primary(), Rgb::from_u8(0, 200, 0)));
         let empty = CoverPalette::from_pixels(8, 8, &image(8, 8, |_, _| [255, 0, 0, 0]));
         assert_eq!(empty.colors, vec![Rgb::BLACK]);
-        assert_eq!(CoverPalette::from_pixels(0, 0, &[]).colors, vec![Rgb::BLACK]);
+        assert_eq!(
+            CoverPalette::from_pixels(0, 0, &[]).colors,
+            vec![Rgb::BLACK]
+        );
     }
 
     #[test]
@@ -383,8 +465,12 @@ mod tests {
     #[test]
     fn one_hue_palette_gains_neighbours() {
         let red = Rgb::from_u8(200, 40, 40);
-        let palette = CoverPalette::from_colors(vec![red, Rgb::from_u8(120, 30, 30), Rgb::from_u8(40, 40, 40)])
-            .with_variety();
+        let palette = CoverPalette::from_colors(vec![
+            red,
+            Rgb::from_u8(120, 30, 30),
+            Rgb::from_u8(40, 40, 40),
+        ])
+        .with_variety();
         assert_eq!(palette.colors.len(), 5);
         assert_eq!(palette.primary(), red);
         assert!((hue_distance(palette.colors[1].hue(), red.hue()) - TINT_STEP).abs() < 0.5);
@@ -393,13 +479,23 @@ mod tests {
         assert_eq!(two.colors.len(), 2);
         let pastel = CoverPalette::from_colors(vec![Rgb::from_u8(183, 178, 217)]).with_variety();
         assert_eq!(pastel.colors.len(), 3);
-        assert!(pastel.colors[1..].iter().all(|c| c.saturation() >= TINT_SATURATION - 0.01));
+        assert!(
+            pastel.colors[1..]
+                .iter()
+                .all(|c| c.saturation() >= TINT_SATURATION - 0.01)
+        );
     }
 
     #[test]
     fn colorless_palette_rolls_a_hue_from_its_pixels() {
         let gray = |shade: u8| {
-            let pixels = image(8, 8, |x, _| if x < 4 { [shade, shade, shade, 255] } else { [240, 240, 240, 255] });
+            let pixels = image(8, 8, |x, _| {
+                if x < 4 {
+                    [shade, shade, shade, 255]
+                } else {
+                    [240, 240, 240, 255]
+                }
+            });
             CoverPalette::from_pixels(8, 8, &pixels)
         };
         let (a, b) = (gray(20).with_variety(), gray(60).with_variety());

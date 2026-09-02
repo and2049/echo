@@ -166,16 +166,28 @@ mod tests {
         .unwrap();
         let resolved = ResolvedTheme::from_theme(&theme);
         let overrides = &resolved.desktop_overrides;
-        assert_eq!(overrides.get("row_selected"), Some(&ThemeColor::Rgb(0x33, 0x33, 0x44)));
-        assert_eq!(overrides.get("menu_hover"), Some(&ThemeColor::Rgb(0x44, 0x44, 0x55)));
+        assert_eq!(
+            overrides.get("row_selected"),
+            Some(&ThemeColor::Rgb(0x33, 0x33, 0x44))
+        );
+        assert_eq!(
+            overrides.get("menu_hover"),
+            Some(&ThemeColor::Rgb(0x44, 0x44, 0x55))
+        );
         assert!(!overrides.contains_key("row_hover"));
     }
 
     #[test]
     fn named_colors_parse_with_any_separator_style() {
         assert_eq!("cyan".parse(), Ok(ThemeColor::Named(NamedColor::Cyan)));
-        assert_eq!("Light-Red".parse(), Ok(ThemeColor::Named(NamedColor::LightRed)));
-        assert_eq!("dark_gray".parse(), Ok(ThemeColor::Named(NamedColor::DarkGray)));
+        assert_eq!(
+            "Light-Red".parse(),
+            Ok(ThemeColor::Named(NamedColor::LightRed))
+        );
+        assert_eq!(
+            "dark_gray".parse(),
+            Ok(ThemeColor::Named(NamedColor::DarkGray))
+        );
         assert_eq!("grey".parse(), Ok(ThemeColor::Named(NamedColor::Gray)));
     }
 

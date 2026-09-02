@@ -17,7 +17,10 @@ pub enum MediaUpdate {
     Playback(bool, u32),
 }
 
-pub fn spawn_media_thread(mut rx: mpsc::Receiver<MediaUpdate>, app_tx: mpsc::UnboundedSender<AppEvent>) {
+pub fn spawn_media_thread(
+    mut rx: mpsc::Receiver<MediaUpdate>,
+    app_tx: mpsc::UnboundedSender<AppEvent>,
+) {
     std::thread::spawn(move || {
         #[cfg(not(target_os = "windows"))]
         let hwnd = None;

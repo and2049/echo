@@ -43,13 +43,12 @@ pub fn handle_playback_started(
         state.playback.current_lyric_track_id = Some(item.id.clone());
         state.playback.is_fetching_lyrics = true;
         state.playback.current_lyrics = None;
-        let _ = app_tx
-            .send(AppEvent::FetchLyrics(
-                item.id.clone(),
-                item.title.clone(),
-                item.artist.clone(),
-                item.duration_ms,
-            ));
+        let _ = app_tx.send(AppEvent::FetchLyrics(
+            item.id.clone(),
+            item.title.clone(),
+            item.artist.clone(),
+            item.duration_ms,
+        ));
     }
 
     if let Some(url) = item.image_url {
@@ -179,13 +178,12 @@ fn apply_synced_playback_item(
             state.playback.current_lyric_track_id = Some(item.id.clone());
             state.playback.is_fetching_lyrics = true;
             state.playback.current_lyrics = None;
-            let _ = app_tx
-                .send(AppEvent::FetchLyrics(
-                    item.id.clone(),
-                    item.title.clone(),
-                    item.artist.clone(),
-                    item.duration_ms,
-                ));
+            let _ = app_tx.send(AppEvent::FetchLyrics(
+                item.id.clone(),
+                item.title.clone(),
+                item.artist.clone(),
+                item.duration_ms,
+            ));
         }
     }
 

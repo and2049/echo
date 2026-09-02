@@ -102,7 +102,11 @@ mod platform {
     pub fn knock(config_dir: &Path) -> bool {
         let name = pipe_name(config_dir);
         for _ in 0..10 {
-            match std::fs::OpenOptions::new().read(true).write(true).open(&name) {
+            match std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&name)
+            {
                 Ok(_) => return true,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => return false,
                 Err(_) => std::thread::sleep(Duration::from_millis(100)),

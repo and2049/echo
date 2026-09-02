@@ -1,16 +1,16 @@
 pub mod browse;
 pub mod command;
-pub mod normal;
-pub mod navigation;
 pub mod keymap;
+pub mod navigation;
+pub mod normal;
 pub mod search;
 pub mod setup;
 pub mod tracklist;
 pub mod visual;
 
+use crossterm::event::KeyEvent;
 use echo_core::app::{AppMode, AppState};
 use echo_core::events::AppEvent;
-use crossterm::event::KeyEvent;
 
 pub fn handle_event(state: &mut AppState, key_event: &KeyEvent) -> Option<AppEvent> {
     match state.ui.mode {

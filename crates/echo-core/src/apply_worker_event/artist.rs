@@ -20,7 +20,8 @@ pub fn handle_page_opened(
         return;
     }
     if !state
-        .data.artist_page_data
+        .data
+        .artist_page_data
         .as_ref()
         .is_some_and(|data| data.artist_id == artist_id)
     {
@@ -56,7 +57,8 @@ pub fn handle_albums_loaded(state: &mut AppState, artist_id: String, albums: Vec
     {
         let selected_album_index = if !albums.is_empty() {
             state
-                .ui.artist_page_album_index
+                .ui
+                .artist_page_album_index
                 .min(albums.len().saturating_sub(1))
         } else {
             0
@@ -70,7 +72,8 @@ pub fn handle_albums_loaded(state: &mut AppState, artist_id: String, albums: Vec
 
 pub fn handle_albums_load_failed(state: &mut AppState, artist_id: String, message: String) {
     if state
-        .data.artist_page_data
+        .data
+        .artist_page_data
         .as_ref()
         .is_some_and(|data| data.artist_id == artist_id)
     {
@@ -85,11 +88,7 @@ pub fn handle_albums_load_failed(state: &mut AppState, artist_id: String, messag
     }
 }
 
-pub fn handle_albums_rate_limited(
-    state: &mut AppState,
-    artist_id: String,
-    retry_after_secs: u64,
-) {
+pub fn handle_albums_rate_limited(state: &mut AppState, artist_id: String, retry_after_secs: u64) {
     if let Some(data) = state.data.artist_page_data.as_ref()
         && data.artist_id == artist_id
     {
@@ -124,7 +123,8 @@ pub fn handle_top_tracks_loaded(
 /// stays hidden while the rest of the page remains usable.
 pub fn handle_top_tracks_load_failed(state: &mut AppState, artist_id: String, _message: String) {
     if state
-        .data.artist_page_data
+        .data
+        .artist_page_data
         .as_ref()
         .is_some_and(|data| data.artist_id == artist_id)
     {
@@ -177,17 +177,22 @@ mod tests {
             }],
         );
 
-        assert_eq!(state.data.pending_artist_page_id.as_deref(), Some("current"));
+        assert_eq!(
+            state.data.pending_artist_page_id.as_deref(),
+            Some("current")
+        );
         assert_eq!(
             state
-                .data.artist_page_data
+                .data
+                .artist_page_data
                 .as_ref()
                 .map(|data| data.artist_name.as_str()),
             Some("Current")
         );
         assert_eq!(
             state
-                .data.artist_page_data
+                .data
+                .artist_page_data
                 .as_ref()
                 .map(|data| data.albums.len()),
             Some(0)
@@ -220,7 +225,8 @@ mod tests {
 
         assert!(
             state
-                .data.artist_page_data
+                .data
+                .artist_page_data
                 .as_ref()
                 .is_some_and(|data| data.top_tracks.is_empty())
         );
@@ -256,7 +262,8 @@ mod tests {
 
         assert_eq!(
             state
-                .data.artist_page_data
+                .data
+                .artist_page_data
                 .as_ref()
                 .map(|data| data.albums.len()),
             Some(1)

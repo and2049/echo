@@ -78,7 +78,12 @@ pub fn handle_devices_loaded(state: &mut AppState, devices: Vec<crate::models::D
 /// manually queued tracks still upcoming. `zip` tolerates the Web API's 20-item cap.
 pub fn reconcile_manual_queue(manual: &mut Vec<String>, queue: &[Track]) {
     let keep_from = (0..=manual.len())
-        .find(|&skip| manual[skip..].iter().zip(queue).all(|(id, track)| *id == track.id))
+        .find(|&skip| {
+            manual[skip..]
+                .iter()
+                .zip(queue)
+                .all(|(id, track)| *id == track.id)
+        })
         .unwrap_or(manual.len());
     manual.drain(..keep_from);
 }
@@ -110,7 +115,11 @@ pub fn handle_recently_played_loaded(state: &mut AppState, tracks: Vec<Track>) {
     if take_pending(state, crate::models::BrowseNode::RecentlyPlayed) {
         let _ = crate::intent::open_recently_played(state);
     } else {
-        refresh_open_generated_list(state, "RECENTLY_PLAYED", &state.data.recently_played.clone());
+        refresh_open_generated_list(
+            state,
+            "RECENTLY_PLAYED",
+            &state.data.recently_played.clone(),
+        );
     }
 }
 
@@ -248,7 +257,10 @@ mod tests {
         state.ui.selected_queue_index = 5;
         handle_queue_loaded(&mut state, vec![sample_track("a"), sample_track("b")]);
         assert_eq!(state.ui.selected_queue_index, 1);
-        handle_queue_loaded(&mut state, vec![sample_track("a"), sample_track("b"), sample_track("c")]);
+        handle_queue_loaded(
+            &mut state,
+            vec![sample_track("a"), sample_track("b"), sample_track("c")],
+        );
         assert_eq!(state.ui.selected_queue_index, 1);
     }
 
@@ -284,7 +296,10 @@ mod tests {
         crate::intent::open_top_tracks(&mut state);
         let history_depth = state.ui.view_history.len();
 
-        handle_top_tracks_loaded(&mut state, vec![sample_track("new-a"), sample_track("new-b")]);
+        handle_top_tracks_loaded(
+            &mut state,
+            vec![sample_track("new-a"), sample_track("new-b")],
+        );
 
         assert_eq!(state.ui.active_view, app::ActiveView::TrackList);
         assert_eq!(state.data.tracks.len(), 2);

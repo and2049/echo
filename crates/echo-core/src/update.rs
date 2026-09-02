@@ -292,10 +292,7 @@ fn probe_writable(dir: &Path) -> Result<(), UpdateError> {
             let _ = std::fs::remove_file(&probe);
             Ok(())
         }
-        Err(_) => Err(UpdateError::NotWritable(
-            dir.to_path_buf(),
-            releases_url(),
-        )),
+        Err(_) => Err(UpdateError::NotWritable(dir.to_path_buf(), releases_url())),
     }
 }
 
@@ -377,7 +374,9 @@ pub async fn download(
 
     let bytes = fetch(asset, &mut on_progress).await?;
 
-    let staging = plan.dir.join(format!(".echo-update-{}", std::process::id()));
+    let staging = plan
+        .dir
+        .join(format!(".echo-update-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir(&staging).map_err(io)?;
 
@@ -686,10 +685,7 @@ mod tests {
             themes: None,
         };
         if let Some(target) = platform_target() {
-            assert_eq!(
-                plan.asset_name().unwrap(),
-                format!("echo-{target}.tar.gz")
-            );
+            assert_eq!(plan.asset_name().unwrap(), format!("echo-{target}.tar.gz"));
         }
     }
 
@@ -708,7 +704,10 @@ mod tests {
 
     #[test]
     fn archive_paths_that_escape_are_rejected() {
-        assert_eq!(safe_relative(Path::new("./spotify")).as_deref(), Some(Path::new("spotify")));
+        assert_eq!(
+            safe_relative(Path::new("./spotify")).as_deref(),
+            Some(Path::new("spotify"))
+        );
         assert_eq!(
             safe_relative(Path::new("themes/echo.toml")).as_deref(),
             Some(Path::new("themes/echo.toml"))
@@ -727,7 +726,11 @@ mod tests {
 
     #[test]
     fn both_binaries_side_by_side_are_both_replaced() {
-        let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
+        let dir = if cfg!(windows) {
+            "C:/echo"
+        } else {
+            "/opt/echo"
+        };
         let exe = format!("{dir}/{}", bin_name("spotify"));
         let desktop = format!("{dir}/{}", bin_name("echo-desktop"));
         let plan = resolve(Path::new(&exe), present(&[&exe, &desktop])).unwrap();
@@ -741,7 +744,11 @@ mod tests {
     fn only_the_binaries_actually_installed_are_replaced() {
         // Someone who kept just the TUI out of the archive gets the same archive back, with
         // `echo-desktop` left out of it rather than dropped beside a binary they never had.
-        let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
+        let dir = if cfg!(windows) {
+            "C:/echo"
+        } else {
+            "/opt/echo"
+        };
         let exe = format!("{dir}/{}", bin_name("spotify"));
         let themes = format!("{dir}/themes");
         let plan = resolve(Path::new(&exe), present(&[&exe, &themes])).unwrap();
@@ -751,7 +758,11 @@ mod tests {
 
     #[test]
     fn an_install_with_neither_binary_is_not_upgradeable() {
-        let dir = if cfg!(windows) { "C:/echo" } else { "/opt/echo" };
+        let dir = if cfg!(windows) {
+            "C:/echo"
+        } else {
+            "/opt/echo"
+        };
         let exe = format!("{dir}/something-else");
         let error = resolve(Path::new(&exe), present(&[])).unwrap_err();
         assert!(matches!(error, UpdateError::UnknownInstall(_)));
@@ -786,10 +797,8 @@ mod tests {
     }
 
     fn scratch_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "echo-update-test-{}-{tag}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("echo-update-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -947,7 +956,9 @@ mod tests {
         };
 
         let mut seen = Vec::new();
-        let fetched = fetch(&asset, &mut |percent| seen.push(percent)).await.unwrap();
+        let fetched = fetch(&asset, &mut |percent| seen.push(percent))
+            .await
+            .unwrap();
 
         assert_eq!(fetched, body);
         assert_eq!(seen.last(), Some(&100), "progress should reach 100%");

@@ -63,7 +63,10 @@ impl EchoSpotifyClient {
         }
         if persist && let Some(tracks) = AppConfig::load_cache().get_top_tracks() {
             log_api("top_tracks route=persistent_cache");
-            self.cache.lock().await.set_top_tracks(range, tracks.clone());
+            self.cache
+                .lock()
+                .await
+                .set_top_tracks(range, tracks.clone());
             return Ok(Some(tracks));
         }
 
@@ -92,7 +95,10 @@ impl EchoSpotifyClient {
 
         self.finish_fetch(&key, &result).await;
         let tracks = result?;
-        self.cache.lock().await.set_top_tracks(range, tracks.clone());
+        self.cache
+            .lock()
+            .await
+            .set_top_tracks(range, tracks.clone());
         if persist {
             update_persistent_cache(|cache| cache.set_top_tracks(tracks.clone()));
         }
@@ -445,7 +451,9 @@ impl EchoSpotifyClient {
         let json = self
             .first_party_json(
                 ApiEndpoint::TopTracks,
-                &format!("https://api.spotify.com/v1/me/top/tracks?limit=50&time_range={time_range}"),
+                &format!(
+                    "https://api.spotify.com/v1/me/top/tracks?limit=50&time_range={time_range}"
+                ),
             )
             .await?;
         Ok(json

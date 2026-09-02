@@ -442,9 +442,7 @@ pub async fn spawn_librespot_daemon(
                     crate::config::debug_log_path("echo-librespot-fatal.log"),
                     format!("Librespot Daemon crashed: {}", err_msg),
                 );
-                log_daemon(&format!(
-                    "daemon attempt={attempt} failed: {err_msg}"
-                ));
+                log_daemon(&format!("daemon attempt={attempt} failed: {err_msg}"));
 
                 // A stale cached blob is the likeliest cause and it cannot recover on its own,
                 // so drop it once and let the next pass take the browser re-auth branch. The

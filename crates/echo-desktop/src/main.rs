@@ -378,15 +378,15 @@ pub(crate) fn text_with_cursor(value: &str, cursor: usize) -> String {
 /// families a desktop Linux install is likely to have; all of these cover U+2500–U+259F.
 fn resolve_mono_font(cx: &App) -> SharedString {
     const CANDIDATES: &[&str] = &[
-        "Consolas",          // Windows
-        "Menlo",             // macOS
-        "DejaVu Sans Mono",  // Debian/Ubuntu default
-        "Liberation Mono",   // Fedora/RHEL default
-        "Noto Sans Mono",    // GNOME
-        "Ubuntu Mono",       // Ubuntu
-        "JetBrains Mono",    // common developer install
-        "Source Code Pro",   //
-        "Courier New",       //
+        "Consolas",         // Windows
+        "Menlo",            // macOS
+        "DejaVu Sans Mono", // Debian/Ubuntu default
+        "Liberation Mono",  // Fedora/RHEL default
+        "Noto Sans Mono",   // GNOME
+        "Ubuntu Mono",      // Ubuntu
+        "JetBrains Mono",   // common developer install
+        "Source Code Pro",  //
+        "Courier New",      //
     ];
 
     let available = cx.text_system().all_font_names();
@@ -546,7 +546,9 @@ impl EchoApp {
         window.focus(&self.focus_handle, cx);
         let this = cx.entity();
         window.on_window_should_close(cx, move |window, cx| {
-            this.update(cx, |this: &mut EchoApp, cx| this.on_close_request(window, cx))
+            this.update(cx, |this: &mut EchoApp, cx| {
+                this.on_close_request(window, cx)
+            })
         });
     }
 
@@ -694,16 +696,19 @@ impl EchoApp {
             match self.state.ui.active_view {
                 ActiveView::TrackList => {
                     self.state.ui.selected_track_index = index;
-                    self.tracks_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                    self.tracks_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
                 }
                 ActiveView::Queue => {
                     self.state.ui.selected_queue_index = index;
                     let row = self.state.queue_row_of(index).unwrap_or(index);
-                    self.queue_scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+                    self.queue_scroll
+                        .scroll_to_item(row, ScrollStrategy::Nearest);
                 }
                 ActiveView::SearchResults => {
                     self.state.ui.selected_search_index = index;
-                    self.search_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                    self.search_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
                 }
                 ActiveView::ArtistList => {
                     self.state.ui.selected_artist_index = index;
@@ -729,7 +734,8 @@ impl EchoApp {
                 }
                 _ => {
                     self.state.ui.selected_playlist_index = index;
-                    self.library_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+                    self.library_scroll
+                        .scroll_to_item(index, ScrollStrategy::Nearest);
                 }
             }
         }
@@ -889,9 +895,7 @@ impl EchoApp {
                 _ => {
                     let index = self.state.ui.selected_playlist_index;
                     match self.state.ui.active_library_tab {
-                        LibraryTab::Albums => {
-                            echo_core::intent::open_album(&mut self.state, index)
-                        }
+                        LibraryTab::Albums => echo_core::intent::open_album(&mut self.state, index),
                         LibraryTab::Artists => {
                             echo_core::intent::open_followed_artist(&mut self.state, index)
                         }
@@ -947,7 +951,8 @@ impl EchoApp {
                         .position(|n| *n == name)
                 })
                 .unwrap_or(0);
-            self.theme_modal_scroll.scroll_to_item(self.theme_modal_index);
+            self.theme_modal_scroll
+                .scroll_to_item(self.theme_modal_index);
         }
         cx.notify();
     }
@@ -964,7 +969,11 @@ impl EchoApp {
             echo_core::intent::exit_visual(&mut self.state);
         } else if self.context_menu.is_some() {
             self.context_menu = None;
-        } else if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_some()) {
+        } else if self
+            .track_menu
+            .as_ref()
+            .is_some_and(|menu| menu.submenu.is_some())
+        {
             // The flyout is the topmost layer: escape steps back to the menu items.
             self.close_playlist_submenu(cx);
         } else if self.track_menu.is_some() {
@@ -1059,9 +1068,7 @@ impl EchoApp {
         match action {
             MenuAction::Open => {
                 self.state.ui.selected_playlist_index = index;
-                if let Some(event) =
-                    echo_core::intent::open_library_entry(&mut self.state, index)
-                {
+                if let Some(event) = echo_core::intent::open_library_entry(&mut self.state, index) {
                     self.dispatch(event);
                 }
             }
@@ -1081,10 +1088,7 @@ impl EchoApp {
             }
             MenuAction::RemoveFromFolder => {
                 if let echo_core::models::LibraryNode::Playlist { playlist, .. } = &node {
-                    echo_core::intent::remove_playlist_from_folders(
-                        &mut self.state,
-                        &playlist.id,
-                    );
+                    echo_core::intent::remove_playlist_from_folders(&mut self.state, &playlist.id);
                 }
             }
             MenuAction::DeletePlaylist => {
@@ -1137,12 +1141,14 @@ impl EchoApp {
     /// Index of the "Add to playlist" row in the open track menu, if it has one. The flyout
     /// anchors to it, and the hover/keyboard handlers key off it.
     pub(crate) fn track_menu_add_row(&self) -> Option<usize> {
-        views::track_menu_items(self).iter().position(|(_, item, _)| {
-            matches!(
-                item,
-                TrackMenuItem::Action(echo_core::models::ActionMenuAction::AddToPlaylist)
-            )
-        })
+        views::track_menu_items(self)
+            .iter()
+            .position(|(_, item, _)| {
+                matches!(
+                    item,
+                    TrackMenuItem::Action(echo_core::models::ActionMenuAction::AddToPlaylist)
+                )
+            })
     }
 
     /// Open the flyout. `focus_row` also parks the menu's keyboard selection on the row it
@@ -1203,7 +1209,10 @@ impl EchoApp {
         cx: &mut Context<Self>,
     ) {
         if self.track_menu_add_row() != Some(ix) {
-            if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_some())
+            if self
+                .track_menu
+                .as_ref()
+                .is_some_and(|menu| menu.submenu.is_some())
                 && !self.pointer_aims_at_submenu(position)
             {
                 self.close_playlist_submenu(cx);
@@ -1211,7 +1220,11 @@ impl EchoApp {
             return;
         }
         self.submenu_apex = position;
-        if self.track_menu.as_ref().is_some_and(|menu| menu.submenu.is_none()) {
+        if self
+            .track_menu
+            .as_ref()
+            .is_some_and(|menu| menu.submenu.is_none())
+        {
             self.open_playlist_submenu(false, cx);
         }
     }
@@ -1227,7 +1240,11 @@ impl EchoApp {
         // The flyout sits on whichever side of the menu had room (`views::playlist_submenu`),
         // so the near edge — and which way "toward it" is — follows from where it landed.
         let flipped = flyout.left() < self.submenu_row_bounds.get().left();
-        let edge = if flipped { flyout.right() } else { flyout.left() };
+        let edge = if flipped {
+            flyout.right()
+        } else {
+            flyout.left()
+        };
         // The flyout can be much taller than the menu, so the triangle alone would cover most
         // of the rows below: a move only counts as aiming while it still travels toward the
         // flyout. Straight down the menu closes it at once.
@@ -1942,23 +1959,28 @@ impl EchoApp {
             .border_t_1()
             .border_color(palette.border)
             .when(is_command && !suggestions.is_empty(), |el| {
-                el.child(div().flex().flex_row().gap_2().overflow_hidden().children(
-                    suggestions.into_iter().enumerate().map(|(index, suggestion)| {
-                        let selected = selected_suggestion == Some(index);
-                        div()
-                            .px_2()
-                            .rounded_sm()
-                            .text_xs()
-                            .map(|el| {
-                                if selected {
-                                    el.bg(palette.row_selected).text_color(fg)
-                                } else {
-                                    el.text_color(muted)
-                                }
-                            })
-                            .child(SharedString::from(suggestion))
-                    }),
-                ))
+                el.child(
+                    div().flex().flex_row().gap_2().overflow_hidden().children(
+                        suggestions
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, suggestion)| {
+                                let selected = selected_suggestion == Some(index);
+                                div()
+                                    .px_2()
+                                    .rounded_sm()
+                                    .text_xs()
+                                    .map(|el| {
+                                        if selected {
+                                            el.bg(palette.row_selected).text_color(fg)
+                                        } else {
+                                            el.text_color(muted)
+                                        }
+                                    })
+                                    .child(SharedString::from(suggestion))
+                            }),
+                    ),
+                )
             })
             .child(
                 div()
@@ -1996,8 +2018,7 @@ impl EchoApp {
         };
         match event.keystroke.key.as_str() {
             "enter" => {
-                if let Some(event) = echo_core::intent::submit_setup_credentials(&mut self.state)
-                {
+                if let Some(event) = echo_core::intent::submit_setup_credentials(&mut self.state) {
                     self.dispatch(event);
                 }
             }
@@ -2195,7 +2216,9 @@ impl EchoApp {
     }
 
     fn finish_scrub(&mut self, x: Pixels, cx: &mut Context<Self>) {
-        let Some(target) = self.scrubbing.take() else { return };
+        let Some(target) = self.scrubbing.take() else {
+            return;
+        };
         let bounds = self.scrub_bounds(target);
         if bounds.size.width <= px(0.0) {
             cx.notify();
@@ -2220,7 +2243,9 @@ impl EchoApp {
     }
 
     fn update_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
-        let Some(resize) = self.sidebar_resizing else { return };
+        let Some(resize) = self.sidebar_resizing else {
+            return;
+        };
         let delta = x - resize.start_x;
         self.sidebar_width = (resize.start_width + f32::from(delta)).clamp(180.0, 480.0);
         cx.notify();
@@ -2270,7 +2295,6 @@ impl EchoApp {
         cx.notify();
         true
     }
-
 
     pub(crate) fn close_artist_page(&mut self, cx: &mut Context<Self>) {
         self.state.ui.active_view = ActiveView::Library;
@@ -2543,41 +2567,43 @@ impl EchoApp {
                                 // to the configured bin count (`:visbins`, same math as the TUI)
                                 // and painted as bottom-anchored bars. Repaints ride the fast
                                 // tick.
-                                el.child(div().flex_none().w(px(120.0)).h(px(32.0)).child(
-                                    canvas(
-                                        |_, _, _| (),
-                                        move |bounds, _, window, _| {
-                                            let bands = bands.lock();
-                                            let chunk = bands.len() as f32 / vis_bins as f32;
-                                            let band_width =
-                                                bounds.size.width / vis_bins as f32;
-                                            for index in 0..vis_bins {
-                                                let start = (index as f32 * chunk) as usize;
-                                                let end = if index == vis_bins - 1 {
-                                                    bands.len()
-                                                } else {
-                                                    ((index + 1) as f32 * chunk) as usize
-                                                };
-                                                let slice = &bands[start..end.max(start + 1)];
-                                                let value = slice.iter().sum::<f32>()
-                                                    / slice.len() as f32;
-                                                let ratio = (value / 100.0).clamp(0.0, 1.0);
-                                                let bar_height = bounds.size.height * ratio;
-                                                let origin = gpui::point(
-                                                    bounds.origin.x + band_width * index as f32,
-                                                    bounds.origin.y + bounds.size.height
-                                                        - bar_height,
-                                                );
-                                                let bar = Bounds {
-                                                    origin,
-                                                    size: size(band_width * 0.8, bar_height),
-                                                };
-                                                window.paint_quad(gpui::fill(bar, accent));
-                                            }
-                                        },
-                                    )
-                                    .size_full(),
-                                ))
+                                el.child(
+                                    div().flex_none().w(px(120.0)).h(px(32.0)).child(
+                                        canvas(
+                                            |_, _, _| (),
+                                            move |bounds, _, window, _| {
+                                                let bands = bands.lock();
+                                                let chunk = bands.len() as f32 / vis_bins as f32;
+                                                let band_width =
+                                                    bounds.size.width / vis_bins as f32;
+                                                for index in 0..vis_bins {
+                                                    let start = (index as f32 * chunk) as usize;
+                                                    let end = if index == vis_bins - 1 {
+                                                        bands.len()
+                                                    } else {
+                                                        ((index + 1) as f32 * chunk) as usize
+                                                    };
+                                                    let slice = &bands[start..end.max(start + 1)];
+                                                    let value = slice.iter().sum::<f32>()
+                                                        / slice.len() as f32;
+                                                    let ratio = (value / 100.0).clamp(0.0, 1.0);
+                                                    let bar_height = bounds.size.height * ratio;
+                                                    let origin = gpui::point(
+                                                        bounds.origin.x + band_width * index as f32,
+                                                        bounds.origin.y + bounds.size.height
+                                                            - bar_height,
+                                                    );
+                                                    let bar = Bounds {
+                                                        origin,
+                                                        size: size(band_width * 0.8, bar_height),
+                                                    };
+                                                    window.paint_quad(gpui::fill(bar, accent));
+                                                }
+                                            },
+                                        )
+                                        .size_full(),
+                                    ),
+                                )
                             }),
                     ),
             )
@@ -2603,9 +2629,7 @@ impl EchoApp {
                                 |this, cx| this.toggle_lyrics(cx),
                             )),
                     )
-                    .child(
-                        self.seek_bar(controls, cx),
-                    )
+                    .child(self.seek_bar(controls, cx))
                     .child(
                         div()
                             .flex_none()
@@ -2631,9 +2655,14 @@ impl EchoApp {
                                 cx,
                                 |this, cx| this.open_devices(cx),
                             ))
-                            .child(icon_button("mute", mute_icon, muted, palette.wash, cx, |this, cx| {
-                                this.toggle_mute(cx)
-                            }))
+                            .child(icon_button(
+                                "mute",
+                                mute_icon,
+                                muted,
+                                palette.wash,
+                                cx,
+                                |this, cx| this.toggle_mute(cx),
+                            ))
                             .child(
                                 div()
                                     .id("volume-bar")
@@ -2643,9 +2672,15 @@ impl EchoApp {
                                     .cursor_pointer()
                                     .on_mouse_down(
                                         gpui::MouseButton::Left,
-                                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
-                                            this.begin_scrub(Scrub::Volume, event.position.x, cx);
-                                        }),
+                                        cx.listener(
+                                            |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.begin_scrub(
+                                                    Scrub::Volume,
+                                                    event.position.x,
+                                                    cx,
+                                                );
+                                            },
+                                        ),
                                     )
                                     .child(
                                         div()
@@ -2656,7 +2691,9 @@ impl EchoApp {
                                             .bg(palette.border)
                                             .child(
                                                 canvas(
-                                                    move |bounds, _window, _cx| volume_bounds.set(bounds),
+                                                    move |bounds, _window, _cx| {
+                                                        volume_bounds.set(bounds)
+                                                    },
                                                     |_, _, _, _| {},
                                                 )
                                                 .absolute()
@@ -2771,8 +2808,16 @@ impl EchoApp {
     /// centers; the caller sizes the row.
     pub(crate) fn transport_controls(&self, colors: ControlColors, cx: &mut Context<Self>) -> Div {
         let playback = &self.state.playback;
-        let play_icon = if playback.is_playing { "icons/pause.svg" } else { "icons/play.svg" };
-        let shuffle_color = if playback.is_shuffled { colors.accent } else { colors.muted };
+        let play_icon = if playback.is_playing {
+            "icons/pause.svg"
+        } else {
+            "icons/play.svg"
+        };
+        let shuffle_color = if playback.is_shuffled {
+            colors.accent
+        } else {
+            colors.muted
+        };
         let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
             "Track" => ("icons/repeat-one.svg", colors.accent),
             "Context" => ("icons/repeat.svg", colors.accent),
@@ -2783,12 +2828,22 @@ impl EchoApp {
             .flex_row()
             .items_center()
             .gap_1()
-            .child(icon_button("shuffle", "icons/shuffle.svg", shuffle_color, colors.hover, cx, |this, cx| {
-                this.toggle_shuffle(cx)
-            }))
-            .child(icon_button("previous", "icons/previous.svg", colors.fg, colors.hover, cx, |this, cx| {
-                this.play_previous(cx)
-            }))
+            .child(icon_button(
+                "shuffle",
+                "icons/shuffle.svg",
+                shuffle_color,
+                colors.hover,
+                cx,
+                |this, cx| this.toggle_shuffle(cx),
+            ))
+            .child(icon_button(
+                "previous",
+                "icons/previous.svg",
+                colors.fg,
+                colors.hover,
+                cx,
+                |this, cx| this.play_previous(cx),
+            ))
             .child(
                 div()
                     .id("play-pause")
@@ -2801,14 +2856,30 @@ impl EchoApp {
                     .rounded_full()
                     .hover(move |style| style.bg(colors.hover))
                     .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
-                    .child(svg().path(play_icon).w(px(20.0)).h(px(20.0)).text_color(colors.fg)),
+                    .child(
+                        svg()
+                            .path(play_icon)
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .text_color(colors.fg),
+                    ),
             )
-            .child(icon_button("next", "icons/next.svg", colors.fg, colors.hover, cx, |this, cx| {
-                this.play_next(cx)
-            }))
-            .child(icon_button("repeat", repeat_icon, repeat_color, colors.hover, cx, |this, cx| {
-                this.cycle_repeat(cx)
-            }))
+            .child(icon_button(
+                "next",
+                "icons/next.svg",
+                colors.fg,
+                colors.hover,
+                cx,
+                |this, cx| this.play_next(cx),
+            ))
+            .child(icon_button(
+                "repeat",
+                repeat_icon,
+                repeat_color,
+                colors.hover,
+                cx,
+                |this, cx| this.cycle_repeat(cx),
+            ))
     }
 
     /// Elapsed time, the seek bar and the duration on one line, growing to the caller's width.
@@ -2857,11 +2928,20 @@ impl EchoApp {
                             .rounded_full()
                             .bg(colors.track)
                             .child(
-                                canvas(move |bounds, _window, _cx| seek_bounds.set(bounds), |_, _, _, _| {})
-                                    .absolute()
-                                    .size_full(),
+                                canvas(
+                                    move |bounds, _window, _cx| seek_bounds.set(bounds),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
                             )
-                            .child(div().h_full().rounded_full().bg(colors.accent).w(gpui::relative(fraction))),
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(colors.accent)
+                                    .w(gpui::relative(fraction)),
+                            ),
                     ),
             )
             .child(label(playback.duration_ms))
@@ -2993,7 +3073,11 @@ impl Render for EchoApp {
             });
             backdrop
         });
-        let phase = if cx.reduce_motion() { 0.0 } else { self.backdrops.phase() };
+        let phase = if cx.reduce_motion() {
+            0.0
+        } else {
+            self.backdrops.phase()
+        };
         let titlebar = owns_frame.then(|| {
             views::titlebar(self, backdrop.as_ref().map(|b| &b.colors), window, cx)
                 .into_any_element()
@@ -3004,22 +3088,24 @@ impl Render for EchoApp {
             .track_focus(&self.focus_handle)
             // Scrubs track the pointer at the window level so dragging keeps working when the
             // pointer leaves the bar; release (or a move without the button) ends them.
-            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
-                if this.sidebar_resizing.is_some() {
-                    if event.pressed_button == Some(gpui::MouseButton::Left) {
-                        this.update_sidebar_resize(event.position.x, cx);
-                    } else {
-                        this.finish_sidebar_resize(cx);
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                    if this.sidebar_resizing.is_some() {
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.update_sidebar_resize(event.position.x, cx);
+                        } else {
+                            this.finish_sidebar_resize(cx);
+                        }
                     }
-                }
-                if this.scrubbing.is_some() {
-                    if event.pressed_button == Some(gpui::MouseButton::Left) {
-                        this.update_scrub(event.position.x, cx);
-                    } else {
-                        this.finish_scrub(event.position.x, cx);
+                    if this.scrubbing.is_some() {
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.update_scrub(event.position.x, cx);
+                        } else {
+                            this.finish_scrub(event.position.x, cx);
+                        }
                     }
-                }
-            }))
+                }),
+            )
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseUpEvent, _window, cx| {
@@ -3027,9 +3113,9 @@ impl Render for EchoApp {
                     this.finish_scrub(event.position.x, cx);
                 }),
             )
-            .on_action(cx.listener(|this, _: &TogglePlayback, _window, cx| {
-                this.toggle_playback(cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &TogglePlayback, _window, cx| this.toggle_playback(cx)),
+            )
             .on_action(cx.listener(|this, _: &MoveUp, _window, cx| {
                 let count = this.take_count();
                 this.move_selection(-count, cx)
@@ -3066,15 +3152,13 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &SelectLast, _window, cx| this.select_last(cx)))
             .on_action(cx.listener(|this, _: &Activate, _window, cx| this.activate_selection(cx)))
             .on_action(cx.listener(|this, _: &ConfirmPrompt, _window, cx| this.confirm_prompt(cx)))
-            .on_action(cx.listener(|this, _: &AddToPlaylist, _window, cx| {
-                this.add_to_playlist(cx)
-            }))
-            .on_action(cx.listener(|this, _: &OpenActionMenu, _window, cx| {
-                this.open_action_menu(cx)
-            }))
-            .on_action(cx.listener(|this, _: &ToggleSettings, _window, cx| {
-                this.toggle_settings(cx)
-            }))
+            .on_action(cx.listener(|this, _: &AddToPlaylist, _window, cx| this.add_to_playlist(cx)))
+            .on_action(
+                cx.listener(|this, _: &OpenActionMenu, _window, cx| this.open_action_menu(cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ToggleSettings, _window, cx| this.toggle_settings(cx)),
+            )
             .on_action(cx.listener(|this, _: &ToggleHelp, _window, cx| {
                 this.help_open = !this.help_open;
                 cx.notify();
@@ -3117,9 +3201,7 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &ToggleShuffle, _window, cx| this.toggle_shuffle(cx)))
             .on_action(cx.listener(|this, _: &CycleRepeat, _window, cx| this.cycle_repeat(cx)))
             .on_action(cx.listener(|this, _: &ToggleMute, _window, cx| this.toggle_mute(cx)))
-            .on_action(
-                cx.listener(|this, _: &SeekForward, _window, cx| this.seek_relative(5, cx)),
-            )
+            .on_action(cx.listener(|this, _: &SeekForward, _window, cx| this.seek_relative(5, cx)))
             .on_action(
                 cx.listener(|this, _: &SeekBackward, _window, cx| this.seek_relative(-5, cx)),
             )
@@ -3132,9 +3214,9 @@ impl Render for EchoApp {
             }))
             .on_action(cx.listener(|this, _: &ToggleLyrics, _window, cx| this.toggle_lyrics(cx)))
             .on_action(cx.listener(|this, _: &ToggleThemes, _window, cx| this.toggle_themes(cx)))
-            .on_action(cx.listener(|this, _: &ToggleImmersive, _window, cx| {
-                this.toggle_immersive(cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &ToggleImmersive, _window, cx| this.toggle_immersive(cx)),
+            )
             .on_action(cx.listener(|this, _: &HalfPageUp, _window, cx| {
                 this.move_selection(-PAGE_ROWS / 2, cx)
             }))
@@ -3168,9 +3250,9 @@ impl Render for EchoApp {
                     this.open_command("newplaylist ", window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &RenamePrompt, window, cx| {
-                this.rename_prompt(window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &RenamePrompt, window, cx| this.rename_prompt(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &AddToQueue, _window, cx| this.add_to_queue(cx)))
             .on_action(cx.listener(|this, _: &TogglePin, _window, cx| this.toggle_pin(cx)))
             .on_action(cx.listener(|this, _: &CycleTab, _window, cx| this.cycle_tab(cx)))
@@ -3422,7 +3504,11 @@ fn main() {
             listener.serve(tray_tx.clone());
         }
         let app = cx.new(|cx| EchoApp::new(boot, cx));
-        cx.set_global(Shell { app, tray_tx, tray: None });
+        cx.set_global(Shell {
+            app,
+            tray_tx,
+            tray: None,
+        });
         cx.spawn(async move |cx| {
             while let Some(event) = tray_rx.recv().await {
                 cx.update(|cx| match event {

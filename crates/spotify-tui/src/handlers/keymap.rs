@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::handlers::navigation::{self, NavigationCommand};
 use echo_core::app::{AppState, TrackSort};
 use echo_core::events::AppEvent;
-use crate::handlers::navigation::{self, NavigationCommand};
 
 const SEQUENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -42,7 +42,10 @@ pub struct ConfiguredKey {
 
 pub fn configured_action(state: &mut AppState, key: &KeyEvent) -> ConfiguredKey {
     if state.ui.library_config.keybindings.is_empty() {
-        return ConfiguredKey { consumed: false, action: None };
+        return ConfiguredKey {
+            consumed: false,
+            action: None,
+        };
     }
     if state
         .ui
@@ -63,7 +66,10 @@ pub fn configured_action(state: &mut AppState, key: &KeyEvent) -> ConfiguredKey 
             .and_then(|name| parse_action(name))
         {
             state.ui.pending_key_sequence = None;
-            return ConfiguredKey { consumed: true, action: Some(action) };
+            return ConfiguredKey {
+                consumed: true,
+                action: Some(action),
+            };
         }
     }
     if let Some(action) = state
@@ -73,7 +79,10 @@ pub fn configured_action(state: &mut AppState, key: &KeyEvent) -> ConfiguredKey 
         .get(&token)
         .and_then(|name| parse_action(name))
     {
-        return ConfiguredKey { consumed: true, action: Some(action) };
+        return ConfiguredKey {
+            consumed: true,
+            action: Some(action),
+        };
     }
     let prefix = format!("{token} ");
     if state
@@ -84,9 +93,15 @@ pub fn configured_action(state: &mut AppState, key: &KeyEvent) -> ConfiguredKey 
         .any(|binding| binding.starts_with(&prefix))
     {
         state.ui.pending_key_sequence = Some((token, std::time::Instant::now()));
-        return ConfiguredKey { consumed: true, action: None };
+        return ConfiguredKey {
+            consumed: true,
+            action: None,
+        };
     }
-    ConfiguredKey { consumed: false, action: None }
+    ConfiguredKey {
+        consumed: false,
+        action: None,
+    }
 }
 
 pub fn execute(state: &mut AppState, action: KeymapAction) -> Option<AppEvent> {

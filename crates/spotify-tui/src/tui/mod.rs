@@ -13,7 +13,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, style::Color as RatatuiColor, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend, style::Color as RatatuiColor};
 use std::io::{Stdout, stdout};
 
 pub struct Tui {

@@ -72,7 +72,11 @@ const LIGHT_SHAPE_LUMINANCE: (f32, f32) = (0.55, 0.80);
 
 impl Tone {
     fn of(palette: &CoverPalette) -> Self {
-        if palette.average.luminance() >= LIGHT_COVER { Self::Light } else { Self::Dark }
+        if palette.average.luminance() >= LIGHT_COVER {
+            Self::Light
+        } else {
+            Self::Dark
+        }
     }
 
     /// The luminance range a mode clamps its colors into: on the dark base they may glow but
@@ -171,10 +175,16 @@ impl Backdrop {
         let guard = BLEED_GUARD as f32;
         let picture_w = u32::from(texels.width) as f32 - 2.0 * guard;
         let picture_h = u32::from(texels.height) as f32 - 2.0 * guard;
-        let (sx, sy) = (bounds.size.width / picture_w, bounds.size.height / picture_h);
+        let (sx, sy) = (
+            bounds.size.width / picture_w,
+            bounds.size.height / picture_h,
+        );
         Bounds {
             origin: point(bounds.origin.x - sx * guard, bounds.origin.y - sy * guard),
-            size: size(sx * (picture_w + 2.0 * guard), sy * (picture_h + 2.0 * guard)),
+            size: size(
+                sx * (picture_w + 2.0 * guard),
+                sy * (picture_h + 2.0 * guard),
+            ),
         }
     }
 }
@@ -198,12 +208,15 @@ pub struct Built {
 impl Build {
     fn keyframe(&self, k: usize) -> Arc<RenderImage> {
         let phase = k as f32 / keyframes(self.mode) as f32;
-        painter(self.mode)(&self.palette, self.colors.base, self.colors.tone, phase).into_render_image(BLEED_GUARD)
+        painter(self.mode)(&self.palette, self.colors.base, self.colors.tone, phase)
+            .into_render_image(BLEED_GUARD)
     }
 
     pub fn run(self) -> Built {
         let count = keyframes(self.mode);
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(count);
+        let threads = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .min(count);
         let per_thread = count.div_ceil(threads);
         let mut frames: Vec<Option<Arc<RenderImage>>> = vec![None; count];
         std::thread::scope(|scope| {
@@ -262,7 +275,9 @@ impl Source {
 
     fn palette(&self) -> CoverPalette {
         match self {
-            Source::Cover(art) => CoverPalette::from_pixels(art.width, art.height, &art.pixels).with_variety(),
+            Source::Cover(art) => {
+                CoverPalette::from_pixels(art.width, art.height, &art.pixels).with_variety()
+            }
             Source::Theme(palette) => palette.clone().with_variety(),
         }
     }
@@ -290,8 +305,16 @@ impl BackdropCache {
                 let palette = source.palette();
                 let colors = ImmersiveColors::derive(&palette);
                 self.generation += 1;
-                let build = Build { generation: self.generation, mode, palette, colors };
-                let stub = Arc::new(Backdrop { colors, frames: vec![build.keyframe(0)] });
+                let build = Build {
+                    generation: self.generation,
+                    mode,
+                    palette,
+                    colors,
+                };
+                let stub = Arc::new(Backdrop {
+                    colors,
+                    frames: vec![build.keyframe(0)],
+                });
                 self.pending = Some(build);
                 self.replace(mode, source, stub.clone());
                 stub
@@ -312,7 +335,10 @@ impl BackdropCache {
         }
         if let Some((mode, source, stub)) = self.last.take() {
             self.retired.extend(stub.frames.iter().cloned());
-            let full = Arc::new(Backdrop { colors: built.colors, frames: built.frames });
+            let full = Arc::new(Backdrop {
+                colors: built.colors,
+                frames: built.frames,
+            });
             self.last = Some((mode, source, full));
         }
     }
@@ -372,39 +398,76 @@ mod tests {
 
     fn full(mode: BackdropMode, palette: &CoverPalette) -> Backdrop {
         let colors = ImmersiveColors::derive(palette);
-        let built = Build { generation: 0, mode, palette: palette.clone(), colors }.run();
-        Backdrop { colors, frames: built.frames }
+        let built = Build {
+            generation: 0,
+            mode,
+            palette: palette.clone(),
+            colors,
+        }
+        .run();
+        Backdrop {
+            colors,
+            frames: built.frames,
+        }
     }
 
     fn white_backdrop() -> Backdrop {
-        full(BackdropMode::Lights, &CoverPalette::from_colors(vec![Rgb::WHITE]))
+        full(
+            BackdropMode::Lights,
+            &CoverPalette::from_colors(vec![Rgb::WHITE]),
+        )
     }
 
     #[test]
     fn roles_keep_text_readable_on_the_base() {
-        for primary in [Rgb::WHITE, Rgb::BLACK, Rgb::from_u8(30, 60, 230), Rgb::from_u8(250, 240, 200)] {
+        for primary in [
+            Rgb::WHITE,
+            Rgb::BLACK,
+            Rgb::from_u8(30, 60, 230),
+            Rgb::from_u8(250, 240, 200),
+        ] {
             let colors = ImmersiveColors::derive(&CoverPalette::from_colors(vec![primary]));
             let (bg, text, accent) = (lum(colors.background), lum(colors.text), lum(colors.accent));
             match colors.tone {
-                Tone::Dark => assert!(bg <= 0.111 && text >= 0.879 && accent >= 0.549, "{primary:?}"),
-                Tone::Light => assert!(bg >= 0.859 && text <= 0.121 && accent <= 0.451, "{primary:?}"),
+                Tone::Dark => assert!(
+                    bg <= 0.111 && text >= 0.879 && accent >= 0.549,
+                    "{primary:?}"
+                ),
+                Tone::Light => assert!(
+                    bg >= 0.859 && text <= 0.121 && accent <= 0.451,
+                    "{primary:?}"
+                ),
             }
-            let (muted, wash) = ((lum(colors.text_muted) - bg).abs(), (lum(colors.wash) - bg).abs());
+            let (muted, wash) = (
+                (lum(colors.text_muted) - bg).abs(),
+                (lum(colors.wash) - bg).abs(),
+            );
             assert!(muted < (text - bg).abs() && muted > wash, "{primary:?}");
         }
     }
 
     #[test]
     fn light_covers_get_the_light_tone() {
-        assert_eq!(Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(250, 240, 200)])), Tone::Light);
-        assert_eq!(Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230)])), Tone::Dark);
+        assert_eq!(
+            Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(
+                250, 240, 200
+            )])),
+            Tone::Light
+        );
+        assert_eq!(
+            Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230)])),
+            Tone::Dark
+        );
     }
 
     #[test]
     fn every_mode_loops_moves_and_keeps_its_tone() {
         let palettes = [
             CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230), Rgb::from_u8(220, 40, 90)]),
-            CoverPalette::from_colors(vec![Rgb::from_u8(250, 240, 200), Rgb::from_u8(120, 200, 230)]),
+            CoverPalette::from_colors(vec![
+                Rgb::from_u8(250, 240, 200),
+                Rgb::from_u8(120, 200, 230),
+            ]),
         ];
         for mode in BackdropMode::ALL {
             for palette in &palettes {
@@ -412,17 +475,29 @@ mod tests {
                 let colors = ImmersiveColors::derive(&palette);
                 let paint = |phase| painter(mode)(&palette, colors.base, colors.tone, phase);
                 let (start, end, later) = (paint(0.0), paint(1.0), paint(0.3));
-                let seam = start.pixels().iter().zip(end.pixels()).map(|(a, b)| (a.luminance() - b.luminance()).abs());
+                let seam = start
+                    .pixels()
+                    .iter()
+                    .zip(end.pixels())
+                    .map(|(a, b)| (a.luminance() - b.luminance()).abs());
                 assert!(seam.fold(0.0f32, f32::max) < 1e-3, "{mode:?} seams");
-                let motion = start.pixels().iter().zip(later.pixels()).map(|(a, b)| (a.luminance() - b.luminance()).abs());
+                let motion = start
+                    .pixels()
+                    .iter()
+                    .zip(later.pixels())
+                    .map(|(a, b)| (a.luminance() - b.luminance()).abs());
                 assert!(motion.fold(0.0f32, f32::max) > 0.02, "{mode:?} is still");
                 let (lo, hi) = colors.tone.shape_luminance();
                 let base = colors.base.luminance();
                 for pixel in start.pixels() {
                     let lum = pixel.luminance();
                     match colors.tone {
-                        Tone::Dark => assert!(lum <= hi + 0.01 && lum >= base - 0.01, "{mode:?} {lum}"),
-                        Tone::Light => assert!(lum >= lo - 0.01 && lum <= base + 0.01, "{mode:?} {lum}"),
+                        Tone::Dark => {
+                            assert!(lum <= hi + 0.01 && lum >= base - 0.01, "{mode:?} {lum}")
+                        }
+                        Tone::Light => {
+                            assert!(lum >= lo - 0.01 && lum <= base + 0.01, "{mode:?} {lum}")
+                        }
                     }
                 }
             }
@@ -434,10 +509,19 @@ mod tests {
         let backdrop = white_backdrop();
         let texels = u32::from(backdrop.frames[0].size(0).width) as f32;
         let picture = texels - 2.0 * BLEED_GUARD as f32;
-        let bounds = Bounds { origin: point(gpui::px(10.0), gpui::px(20.0)), size: size(gpui::px(picture * 10.0), gpui::px(picture * 5.0)) };
+        let bounds = Bounds {
+            origin: point(gpui::px(10.0), gpui::px(20.0)),
+            size: size(gpui::px(picture * 10.0), gpui::px(picture * 5.0)),
+        };
         let image = backdrop.image_bounds(bounds);
-        assert_eq!(image.origin, point(gpui::px(10.0 - 20.0), gpui::px(20.0 - 10.0)));
-        assert_eq!(image.size, size(gpui::px(texels * 10.0), gpui::px(texels * 5.0)));
+        assert_eq!(
+            image.origin,
+            point(gpui::px(10.0 - 20.0), gpui::px(20.0 - 10.0))
+        );
+        assert_eq!(
+            image.size,
+            size(gpui::px(texels * 10.0), gpui::px(texels * 5.0))
+        );
     }
 
     #[test]
@@ -445,12 +529,19 @@ mod tests {
         let backdrop = white_backdrop();
         assert_eq!(backdrop.frames.len(), KEYFRAMES);
         let (a, b, t) = backdrop.frame(0.0);
-        assert!(Arc::ptr_eq(&a, &backdrop.frames[0]) && Arc::ptr_eq(&b, &backdrop.frames[1]) && t == 0.0);
+        assert!(
+            Arc::ptr_eq(&a, &backdrop.frames[0])
+                && Arc::ptr_eq(&b, &backdrop.frames[1])
+                && t == 0.0
+        );
         let (a, b, t) = backdrop.frame(1.5 / KEYFRAMES as f32);
         assert!(Arc::ptr_eq(&a, &backdrop.frames[1]) && Arc::ptr_eq(&b, &backdrop.frames[2]));
         assert!((t - 0.5).abs() < 1e-4);
         let (a, b, t) = backdrop.frame(0.999);
-        assert!(Arc::ptr_eq(&a, &backdrop.frames[KEYFRAMES - 1]) && Arc::ptr_eq(&b, &backdrop.frames[0]));
+        assert!(
+            Arc::ptr_eq(&a, &backdrop.frames[KEYFRAMES - 1])
+                && Arc::ptr_eq(&b, &backdrop.frames[0])
+        );
         assert!(t > 0.9);
         let (a, _, _) = backdrop.frame(1.0);
         assert!(Arc::ptr_eq(&a, &backdrop.frames[0]));
@@ -458,7 +549,10 @@ mod tests {
 
     #[test]
     fn a_stub_never_blends() {
-        let stub = Backdrop { colors: white_backdrop().colors, frames: vec![white_backdrop().frames[0].clone()] };
+        let stub = Backdrop {
+            colors: white_backdrop().colors,
+            frames: vec![white_backdrop().frames[0].clone()],
+        };
         let (a, b, t) = stub.frame(0.7);
         assert!(Arc::ptr_eq(&a, &b) && t == 0.0);
     }
@@ -466,14 +560,23 @@ mod tests {
     #[test]
     fn cache_stubs_then_installs_and_ignores_stale_builds() {
         let theme = CoverPalette::from_colors(vec![Rgb::from_u8(0, 200, 200)]);
-        let art = |v: u8| Arc::new(echo_core::artwork::Artwork { width: 1, height: 1, pixels: vec![v, 0, 0, 255] });
+        let art = |v: u8| {
+            Arc::new(echo_core::artwork::Artwork {
+                width: 1,
+                height: 1,
+                pixels: vec![v, 0, 0, 255],
+            })
+        };
         let (a, b) = (art(200), art(20));
         let mut cache = BackdropCache::default();
         let first = cache.get(BackdropMode::Lights, Some(&a), &theme);
         assert_eq!(first.frames.len(), 1);
         let build = cache.take_build().expect("a miss leaves a build");
         assert!(cache.take_build().is_none());
-        assert!(Arc::ptr_eq(&first, &cache.get(BackdropMode::Lights, Some(&a), &theme)));
+        assert!(Arc::ptr_eq(
+            &first,
+            &cache.get(BackdropMode::Lights, Some(&a), &theme)
+        ));
         let mut released = 0;
         cache.release(|_| released += 1);
         assert_eq!(released, 0);
@@ -487,22 +590,35 @@ mod tests {
         let third = cache.get(BackdropMode::Mesh, Some(&b), &theme);
         let current = cache.take_build().unwrap();
         cache.install(stale.run());
-        assert!(Arc::ptr_eq(&third, &cache.get(BackdropMode::Mesh, Some(&b), &theme)));
+        assert!(Arc::ptr_eq(
+            &third,
+            &cache.get(BackdropMode::Mesh, Some(&b), &theme)
+        ));
         cache.install(current.run());
         let installed = cache.get(BackdropMode::Mesh, Some(&b), &theme);
-        assert!(!Arc::ptr_eq(&third, &installed) && installed.frames.len() == keyframes(BackdropMode::Mesh));
+        assert!(
+            !Arc::ptr_eq(&third, &installed)
+                && installed.frames.len() == keyframes(BackdropMode::Mesh)
+        );
         released = 0;
         cache.release(|_| released += 1);
         assert_eq!(released, KEYFRAMES + 2);
         assert!(!Arc::ptr_eq(&second, &installed));
         let fallback = cache.get(BackdropMode::Mesh, None, &theme);
-        assert!(Arc::ptr_eq(&fallback, &cache.get(BackdropMode::Mesh, None, &theme)));
+        assert!(Arc::ptr_eq(
+            &fallback,
+            &cache.get(BackdropMode::Mesh, None, &theme)
+        ));
     }
 
     #[test]
     fn the_nebula_gets_more_keyframes_than_the_soft_modes() {
         assert!(keyframes(BackdropMode::Nebula) >= keyframes(BackdropMode::Lights) * 3 / 2);
-        assert!(BackdropMode::ALL.iter().all(|mode| keyframes(*mode) >= KEYFRAMES));
+        assert!(
+            BackdropMode::ALL
+                .iter()
+                .all(|mode| keyframes(*mode) >= KEYFRAMES)
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
-use echo_core::app::AppState;
-use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{format_time, stabilize_terminal_emoji_width};
+use crate::tui::theme::{ThemeStyles, ToRatatui};
+use echo_core::app::AppState;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -188,9 +188,16 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
     let text_lines = vec![
         Line::from(Span::styled(
             track_title,
-            state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
+            state
+                .ui
+                .active_theme
+                .base_style()
+                .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(track_artist, state.ui.active_theme.muted_style())),
+        Line::from(Span::styled(
+            track_artist,
+            state.ui.active_theme.muted_style(),
+        )),
     ];
     let track_text_p = Paragraph::new(text_lines)
         .alignment(Alignment::Left)
@@ -253,7 +260,8 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
                 vec![
                     format_lyric(
                         current_line,
-                        state.ui
+                        state
+                            .ui
                             .active_theme
                             .primary_style()
                             .add_modifier(Modifier::BOLD),

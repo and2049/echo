@@ -1,8 +1,8 @@
-use echo_core::app::{ActiveView, AppState};
 use crate::tui::render::{
     padded_library_list, stabilize_terminal_emoji_width, truncate_to_width_with_ellipsis,
 };
 use crate::tui::theme::{ThemeStyles, ToRatatui};
+use echo_core::app::{ActiveView, AppState};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -49,7 +49,8 @@ pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .collect();
 
     let list = padded_library_list(items).highlight_style(
-        state.ui
+        state
+            .ui
             .active_theme
             .selected_style()
             .add_modifier(Modifier::BOLD),
@@ -61,7 +62,8 @@ pub fn render_artist_list(frame: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
-    let artist_name = state.data
+    let artist_name = state
+        .data
         .artist_page_data
         .as_ref()
         .map(|d| d.artist_name.clone())
@@ -83,7 +85,8 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let Some((artist_image_url, albums)) = state.data
+    let Some((artist_image_url, albums)) = state
+        .data
         .artist_page_data
         .as_ref()
         .map(|data| (data.image_url.clone(), data.albums.clone()))
@@ -93,13 +96,13 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             "  Artist page unavailable."
         };
-        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
+        let p =
+            ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
         frame.render_widget(p, inner_area);
         return;
     };
 
-    let has_image =
-        artist_image_url.is_some() && state.ui.active_library_header_image.is_some();
+    let has_image = artist_image_url.is_some() && state.ui.active_library_header_image.is_some();
     let (header_area, albums_area) = if has_image {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -120,7 +123,8 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             "  No albums loaded."
         };
-        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
+        let p =
+            ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
         frame.render_widget(p, albums_area);
         return;
     }
@@ -128,12 +132,14 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let selected_idx = state.ui.artist_page_album_index;
     let show_track_count = albums.iter().any(|album| album.track_count.is_some());
     let header_style = if is_active {
-        state.ui
+        state
+            .ui
             .active_theme
             .secondary_style()
             .add_modifier(Modifier::BOLD)
     } else {
-        state.ui
+        state
+            .ui
             .active_theme
             .primary_style()
             .add_modifier(Modifier::BOLD)
@@ -227,18 +233,21 @@ pub fn render_whats_new(frame: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             "  No recent releases from followed artists."
         };
-        let p = ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
+        let p =
+            ratatui::widgets::Paragraph::new(message).style(state.ui.active_theme.muted_style());
         frame.render_widget(p, inner_area);
         return;
     }
 
     let header_style = if is_active {
-        state.ui
+        state
+            .ui
             .active_theme
             .secondary_style()
             .add_modifier(Modifier::BOLD)
     } else {
-        state.ui
+        state
+            .ui
             .active_theme
             .primary_style()
             .add_modifier(Modifier::BOLD)
@@ -246,7 +255,8 @@ pub fn render_whats_new(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
     let name_width = inner_area.width.saturating_mul(45) / 100;
     let artist_width = inner_area.width.saturating_mul(35) / 100;
-    let rows: Vec<Row> = state.data
+    let rows: Vec<Row> = state
+        .data
         .whats_new
         .iter()
         .enumerate()

@@ -218,11 +218,14 @@ impl Default for PlaybackState {
 impl PlaybackState {
     pub fn display_progress_ms(&self) -> u32 {
         if self.is_playing {
-            self.playback_last_updated_at.map_or(self.progress_ms, |updated| {
-                self.progress_ms
-                    .saturating_add(updated.elapsed().as_millis().try_into().unwrap_or(u32::MAX))
-                    .min(self.duration_ms)
-            })
+            self.playback_last_updated_at
+                .map_or(self.progress_ms, |updated| {
+                    self.progress_ms
+                        .saturating_add(
+                            updated.elapsed().as_millis().try_into().unwrap_or(u32::MAX),
+                        )
+                        .min(self.duration_ms)
+                })
         } else {
             self.progress_ms
         }
@@ -378,9 +381,17 @@ impl AppState {
     fn playing_context_name(&self) -> Option<String> {
         let context = self.playback.playing_context.as_ref()?;
         if context.is_album {
-            self.data.saved_albums.iter().find(|a| a.id == context.context_id).map(|a| a.name.clone())
+            self.data
+                .saved_albums
+                .iter()
+                .find(|a| a.id == context.context_id)
+                .map(|a| a.name.clone())
         } else {
-            self.data.playlists.iter().find(|p| p.id == context.context_id).map(|p| p.name.clone())
+            self.data
+                .playlists
+                .iter()
+                .find(|p| p.id == context.context_id)
+                .map(|p| p.name.clone())
         }
     }
 }
@@ -828,7 +839,11 @@ impl AppState {
     pub fn show_local_library(&mut self) {
         let context = TrackListContext::local_library();
         if self.ui.active_view != ActiveView::TrackList
-            || self.data.active_tracklist_context.as_ref().map(|active| &active.id)
+            || self
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .map(|active| &active.id)
                 != Some(&context.id)
         {
             self.push_view_history();
@@ -845,7 +860,11 @@ impl AppState {
     pub fn show_local_playlist(&mut self, playlist_id: &str, title: String) {
         let context = TrackListContext::local_playlist(playlist_id.to_string(), title);
         if self.ui.active_view != ActiveView::TrackList
-            || self.data.active_tracklist_context.as_ref().map(|active| &active.id)
+            || self
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .map(|active| &active.id)
                 != Some(&context.id)
         {
             self.push_view_history();

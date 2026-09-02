@@ -5,9 +5,9 @@
 
 use std::f32::consts::TAU;
 
+use super::Tone;
 use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
-use super::Tone;
 
 const SIZE: (usize, usize) = (192, 120);
 /// Every curtain leans this much: height gained from the left edge to the right.
@@ -20,10 +20,42 @@ const FADE_DEPTH: f32 = 0.75;
 /// way), half the curtain's thickness, the shimmer's cycles across the width and where the
 /// ripple starts, in turns. Heights and thicknesses are fractions of the canvas.
 const CURTAINS: [Curtain; 4] = [
-    Curtain { height: 0.30, ripple: 0.11, waves: 1.0, travel: 1, thickness: 0.15, shimmer: 2.0, start: 0.00 },
-    Curtain { height: 0.46, ripple: 0.09, waves: 1.5, travel: -1, thickness: 0.12, shimmer: 3.0, start: 0.35 },
-    Curtain { height: 0.16, ripple: 0.07, waves: 2.0, travel: 1, thickness: 0.09, shimmer: 3.5, start: 0.60 },
-    Curtain { height: 0.60, ripple: 0.10, waves: 1.0, travel: -2, thickness: 0.13, shimmer: 2.5, start: 0.80 },
+    Curtain {
+        height: 0.30,
+        ripple: 0.11,
+        waves: 1.0,
+        travel: 1,
+        thickness: 0.15,
+        shimmer: 2.0,
+        start: 0.00,
+    },
+    Curtain {
+        height: 0.46,
+        ripple: 0.09,
+        waves: 1.5,
+        travel: -1,
+        thickness: 0.12,
+        shimmer: 3.0,
+        start: 0.35,
+    },
+    Curtain {
+        height: 0.16,
+        ripple: 0.07,
+        waves: 2.0,
+        travel: 1,
+        thickness: 0.09,
+        shimmer: 3.5,
+        start: 0.60,
+    },
+    Curtain {
+        height: 0.60,
+        ripple: 0.10,
+        waves: 1.0,
+        travel: -2,
+        thickness: 0.13,
+        shimmer: 2.5,
+        start: 0.80,
+    },
 ];
 
 struct Curtain {
@@ -49,20 +81,25 @@ impl Curtain {
     fn glow(&self, x: f32, y: f32, phase: f32) -> f32 {
         let d = (y - self.spine(x, phase)) / self.thickness;
         let band = (-d * d).exp();
-        let shimmer = 0.7 + 0.3 * (TAU * (x * self.shimmer + 2.0 * self.travel as f32 * phase)).sin();
+        let shimmer =
+            0.7 + 0.3 * (TAU * (x * self.shimmer + 2.0 * self.travel as f32 * phase)).sin();
         band * shimmer
     }
 }
 
 pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raster {
     let (lo, hi) = tone.shape_luminance();
-    let colors: Vec<Rgb> = (0..CURTAINS.len()).map(|ix| palette.color(ix).with_luminance_in(lo, hi)).collect();
+    let colors: Vec<Rgb> = (0..CURTAINS.len())
+        .map(|ix| palette.color(ix).with_luminance_in(lo, hi))
+        .collect();
     let mut raster = Raster::new(SIZE.0, SIZE.1, base);
     raster.map(|x, y, color| {
         CURTAINS
             .iter()
             .zip(&colors)
-            .fold(color, |color, (curtain, tint)| color.mix(*tint, curtain.glow(x, y, phase)))
+            .fold(color, |color, (curtain, tint)| {
+                color.mix(*tint, curtain.glow(x, y, phase))
+            })
     });
     raster.blur(BLUR_RADIUS);
     raster.settle(base, FADE.0, FADE.1, FADE_DEPTH);

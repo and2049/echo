@@ -54,7 +54,9 @@ pub trait ThemeStyles {
 
 impl ThemeStyles for ResolvedTheme {
     fn base_style(&self) -> Style {
-        Style::default().fg(self.text.rat()).bg(self.background.rat())
+        Style::default()
+            .fg(self.text.rat())
+            .bg(self.background.rat())
     }
 
     fn muted_style(&self) -> Style {
@@ -80,6 +82,8 @@ impl ThemeStyles for ResolvedTheme {
     }
 
     fn gauge_style(&self) -> Style {
-        Style::default().fg(self.text.rat()).bg(self.text_muted.rat())
+        Style::default()
+            .fg(self.text.rat())
+            .bg(self.text_muted.rat())
     }
 }

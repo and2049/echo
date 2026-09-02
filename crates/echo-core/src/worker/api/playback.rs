@@ -407,10 +407,7 @@ impl SpotifyWorker {
 
     pub async fn seek_to(&mut self, progress_ms: u32) -> Result<()> {
         self.client
-            .seek_track(
-                chrono::Duration::milliseconds(i64::from(progress_ms)),
-                None,
-            )
+            .seek_track(chrono::Duration::milliseconds(i64::from(progress_ms)), None)
             .await?;
         Ok(())
     }
@@ -491,11 +488,19 @@ impl SpotifyWorker {
 
         let res = self
             .client
-            .start_context_playback(context_uri, Some(target_device.as_str()), Some(offset), None)
+            .start_context_playback(
+                context_uri,
+                Some(target_device.as_str()),
+                Some(offset),
+                None,
+            )
             .await;
 
         if let Err(e) = &res {
-            let _ = std::fs::write(crate::config::debug_log_path("echo-debug.log"), format!("Playback error: {:?}\n", e));
+            let _ = std::fs::write(
+                crate::config::debug_log_path("echo-debug.log"),
+                format!("Playback error: {:?}\n", e),
+            );
         }
 
         res?;

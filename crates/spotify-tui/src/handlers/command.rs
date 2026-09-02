@@ -1,9 +1,9 @@
 //! Key handling for command mode. What the commands do lives in [`echo_core::commands`],
 //! shared with the desktop app's command bar.
 
+use crossterm::event::{KeyCode, KeyEvent};
 use echo_core::app::{AppMode, AppState};
 use echo_core::events::AppEvent;
-use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {

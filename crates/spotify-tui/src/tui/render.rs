@@ -1,5 +1,5 @@
-use echo_core::app::{ActiveView, AppMode, AppState};
 use crate::tui::theme::{ThemeStyles, ToRatatui};
+use echo_core::app::{ActiveView, AppMode, AppState};
 use ratatui::{
     Frame,
     buffer::Buffer,
@@ -76,7 +76,8 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     frame.render_widget(cmd_bar, command_bar_area);
 
     if state.ui.mode == AppMode::Command && !state.ui.command_suggestions.is_empty() {
-        let max_len = state.ui
+        let max_len = state
+            .ui
             .command_suggestions
             .iter()
             .map(|s| s.len())
@@ -93,7 +94,8 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             height,
         };
 
-        let items: Vec<ratatui::widgets::ListItem> = state.ui
+        let items: Vec<ratatui::widgets::ListItem> = state
+            .ui
             .command_suggestions
             .iter()
             .enumerate()
@@ -134,7 +136,11 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state
+                    .ui
+                    .active_theme
+                    .base_style()
+                    .add_modifier(Modifier::BOLD),
             )),
         ])
         .style(state.ui.active_theme.base_style())
@@ -167,7 +173,11 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state
+                    .ui
+                    .active_theme
+                    .base_style()
+                    .add_modifier(Modifier::BOLD),
             )),
         ])
         .style(state.ui.active_theme.base_style())
@@ -197,7 +207,11 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state
+                    .ui
+                    .active_theme
+                    .base_style()
+                    .add_modifier(Modifier::BOLD),
             )),
         ])
         .style(state.ui.active_theme.base_style())
@@ -232,7 +246,11 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 "Press 'y' to confirm or any other key to cancel.",
-                state.ui.active_theme.base_style().add_modifier(Modifier::BOLD),
+                state
+                    .ui
+                    .active_theme
+                    .base_style()
+                    .add_modifier(Modifier::BOLD),
             )),
         ])
         .style(state.ui.active_theme.base_style())
@@ -253,7 +271,10 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     if state.ui.liked_track_remove_prompt.is_some() {
         let popup_area = centered_rect(60, 40, frame.area());
         let popup = Paragraph::new(vec![Line::from(Span::styled(
-            echo_core::i18n::t("prompts.remove_from_liked", &state.ui.library_config.language),
+            echo_core::i18n::t(
+                "prompts.remove_from_liked",
+                &state.ui.library_config.language,
+            ),
             state.ui.active_theme.error_style(),
         ))])
         .style(state.ui.active_theme.base_style())
@@ -314,7 +335,8 @@ pub fn render_app(frame: &mut Frame, state: &mut AppState) {
     if state.ui.device_modal_open {
         let popup_area = centered_rect(50, 60, frame.area());
 
-        let items: Vec<ratatui::widgets::ListItem> = state.data
+        let items: Vec<ratatui::widgets::ListItem> = state
+            .data
             .devices
             .iter()
             .enumerate()
@@ -507,7 +529,8 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
         let mut items = Vec::new();
         for (i, line) in lyrics.lines.iter().enumerate() {
             let style = if i == current_idx {
-                state.ui
+                state
+                    .ui
                     .active_theme
                     .primary_style()
                     .add_modifier(Modifier::BOLD)
@@ -522,7 +545,8 @@ pub fn render_lyrics_modal(frame: &mut Frame, state: &mut AppState) {
         let list = ratatui::widgets::List::new(items)
             .block(block)
             .highlight_style(
-                state.ui
+                state
+                    .ui
                     .active_theme
                     .primary_style()
                     .add_modifier(Modifier::BOLD),
@@ -798,7 +822,10 @@ mod tests {
         state.ui.command_buffer = "redraw".to_string();
 
         assert_eq!(command_bar_content(&state).0, ":redraw");
-        assert_eq!(state.ui.audio_output_error.as_deref(), Some("audio disconnected"));
+        assert_eq!(
+            state.ui.audio_output_error.as_deref(),
+            Some("audio disconnected")
+        );
 
         state.ui.mode = AppMode::Normal;
         assert_eq!(command_bar_content(&state).0, "audio disconnected");

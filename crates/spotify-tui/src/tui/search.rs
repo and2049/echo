@@ -1,8 +1,8 @@
-use echo_core::app::{ActiveView, AppState, SearchTab};
-use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     DURATION_COLUMN_WIDTH, format_duration_text, truncate_to_width_with_ellipsis,
 };
+use crate::tui::theme::{ThemeStyles, ToRatatui};
+use echo_core::app::{ActiveView, AppState, SearchTab};
 use ratatui::{
     Frame,
     layout::{Constraint, Rect},
@@ -99,7 +99,8 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                 None
             };
 
-            let rows: Vec<Row> = state.data
+            let rows: Vec<Row> = state
+                .data
                 .search_results
                 .tracks
                 .iter()
@@ -112,10 +113,11 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
                     };
 
                     let style = if is_in_visual {
-                        state.ui
+                        state.ui.active_theme.selected_style().bg(state
+                            .ui
                             .active_theme
-                            .selected_style()
-                            .bg(state.ui.active_theme.primary.rat())
+                            .primary
+                            .rat())
                     } else if i == sel {
                         state.ui.active_theme.selected_style()
                     } else {
@@ -181,7 +183,8 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             let header = Row::new(vec!["Album", "Artist"])
                 .style(header_style)
                 .height(1);
-            let rows: Vec<Row> = state.data
+            let rows: Vec<Row> = state
+                .data
                 .search_results
                 .albums
                 .iter()
@@ -221,7 +224,8 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             )])
             .style(header_style)
             .height(1);
-            let rows: Vec<Row> = state.data
+            let rows: Vec<Row> = state
+                .data
                 .search_results
                 .artists
                 .iter()
@@ -256,7 +260,8 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
             ])
             .style(header_style)
             .height(1);
-            let rows: Vec<Row> = state.data
+            let rows: Vec<Row> = state
+                .data
                 .search_results
                 .playlists
                 .iter()
