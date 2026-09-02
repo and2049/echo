@@ -40,7 +40,11 @@ impl Raster {
     /// A filled disc centered at (`cx`, `cy`) — fractions of the width and height — with radius
     /// `r` as a fraction of the width, its edge softened over one pixel, blended in at `opacity`.
     pub fn disc(&mut self, cx: f32, cy: f32, r: f32, color: Rgb, opacity: f32) {
-        let (cx, cy, r) = (cx * self.width as f32, cy * self.height as f32, r * self.width as f32);
+        let (cx, cy, r) = (
+            cx * self.width as f32,
+            cy * self.height as f32,
+            r * self.width as f32,
+        );
         for y in 0..self.height {
             for x in 0..self.width {
                 let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
@@ -66,8 +70,18 @@ impl Raster {
     }
 
     fn box_pass(&mut self, radius: usize, horizontal: bool) {
-        let (lines, len) = if horizontal { (self.height, self.width) } else { (self.width, self.height) };
-        let index = |line: usize, i: usize| if horizontal { line * self.width + i } else { i * self.width + line };
+        let (lines, len) = if horizontal {
+            (self.height, self.width)
+        } else {
+            (self.width, self.height)
+        };
+        let index = |line: usize, i: usize| {
+            if horizontal {
+                line * self.width + i
+            } else {
+                i * self.width + line
+            }
+        };
         let window = (2 * radius + 1) as f32;
         let mut out = vec![Rgb::BLACK; len];
         for line in 0..lines {
@@ -81,7 +95,10 @@ impl Raster {
             }
             for (i, slot) in out.iter_mut().enumerate() {
                 *slot = Rgb::new(r / window, g / window, b / window);
-                let (leaving, entering) = (at(i as isize - radius as isize), at(i as isize + radius as isize + 1));
+                let (leaving, entering) = (
+                    at(i as isize - radius as isize),
+                    at(i as isize + radius as isize + 1),
+                );
                 r += entering.r - leaving.r;
                 g += entering.g - leaving.g;
                 b += entering.b - leaving.b;
@@ -196,16 +213,28 @@ mod tests {
     fn render_image_is_bgra_of_the_canvas() {
         let raster = Raster::new(1, 1, Rgb::new(1.0, 0.5, 0.0));
         let image = raster.into_render_image(0);
-        assert_eq!(image.size(0), gpui::size(gpui::DevicePixels(1), gpui::DevicePixels(1)));
+        assert_eq!(
+            image.size(0),
+            gpui::size(gpui::DevicePixels(1), gpui::DevicePixels(1))
+        );
         assert_eq!(image.as_bytes(0), Some(&[0u8, 128, 255, 255][..]));
     }
 
     #[test]
     fn guard_replicates_the_edges() {
         let mut raster = Raster::new(2, 1, Rgb::BLACK);
-        raster.map(|x, _, _| if x < 0.5 { Rgb::new(1.0, 0.0, 0.0) } else { Rgb::new(0.0, 0.0, 1.0) });
+        raster.map(|x, _, _| {
+            if x < 0.5 {
+                Rgb::new(1.0, 0.0, 0.0)
+            } else {
+                Rgb::new(0.0, 0.0, 1.0)
+            }
+        });
         let image = raster.into_render_image(1);
-        assert_eq!(image.size(0), gpui::size(gpui::DevicePixels(4), gpui::DevicePixels(3)));
+        assert_eq!(
+            image.size(0),
+            gpui::size(gpui::DevicePixels(4), gpui::DevicePixels(3))
+        );
         let bytes = image.as_bytes(0).unwrap();
         let texel = |x: usize, y: usize| &bytes[(y * 4 + x) * 4..(y * 4 + x) * 4 + 3];
         assert_eq!(texel(0, 0), [0, 0, 255]);

@@ -32,19 +32,31 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("lang <en|zh-CN|zh-TW>", "Switch language"),
     ("newplaylist <name>", "Create a Spotify playlist"),
     ("newlocalplaylist <name>", "Create a local playlist"),
-    ("localpath <abs-path>", "Set and scan the local music folder"),
+    (
+        "localpath <abs-path>",
+        "Set and scan the local music folder",
+    ),
     ("rescanlocal", "Rescan the local music folder"),
     ("spotifylogin", "Re-authenticate with Spotify"),
     ("rename <name>", "Rename the selected playlist or folder"),
     ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
     ("backdrop <name>", "Immersive view backdrop (desktop)"),
     ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
-    ("tray [on|off]", "Close button hides echo to the tray (desktop)"),
+    (
+        "tray [on|off]",
+        "Close button hides echo to the tray (desktop)",
+    ),
     ("seek <s|+s|-s>", "Seek to, or by, a number of seconds"),
     ("sleep <30m|1h|off>", "Pause playback after a delay"),
     ("mute", "Mute, or restore the previous volume"),
-    ("open [url|uri]", "Open a Spotify link, or read the clipboard"),
-    ("relative <on|off|toggle>", "Vim-style relative line numbers"),
+    (
+        "open [url|uri]",
+        "Open a Spotify link, or read the clipboard",
+    ),
+    (
+        "relative <on|off|toggle>",
+        "Vim-style relative line numbers",
+    ),
     ("range <short|medium|long>", "Top tracks/artists time range"),
     ("redraw", "Clear and redraw (TUI only)"),
 ];
@@ -142,8 +154,7 @@ pub fn cycle_suggestion(state: &mut AppState, forward: bool) {
                 Some((idx + 1) % state.ui.command_suggestions.len());
         } else {
             state.ui.command_suggestion_index = Some(
-                (idx + state.ui.command_suggestions.len() - 1)
-                    % state.ui.command_suggestions.len(),
+                (idx + state.ui.command_suggestions.len() - 1) % state.ui.command_suggestions.len(),
             );
         }
     }
@@ -330,12 +341,9 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     seconds
                         .max(0)
                         .saturating_mul(1_000)
-                        .min(i64::from(state.playback.duration_ms))
-                        as u32
+                        .min(i64::from(state.playback.duration_ms)) as u32
                 };
-                if state.playback.playing_track_id.is_none()
-                    || state.playback.duration_ms == 0
-                {
+                if state.playback.playing_track_id.is_none() || state.playback.duration_ms == 0 {
                     set_status(state, "Nothing is currently seekable");
                     return None;
                 }
@@ -380,10 +388,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                         match crate::platform::read_clipboard() {
                             Ok(value) => value,
                             Err(error) => {
-                                set_status(
-                                    state,
-                                    format!("Unable to read clipboard: {error}"),
-                                );
+                                set_status(state, format!("Unable to read clipboard: {error}"));
                                 return None;
                             }
                         }
@@ -424,7 +429,9 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 );
             }
             "backdrop" => {
-                let names = crate::config::BackdropMode::ALL.map(|mode| mode.name()).join("|");
+                let names = crate::config::BackdropMode::ALL
+                    .map(|mode| mode.name())
+                    .join("|");
                 match args.next().and_then(crate::config::BackdropMode::parse) {
                     Some(mode) => {
                         state.ui.library_config.immersive_backdrop = mode;
@@ -462,16 +469,12 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                                 crate::config::SortMode::Alphabetical
                         }
                         "creator" => {
-                            state.ui.library_config.sort_mode =
-                                crate::config::SortMode::Creator
+                            state.ui.library_config.sort_mode = crate::config::SortMode::Creator
                         }
-                        "original" | "title" | "artist" | "album" | "duration"
-                        | "added" | "reverse" => {
+                        "original" | "title" | "artist" | "album" | "duration" | "added"
+                        | "reverse" => {
                             if state.ui.active_view != crate::app::ActiveView::TrackList {
-                                set_status(
-                                    state,
-                                    "Track sorting is available from a track list",
-                                );
+                                set_status(state, "Track sorting is available from a track list");
                             } else {
                                 let sort = match mode {
                                     "title" => crate::app::TrackSort::Title,
@@ -505,8 +508,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     if let Ok(base) = base_str.parse::<isize>() {
                         state.ui.library_config.track_index_base = base;
                         state.save_library_config();
-                        state.ui.status_message =
-                            Some(format!("Track index base set to {}", base));
+                        state.ui.status_message = Some(format!("Track index base set to {}", base));
                     } else {
                         state.ui.status_message =
                             Some("Invalid index base, must be a number".to_string());
@@ -538,8 +540,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     if crate::intent::apply_theme(state, theme_name) {
                         state.ui.status_message = Some(format!("Theme: {}", theme_name));
                     } else {
-                        let mut theme_names: Vec<&String> =
-                            state.ui.themes.keys().collect();
+                        let mut theme_names: Vec<&String> = state.ui.themes.keys().collect();
                         theme_names.sort();
                         state.ui.status_message = Some(format!(
                             "Unknown theme '{}'. Available: {}",
@@ -620,9 +621,8 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     Some(other) => {
                         state.ui.status_message =
                             Some(format!("Usage: thumbs [on|off], got '{}'", other));
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         return None;
                     }
                     None => !state.ui.library_config.library_thumbnails,
@@ -675,11 +675,9 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     }
                 } else if state.ui.active_view == ActiveView::SearchResults
                     && state.ui.active_search_tab == crate::app::SearchTab::Tracks
-                    && state.ui.selected_search_index
-                        < state.data.search_results.tracks.len()
+                    && state.ui.selected_search_index < state.data.search_results.tracks.len()
                 {
-                    album_id_opt = state.data.search_results.tracks
-                        [state.ui.selected_search_index]
+                    album_id_opt = state.data.search_results.tracks[state.ui.selected_search_index]
                         .album_id
                         .clone();
                 }
@@ -694,8 +692,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     state.begin_tracklist_load(context.clone());
                     return Some(AppEvent::LoadContextTracks(context));
                 } else {
-                    state.ui.status_message =
-                        Some("No album available for this track".to_string());
+                    state.ui.status_message = Some("No album available for this track".to_string());
                     state.ui.status_message_expiry =
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                 }
@@ -703,8 +700,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
             "newplaylist" => {
                 let name = args.collect::<Vec<&str>>().join(" ");
                 if !name.is_empty() {
-                    state.ui.status_message =
-                        Some(format!("Creating playlist '{}'...", name));
+                    state.ui.status_message = Some(format!("Creating playlist '{}'...", name));
                     state.ui.status_message_expiry =
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     return Some(AppEvent::CreatePlaylist(name));
@@ -730,26 +726,22 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 } else {
                     let path = std::path::PathBuf::from(path_text);
                     if !path.is_absolute() {
-                        state.ui.status_message =
-                            Some("Local path must be absolute".to_string());
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message = Some("Local path must be absolute".to_string());
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     } else if !path.is_dir() {
                         state.ui.status_message =
                             Some("Local path must be an existing directory".to_string());
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     } else {
                         state.ui.library_config.local_music_dir = Some(path.clone());
                         state.save_library_config();
                         state.compute_library_view();
                         state.ui.status_message =
                             Some(format!("Scanning local music in {}...", path.display()));
-                        state.ui.status_message_expiry = Some(
-                            std::time::Instant::now() + std::time::Duration::from_secs(3),
-                        );
+                        state.ui.status_message_expiry =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         return Some(AppEvent::ScanLocalLibrary(path));
                     }
                 }
@@ -762,8 +754,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                     return Some(AppEvent::RescanLocalLibrary);
                 } else {
-                    state.ui.status_message =
-                        Some("No local music path configured".to_string());
+                    state.ui.status_message = Some("No local music path configured".to_string());
                     state.ui.status_message_expiry =
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                 }
@@ -780,10 +771,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 {
                     match node {
                         crate::models::LibraryNode::Playlist { playlist, .. } => {
-                            return Some(AppEvent::RenamePlaylist(
-                                playlist.id.clone(),
-                                name,
-                            ));
+                            return Some(AppEvent::RenamePlaylist(playlist.id.clone(), name));
                         }
                         crate::models::LibraryNode::Folder(f) => {
                             let old_name = f.name.clone();
@@ -798,12 +786,9 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                             }
                             state.save_library_config();
                             state.compute_library_view();
-                            state.ui.status_message =
-                                Some(format!("Renamed folder to '{}'", name));
-                            state.ui.status_message_expiry = Some(
-                                std::time::Instant::now()
-                                    + std::time::Duration::from_secs(3),
-                            );
+                            state.ui.status_message = Some(format!("Renamed folder to '{}'", name));
+                            state.ui.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
                     }
                 }
@@ -867,9 +852,18 @@ mod tests {
     #[test]
     fn sleep_arg_parses_minutes_hours_and_off() {
         use std::time::Duration;
-        assert_eq!(parse_sleep_arg("30m"), Some(Some(Duration::from_secs(30 * 60))));
-        assert_eq!(parse_sleep_arg("2h"), Some(Some(Duration::from_secs(2 * 3600))));
-        assert_eq!(parse_sleep_arg("45"), Some(Some(Duration::from_secs(45 * 60))));
+        assert_eq!(
+            parse_sleep_arg("30m"),
+            Some(Some(Duration::from_secs(30 * 60)))
+        );
+        assert_eq!(
+            parse_sleep_arg("2h"),
+            Some(Some(Duration::from_secs(2 * 3600)))
+        );
+        assert_eq!(
+            parse_sleep_arg("45"),
+            Some(Some(Duration::from_secs(45 * 60)))
+        );
         assert_eq!(parse_sleep_arg("off"), Some(None));
         assert_eq!(parse_sleep_arg("OFF"), Some(None));
         assert_eq!(parse_sleep_arg(""), None);
@@ -887,10 +881,22 @@ mod tests {
         use crate::config::BackdropMode;
         let mut state = AppState::new();
         submit_command(&mut state, "backdrop nebula");
-        assert_eq!(state.ui.library_config.immersive_backdrop, BackdropMode::Nebula);
+        assert_eq!(
+            state.ui.library_config.immersive_backdrop,
+            BackdropMode::Nebula
+        );
         submit_command(&mut state, "backdrop plaid");
-        assert_eq!(state.ui.library_config.immersive_backdrop, BackdropMode::Nebula);
-        assert!(state.ui.status_message.as_deref().is_some_and(|m| m.contains("lights|mesh")));
+        assert_eq!(
+            state.ui.library_config.immersive_backdrop,
+            BackdropMode::Nebula
+        );
+        assert!(
+            state
+                .ui
+                .status_message
+                .as_deref()
+                .is_some_and(|m| m.contains("lights|mesh"))
+        );
         assert_eq!(BackdropMode::parse("lights"), Some(BackdropMode::Lights));
         assert_eq!(BackdropMode::parse("Lights"), None);
     }
@@ -1005,7 +1011,10 @@ mod tests {
         state.ui.library_config.close_to_tray = true;
         assert!(submit_command(&mut state, "tray").is_none());
         assert!(!state.ui.library_config.close_to_tray);
-        assert_eq!(state.ui.status_message.as_deref(), Some("Close to tray off"));
+        assert_eq!(
+            state.ui.status_message.as_deref(),
+            Some("Close to tray off")
+        );
         assert!(submit_command(&mut state, "tray on").is_none());
         assert!(state.ui.library_config.close_to_tray);
         assert_eq!(state.ui.status_message.as_deref(), Some("Close to tray on"));
@@ -1013,7 +1022,10 @@ mod tests {
         assert!(!state.ui.library_config.close_to_tray);
         assert!(submit_command(&mut state, "tray sideways").is_none());
         assert!(!state.ui.library_config.close_to_tray);
-        assert_eq!(state.ui.status_message.as_deref(), Some("Usage: tray [on|off]"));
+        assert_eq!(
+            state.ui.status_message.as_deref(),
+            Some("Usage: tray [on|off]")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use souvlaki::{MediaControls, PlatformConfig, MediaMetadata};
+use souvlaki::{MediaControls, MediaMetadata, PlatformConfig};
 
 fn main() {
     println!("Testing souvlaki...");
@@ -46,8 +46,8 @@ pub mod windows {
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW,
-        WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WNDCLASSEXW,
     };
     use windows::core::w;
 
@@ -78,8 +78,16 @@ pub mod windows {
                     class_name,
                     w!(""),
                     WINDOW_STYLE::default(),
-                    0, 0, 0, 0, None, None, instance, None,
-                ).map_err(|e| format!("Failed to create window: {e}"))?;
+                    0,
+                    0,
+                    0,
+                    0,
+                    None,
+                    None,
+                    instance,
+                    None,
+                )
+                .map_err(|e| format!("Failed to create window: {e}"))?;
 
                 if handle.0.is_null() {
                     Err("Window creation failed".to_string())
@@ -89,7 +97,12 @@ pub mod windows {
             }
         }
 
-        extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        extern "system" fn wnd_proc(
+            hwnd: HWND,
+            msg: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
     }

@@ -4,9 +4,9 @@
 
 use std::f32::consts::TAU;
 
+use super::Tone;
 use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
-use super::Tone;
 
 const SIZE: (usize, usize) = (256, 160);
 const ASPECT: f32 = 1.6;
@@ -26,7 +26,9 @@ const FADE_DEPTH: f32 = 0.6;
 pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raster {
     let (lo, hi) = tone.shape_luminance();
     let sectors = LAPS * palette.colors.len();
-    let colors: Vec<Rgb> = (0..sectors).map(|ix| palette.color(ix).with_luminance_in(lo, hi)).collect();
+    let colors: Vec<Rgb> = (0..sectors)
+        .map(|ix| palette.color(ix).with_luminance_in(lo, hi))
+        .collect();
     let mut raster = Raster::new(SIZE.0, SIZE.1, base);
     raster.map(|x, y, _| {
         let (dx, dy) = ((x - 0.5) * ASPECT, y - 0.5);

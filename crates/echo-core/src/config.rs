@@ -534,7 +534,13 @@ pub enum BackdropMode {
 }
 
 impl BackdropMode {
-    pub const ALL: [BackdropMode; 5] = [Self::Lights, Self::Mesh, Self::Aurora, Self::Vinyl, Self::Nebula];
+    pub const ALL: [BackdropMode; 5] = [
+        Self::Lights,
+        Self::Mesh,
+        Self::Aurora,
+        Self::Vinyl,
+        Self::Nebula,
+    ];
 
     /// The name saved in the config and typed after `:backdrop`.
     pub fn name(self) -> &'static str {

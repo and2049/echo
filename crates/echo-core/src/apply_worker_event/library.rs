@@ -34,7 +34,8 @@ pub fn handle_local_library_loaded(
         5,
     );
     if state
-        .data.active_tracklist_context
+        .data
+        .active_tracklist_context
         .as_ref()
         .is_some_and(|context| context.kind == crate::models::TrackListContextKind::LocalLibrary)
     {

@@ -1,9 +1,9 @@
-use echo_core::app::{AppState, QueueRow};
-use crate::tui::theme::{ThemeStyles, ToRatatui};
 use crate::tui::render::{
     format_duration_text, format_time, stabilize_terminal_emoji_width,
     truncate_to_width_with_ellipsis,
 };
+use crate::tui::theme::{ThemeStyles, ToRatatui};
+use echo_core::app::{AppState, QueueRow};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Rect},
@@ -67,7 +67,8 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
                 };
 
                 let style = if is_in_visual {
-                    state.ui
+                    state
+                        .ui
                         .active_theme
                         .selected_style()
                         .bg(state.ui.active_theme.primary.rat())
@@ -90,7 +91,8 @@ pub fn render_queue(frame: &mut Frame, state: &AppState, area: Rect) {
                 } else {
                     " "
                 };
-                let liked_cell = Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
+                let liked_cell =
+                    Cell::from(liked_str).style(state.ui.active_theme.secondary_style());
 
                 Row::new(vec![
                     liked_cell,

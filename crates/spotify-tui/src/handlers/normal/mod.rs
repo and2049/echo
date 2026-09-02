@@ -1,7 +1,7 @@
-use echo_core::app::{ActiveView, AppState};
-use echo_core::events::AppEvent;
 use crate::handlers::{browse, tracklist};
 use crossterm::event::{KeyCode, KeyEvent};
+use echo_core::app::{ActiveView, AppState};
+use echo_core::events::AppEvent;
 
 mod modals;
 mod prompts;
@@ -53,11 +53,12 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     browse::select_node_from_library_index(state);
                     return browse::load_event_if_needed(state);
                 } else {
-                    let max_len = if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
-                        state.data.saved_albums.len()
-                    } else {
-                        state.data.library_view.len()
-                    };
+                    let max_len =
+                        if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
+                            state.data.saved_albums.len()
+                        } else {
+                            state.data.library_view.len()
+                        };
                     if max_len > 0 && state.ui.selected_playlist_index < max_len.saturating_sub(1) {
                         state.ui.selected_playlist_index += 1;
                     }
@@ -216,10 +217,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                     state.ui.selected_search_index,
                 );
             } else if state.ui.active_view == ActiveView::ArtistList {
-                return echo_core::intent::open_artist_at(
-                    state,
-                    state.ui.selected_artist_index,
-                );
+                return echo_core::intent::open_artist_at(state, state.ui.selected_artist_index);
             } else if state.ui.active_view == ActiveView::ArtistPage {
                 return echo_core::intent::open_artist_album(
                     state,
@@ -260,8 +258,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             if state.ui.active_library_tab == echo_core::app::LibraryTab::Albums {
                 return None;
             }
-            if let Some(echo_core::models::LibraryNode::Playlist { playlist, .. }) =
-                state.data.library_view.get(state.ui.selected_playlist_index)
+            if let Some(echo_core::models::LibraryNode::Playlist { playlist, .. }) = state
+                .data
+                .library_view
+                .get(state.ui.selected_playlist_index)
                 && playlist.id != "LIKED_SONGS"
                 && playlist.id != "local-library"
             {
@@ -309,7 +309,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                         .local_library
                         .tracks
                         .iter()
-                        .find(|track| Some(track.id.as_str()) == state.playback.playing_track_id.as_deref())
+                        .find(|track| {
+                            Some(track.id.as_str()) == state.playback.playing_track_id.as_deref()
+                        })
                         .map(|track| track.album.clone())
                         .unwrap_or_default(),
                     artist_id: state.playback.playing_track_artist_id.clone(),
@@ -626,10 +628,7 @@ mod tests {
 
         let event = handle_key(
             &mut state,
-            &KeyEvent::new(
-                KeyCode::Char('l'),
-                crossterm::event::KeyModifiers::CONTROL,
-            ),
+            &KeyEvent::new(KeyCode::Char('l'), crossterm::event::KeyModifiers::CONTROL),
         );
 
         assert!(event.is_none());

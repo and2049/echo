@@ -178,7 +178,12 @@ fn recent_releases(albums: &[Album], cutoff: &str) -> Vec<Album> {
     let mut seen = std::collections::HashSet::new();
     let mut out: Vec<Album> = albums
         .iter()
-        .filter(|album| album.release_date.as_deref().is_some_and(|date| date >= cutoff))
+        .filter(|album| {
+            album
+                .release_date
+                .as_deref()
+                .is_some_and(|date| date >= cutoff)
+        })
         .filter(|album| seen.insert(album.id.clone()))
         .cloned()
         .collect();
@@ -194,7 +199,10 @@ async fn send_api_error(
     err: anyhow::Error,
 ) {
     let message = api_request_error_message(&err);
-    let _ = std::fs::write(crate::config::debug_log_path("echo-debug-api.log"), format!("{log_name} err: {err:?}\n"));
+    let _ = std::fs::write(
+        crate::config::debug_log_path("echo-debug-api.log"),
+        format!("{log_name} err: {err:?}\n"),
+    );
     let _ = tx
         .send(WorkerEvent::ApiRequestFailed {
             label: label.to_string(),

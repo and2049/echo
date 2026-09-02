@@ -203,6 +203,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn argb_moves_alpha_first() {
-        assert_eq!(super::argb(&[1, 2, 3, 4, 5, 6, 7, 8]), [4, 1, 2, 3, 8, 5, 6, 7]);
+        assert_eq!(
+            super::argb(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            [4, 1, 2, 3, 8, 5, 6, 7]
+        );
     }
 }

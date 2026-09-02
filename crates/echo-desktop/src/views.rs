@@ -31,7 +31,11 @@ const SUBMENU_MAX_H: f32 = 270.0;
 const SUBMENU_ROW_HEIGHT: f32 = 31.0;
 const THUMB_EDGE: f32 = 26.0;
 // Native caption metrics: Windows titlebars are a fixed 32px, macOS gets a touch more.
-const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") { 32.0 } else { 34.0 };
+const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") {
+    32.0
+} else {
+    34.0
+};
 // Zed's measured inset for the macOS traffic lights (71px, +1px window border).
 const TRAFFIC_LIGHT_PADDING: f32 = 71.0;
 
@@ -275,7 +279,12 @@ pub fn titlebar(
                 .flex_row()
                 .items_center()
                 .gap_2()
-                .child(svg().path("icons/music-note.svg").size(px(14.0)).text_color(fg))
+                .child(
+                    svg()
+                        .path("icons/music-note.svg")
+                        .size(px(14.0))
+                        .text_color(fg),
+                )
                 .child(div().text_xs().text_color(fg).child("echo")),
         )
         .when(CAPTION_BUTTONS && !fullscreen, |el| {
@@ -334,8 +343,11 @@ fn caption_button(
 ) -> impl IntoElement {
     let close = matches!(area, gpui::WindowControlArea::Close);
     // The close button hovers Windows-red with a white glyph; the rest get a faint wash.
-    let hover_bg: gpui::Hsla =
-        if close { crate::theme::CLOSE_RED() } else { hover };
+    let hover_bg: gpui::Hsla = if close {
+        crate::theme::CLOSE_RED()
+    } else {
+        hover
+    };
     div()
         .id(id)
         .group(id)
@@ -366,7 +378,9 @@ fn caption_button(
                 .path(icon)
                 .size(px(10.0))
                 .text_color(fg)
-                .when(close, |el| el.group_hover(id, |style| style.text_color(gpui::white()))),
+                .when(close, |el| {
+                    el.group_hover(id, |style| style.text_color(gpui::white()))
+                }),
         )
 }
 
@@ -422,9 +436,17 @@ pub(crate) fn client_corner_radii(
     corners: Option<gpui::Tiling>,
     which: ClientCorners,
 ) -> gpui::Corners<gpui::Pixels> {
-    let Some(tiling) = corners else { return gpui::Corners::default() };
+    let Some(tiling) = corners else {
+        return gpui::Corners::default();
+    };
     let all = matches!(which, ClientCorners::All);
-    let radius = |rounded: bool| if rounded { px(CLIENT_CORNER_RADIUS) } else { px(0.0) };
+    let radius = |rounded: bool| {
+        if rounded {
+            px(CLIENT_CORNER_RADIUS)
+        } else {
+            px(0.0)
+        }
+    };
     gpui::Corners {
         top_left: radius(!tiling.top && !tiling.left),
         top_right: radius(!tiling.top && !tiling.right),
@@ -466,10 +488,26 @@ pub fn window_frame(
         ("resize-bottom", gpui::ResizeEdge::Bottom, tiling.bottom),
         ("resize-left", gpui::ResizeEdge::Left, tiling.left),
         ("resize-right", gpui::ResizeEdge::Right, tiling.right),
-        ("resize-top-left", gpui::ResizeEdge::TopLeft, tiling.top || tiling.left),
-        ("resize-top-right", gpui::ResizeEdge::TopRight, tiling.top || tiling.right),
-        ("resize-bottom-left", gpui::ResizeEdge::BottomLeft, tiling.bottom || tiling.left),
-        ("resize-bottom-right", gpui::ResizeEdge::BottomRight, tiling.bottom || tiling.right),
+        (
+            "resize-top-left",
+            gpui::ResizeEdge::TopLeft,
+            tiling.top || tiling.left,
+        ),
+        (
+            "resize-top-right",
+            gpui::ResizeEdge::TopRight,
+            tiling.top || tiling.right,
+        ),
+        (
+            "resize-bottom-left",
+            gpui::ResizeEdge::BottomLeft,
+            tiling.bottom || tiling.left,
+        ),
+        (
+            "resize-bottom-right",
+            gpui::ResizeEdge::BottomRight,
+            tiling.bottom || tiling.right,
+        ),
     ];
 
     div()
@@ -553,8 +591,15 @@ fn nav_button_cluster(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             crate::icon_button(id, icon, muted, palette.wash, cx, go).into_any_element()
         } else {
             // `border` rather than `wash`: at icon-glyph size the 15% wash all but vanishes.
-            crate::icon_button(id, icon, palette.border, gpui::transparent_black(), cx, |_, _| {})
-                .into_any_element()
+            crate::icon_button(
+                id,
+                icon,
+                palette.border,
+                gpui::transparent_black(),
+                cx,
+                |_, _| {},
+            )
+            .into_any_element()
         }
     };
 
@@ -1073,12 +1118,12 @@ pub fn main_area(
         setup_view(app, window, cx).into_any_element()
     } else {
         match app.state.ui.active_view {
-        ActiveView::TrackList => track_list(app, cx).into_any_element(),
-        ActiveView::Queue => queue_list(app, cx).into_any_element(),
-        ActiveView::SearchResults => search_results(app, cx).into_any_element(),
-        ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
-        ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
-        ActiveView::WhatsNew => whats_new(app, cx).into_any_element(),
+            ActiveView::TrackList => track_list(app, cx).into_any_element(),
+            ActiveView::Queue => queue_list(app, cx).into_any_element(),
+            ActiveView::SearchResults => search_results(app, cx).into_any_element(),
+            ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
+            ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
+            ActiveView::WhatsNew => whats_new(app, cx).into_any_element(),
             _ if app.state.ui.mode != AppMode::Authenticating
                 && (app.state.data.active_tracklist_context.is_some()
                     || !app.state.data.tracks.is_empty()) =>
@@ -1180,7 +1225,12 @@ fn setup_view(
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(div().text_lg().text_color(fg).child(tr(&app.state, "desktop.setup.title")))
+                .child(
+                    div()
+                        .text_lg()
+                        .text_color(fg)
+                        .child(tr(&app.state, "desktop.setup.title")),
+                )
                 .child(
                     div()
                         .flex()
@@ -1205,15 +1255,13 @@ fn setup_view(
                                 .gap_2()
                                 .cursor_pointer()
                                 .hover(|style| style.border_color(accent))
-                                .on_click(cx.listener(
-                                    |this: &mut EchoApp, _event, _window, cx| {
-                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                            echo_core::worker::api::REDIRECT_URI.to_string(),
-                                        ));
-                                        this.setup_uri_copied = true;
-                                        cx.notify();
-                                    },
-                                ))
+                                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                        echo_core::worker::api::REDIRECT_URI.to_string(),
+                                    ));
+                                    this.setup_uri_copied = true;
+                                    cx.notify();
+                                }))
                                 .child(
                                     div()
                                         .text_color(fg)
@@ -1221,18 +1269,19 @@ fn setup_view(
                                         .overflow_hidden()
                                         .child(echo_core::worker::api::REDIRECT_URI),
                                 )
-                                .child(div().text_xs().text_color(if uri_copied {
-                                    accent
-                                } else {
-                                    muted
-                                }).child(tr(
-                                    &app.state,
-                                    if uri_copied {
-                                        "desktop.setup.copied"
-                                    } else {
-                                        "desktop.setup.copy"
-                                    },
-                                ))),
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(if uri_copied { accent } else { muted })
+                                        .child(tr(
+                                            &app.state,
+                                            if uri_copied {
+                                                "desktop.setup.copied"
+                                            } else {
+                                                "desktop.setup.copy"
+                                            },
+                                        )),
+                                ),
                         )
                         .child(tr(&app.state, "desktop.setup.step3")),
                 )
@@ -1274,11 +1323,7 @@ fn setup_view(
                         .flex()
                         .justify_center()
                         .text_sm()
-                        .bg(if ready {
-                            accent
-                        } else {
-                            palette.wash
-                        })
+                        .bg(if ready { accent } else { palette.wash })
                         .text_color(if ready {
                             gpui::hsla(0.0, 0.0, 0.08, 1.0)
                         } else {
@@ -1334,55 +1379,55 @@ fn search_bar(
         })
         .child(div().flex_grow(1.0))
         .child(
-        div()
-            .id("search-box")
-            .key_context(crate::SEARCH_CONTEXT)
-            .track_focus(&app.search_focus)
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                this.handle_search_key(event, window, cx)
-            }))
-            .w(px(360.0))
-            .px_3()
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(if focused { accent } else { palette.border })
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_2()
-            .cursor_pointer()
-            .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
-                window.focus(&this.search_focus, cx);
-                cx.notify();
-            }))
-            .child(
-                svg()
-                    .path("icons/search.svg")
-                    .flex_none()
-                    .w(px(14.0))
-                    .h(px(14.0))
-                    .text_color(muted),
-            )
-            .child(if query.is_empty() && !focused {
-                div()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(tr(&app.state, "desktop.search_placeholder"))
-                    .into_any_element()
-            } else {
-                div()
-                    .text_sm()
-                    .text_color(fg)
-                    .whitespace_nowrap()
-                    .overflow_hidden()
-                    .child(SharedString::from(if focused {
-                        crate::text_with_cursor(&query, app.search_cursor)
-                    } else {
-                        query
-                    }))
-                    .into_any_element()
-            }),
+            div()
+                .id("search-box")
+                .key_context(crate::SEARCH_CONTEXT)
+                .track_focus(&app.search_focus)
+                .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                    this.handle_search_key(event, window, cx)
+                }))
+                .w(px(360.0))
+                .px_3()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(if focused { accent } else { palette.border })
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .cursor_pointer()
+                .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
+                    window.focus(&this.search_focus, cx);
+                    cx.notify();
+                }))
+                .child(
+                    svg()
+                        .path("icons/search.svg")
+                        .flex_none()
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .text_color(muted),
+                )
+                .child(if query.is_empty() && !focused {
+                    div()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(&app.state, "desktop.search_placeholder"))
+                        .into_any_element()
+                } else {
+                    div()
+                        .text_sm()
+                        .text_color(fg)
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .child(SharedString::from(if focused {
+                            crate::text_with_cursor(&query, app.search_cursor)
+                        } else {
+                            query
+                        }))
+                        .into_any_element()
+                }),
         )
         .child(div().flex_grow(1.0))
         .child(immersive_button(muted, palette.wash, cx))
@@ -1466,37 +1511,44 @@ pub fn sort_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEleme
                 .flex_col()
                 .overflow_hidden()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .children(SORT_OPTIONS.iter().enumerate().map(|(ix, (label_key, arg))| {
-                    let label = tr(&app.state, label_key);
-                    // `reverse` flips the current order rather than naming one, so it never
-                    // shows the active marker.
-                    let is_active = *arg != "reverse" && crate::sort_arg(active) == *arg;
-                    let is_selected = ix == selected;
-                    div()
-                        .id(*arg)
-                        .mx_1()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .justify_between()
-                        .text_sm()
-                        .text_color(if is_active { accent } else { fg })
-                        .when(is_selected, |el| el.bg(palette.menu_selected))
-                        .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_hover))
-                        })
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            this.apply_sort(arg, cx);
-                        }))
-                        .child(label)
-                        .when(is_active, |el| {
-                            el.child(div().flex_none().text_color(accent).child("●"))
-                        })
-                })),
+                .children(
+                    SORT_OPTIONS
+                        .iter()
+                        .enumerate()
+                        .map(|(ix, (label_key, arg))| {
+                            let label = tr(&app.state, label_key);
+                            // `reverse` flips the current order rather than naming one, so it never
+                            // shows the active marker.
+                            let is_active = *arg != "reverse" && crate::sort_arg(active) == *arg;
+                            let is_selected = ix == selected;
+                            div()
+                                .id(*arg)
+                                .mx_1()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .text_sm()
+                                .text_color(if is_active { accent } else { fg })
+                                .when(is_selected, |el| el.bg(palette.menu_selected))
+                                .when(!is_selected, |el| {
+                                    el.hover(move |style| style.bg(palette.menu_hover))
+                                })
+                                .cursor_pointer()
+                                .on_click(cx.listener(
+                                    move |this: &mut EchoApp, _event, _window, cx| {
+                                        this.apply_sort(arg, cx);
+                                    },
+                                ))
+                                .child(label)
+                                .when(is_active, |el| {
+                                    el.child(div().flex_none().text_color(accent).child("●"))
+                                })
+                        }),
+                ),
         )
 }
 
@@ -2008,12 +2060,14 @@ fn queue_header(
                     .text_color(fg)
                     .hover(move |style| style.text_color(muted))
                     .child(label)
-                    .on_click(cx.listener(|this: &mut EchoApp, _: &gpui::ClickEvent, _window, cx| {
-                        if let Some(event) = echo_core::intent::clear_queue(&mut this.state) {
-                            this.dispatch(event);
-                        }
-                        cx.notify();
-                    })),
+                    .on_click(cx.listener(
+                        |this: &mut EchoApp, _: &gpui::ClickEvent, _window, cx| {
+                            if let Some(event) = echo_core::intent::clear_queue(&mut this.state) {
+                                this.dispatch(event);
+                            }
+                            cx.notify();
+                        },
+                    )),
             )
         })
         .into_any_element()
@@ -2082,7 +2136,11 @@ pub(crate) fn playing_context_label(state: &echo_core::app::AppState) -> Option<
 
 /// Index-column text for a list row, honoring `track_index_base` (negative hides the
 /// column — the caller omits the div) and `relative_line_numbers`, exactly as the TUI does.
-fn row_number(state: &echo_core::app::AppState, ix: usize, selected: usize) -> Option<SharedString> {
+fn row_number(
+    state: &echo_core::app::AppState,
+    ix: usize,
+    selected: usize,
+) -> Option<SharedString> {
     let config = &state.ui.library_config;
     if config.track_index_base < 0 {
         return None;
@@ -2120,15 +2178,17 @@ fn liked_cell(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .on_click(cx.listener(move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
-            cx.stop_propagation();
-            if let Some(event) =
-                echo_core::intent::toggle_like_track(&mut this.state, track_id.clone())
-            {
-                this.dispatch(event);
-            }
-            cx.notify();
-        }))
+        .on_click(cx.listener(
+            move |this: &mut EchoApp, _event: &gpui::ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if let Some(event) =
+                    echo_core::intent::toggle_like_track(&mut this.state, track_id.clone())
+                {
+                    this.dispatch(event);
+                }
+                cx.notify();
+            },
+        ))
         .child(
             // gpui svgs don't inherit text color, so the tint (and its hover swap) must
             // live on the svg itself.
@@ -2160,7 +2220,12 @@ fn thumb_element(
     match artwork.and_then(|artwork| this.images.get(&artwork)) {
         Some(image) => {
             let el = img(image).flex_none().w(px(edge)).h(px(edge));
-            if round { el.rounded_full() } else { el.rounded_sm() }.into_any_element()
+            if round {
+                el.rounded_full()
+            } else {
+                el.rounded_sm()
+            }
+            .into_any_element()
         }
         None => {
             let el = div()
@@ -2178,7 +2243,12 @@ fn thumb_element(
                         .h(px((edge * 0.45).max(10.0)))
                         .text_color(muted),
                 );
-            if round { el.rounded_full() } else { el.rounded_sm() }.into_any_element()
+            if round {
+                el.rounded_full()
+            } else {
+                el.rounded_sm()
+            }
+            .into_any_element()
         }
     }
 }
@@ -2290,190 +2360,216 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             uniform_list(
                 "search-rows",
                 count,
-                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                    let theme = &this.state.ui.active_theme;
-                    let fg = theme.text.gpui(WINDOW_FG());
-                    let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
-                    let tab = this.state.ui.active_search_tab;
-                    let selected = this.state.ui.selected_search_index;
-                    let visual = visual_range_in(&this.state, ActiveView::SearchResults);
+                cx.processor(
+                    move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let palette = DesktopPalette::resolve(theme);
+                        let selected_bg = palette.row_selected;
+                        let tab = this.state.ui.active_search_tab;
+                        let selected = this.state.ui.selected_search_index;
+                        let visual = visual_range_in(&this.state, ActiveView::SearchResults);
 
-                    let rows: Vec<AnyElement> = range
-                        .map(|ix| {
-                            pill_row(ix, LIST_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover, |row| {
-                                let row = row.gap_3().on_click(cx.listener(
-                                    move |this: &mut EchoApp, _event, _window, cx| {
-                                        if let Some(event) =
-                                            echo_core::intent::activate_search_result(
-                                                &mut this.state,
-                                                ix,
-                                            )
-                                        {
-                                            this.dispatch(event);
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                pill_row(
+                                    ix,
+                                    LIST_PILL,
+                                    row_selected(ix, selected, visual),
+                                    selected_bg,
+                                    palette.row_hover,
+                                    |row| {
+                                        let row = row.gap_3().on_click(cx.listener(
+                                            move |this: &mut EchoApp, _event, _window, cx| {
+                                                if let Some(event) =
+                                                    echo_core::intent::activate_search_result(
+                                                        &mut this.state,
+                                                        ix,
+                                                    )
+                                                {
+                                                    this.dispatch(event);
+                                                }
+                                                cx.notify();
+                                            },
+                                        ));
+
+                                        match tab {
+                                            SearchTab::Tracks => {
+                                                let track = this.state.data.search_results.tracks
+                                                    [ix]
+                                                    .clone();
+                                                let is_liked = this
+                                                    .state
+                                                    .data
+                                                    .liked_tracks
+                                                    .contains(&track.id);
+                                                let secondary = this
+                                                    .state
+                                                    .ui
+                                                    .active_theme
+                                                    .secondary
+                                                    .gpui(WINDOW_FG());
+                                                row.child(
+                                                    div()
+                                                        .flex_grow(2.0)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(fg)
+                                                        .child(SharedString::from(track.name)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_grow(1.5)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(track.artist)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_grow(1.5)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(track.album)),
+                                                )
+                                                .child(liked_cell(
+                                                    "search",
+                                                    ix,
+                                                    track.id.clone(),
+                                                    is_liked,
+                                                    secondary,
+                                                    palette,
+                                                    cx,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .flex_none()
+                                                        .w(px(48.0))
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(format_time(
+                                                            track.duration_ms,
+                                                        ))),
+                                                )
+                                            }
+                                            SearchTab::Albums => {
+                                                let album = this.state.data.search_results.albums
+                                                    [ix]
+                                                    .clone();
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    album.image_url.as_deref(),
+                                                    26.0,
+                                                    false,
+                                                    muted,
+                                                );
+                                                row.child(thumb)
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(2.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(fg)
+                                                            .child(SharedString::from(album.name)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(1.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(muted)
+                                                            .child(SharedString::from(
+                                                                album.artist,
+                                                            )),
+                                                    )
+                                            }
+                                            SearchTab::Artists => {
+                                                let artist = this.state.data.search_results.artists
+                                                    [ix]
+                                                    .clone();
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    artist.image_url.as_deref(),
+                                                    26.0,
+                                                    true,
+                                                    muted,
+                                                );
+                                                // No followers column: the count is gone from the
+                                                // dev-mode API, so it would always read 0.
+                                                row.child(thumb).child(
+                                                    div()
+                                                        .flex_grow(1.0)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(fg)
+                                                        .child(SharedString::from(artist.name)),
+                                                )
+                                            }
+                                            SearchTab::Playlists => {
+                                                let playlist =
+                                                    this.state.data.search_results.playlists[ix]
+                                                        .clone();
+                                                let thumb_url = playlist
+                                                    .thumb_url
+                                                    .clone()
+                                                    .or_else(|| playlist.image_url.clone());
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    thumb_url.as_deref(),
+                                                    26.0,
+                                                    false,
+                                                    muted,
+                                                );
+                                                row.child(thumb)
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(2.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(fg)
+                                                            .child(SharedString::from(
+                                                                playlist.name,
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(1.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(muted)
+                                                            .child(SharedString::from(
+                                                                playlist.owner,
+                                                            )),
+                                                    )
+                                            }
                                         }
-                                        cx.notify();
                                     },
-                                ));
-
-                                match tab {
-                                SearchTab::Tracks => {
-                                    let track =
-                                        this.state.data.search_results.tracks[ix].clone();
-                                    let is_liked =
-                                        this.state.data.liked_tracks.contains(&track.id);
-                                    let secondary =
-                                        this.state.ui.active_theme.secondary.gpui(WINDOW_FG());
-                                    row.child(
-                                        div()
-                                            .flex_grow(2.0)
-                                            .flex_basis(px(0.0))
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .text_color(fg)
-                                            .child(SharedString::from(track.name)),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_grow(1.5)
-                                            .flex_basis(px(0.0))
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .text_color(muted)
-                                            .child(SharedString::from(track.artist)),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_grow(1.5)
-                                            .flex_basis(px(0.0))
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .text_color(muted)
-                                            .child(SharedString::from(track.album)),
-                                    )
-                                    .child(liked_cell(
-                                        "search",
-                                        ix,
-                                        track.id.clone(),
-                                        is_liked,
-                                        secondary,
-                                        palette,
-                                        cx,
-                                    ))
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .w(px(48.0))
-                                            .text_color(muted)
-                                            .child(SharedString::from(format_time(
-                                                track.duration_ms,
-                                            ))),
-                                    )
-                                }
-                                SearchTab::Albums => {
-                                    let album =
-                                        this.state.data.search_results.albums[ix].clone();
-                                    let thumb = thumb_element(
-                                        this,
-                                        album.image_url.as_deref(),
-                                        26.0,
-                                        false,
-                                        muted,
-                                    );
-                                    row.child(thumb)
-                                        .child(
-                                            div()
-                                                .flex_grow(2.0)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(fg)
-                                                .child(SharedString::from(album.name)),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_grow(1.0)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(muted)
-                                                .child(SharedString::from(album.artist)),
-                                        )
-                                }
-                                SearchTab::Artists => {
-                                    let artist =
-                                        this.state.data.search_results.artists[ix].clone();
-                                    let thumb = thumb_element(
-                                        this,
-                                        artist.image_url.as_deref(),
-                                        26.0,
-                                        true,
-                                        muted,
-                                    );
-                                    // No followers column: the count is gone from the
-                                    // dev-mode API, so it would always read 0.
-                                    row.child(thumb).child(
-                                        div()
-                                            .flex_grow(1.0)
-                                            .flex_basis(px(0.0))
-                                            .overflow_hidden()
-                                            .text_ellipsis()
-                                            .whitespace_nowrap()
-                                            .text_color(fg)
-                                            .child(SharedString::from(artist.name)),
-                                    )
-                                }
-                                SearchTab::Playlists => {
-                                    let playlist =
-                                        this.state.data.search_results.playlists[ix].clone();
-                                    let thumb_url = playlist
-                                        .thumb_url
-                                        .clone()
-                                        .or_else(|| playlist.image_url.clone());
-                                    let thumb = thumb_element(
-                                        this,
-                                        thumb_url.as_deref(),
-                                        26.0,
-                                        false,
-                                        muted,
-                                    );
-                                    row.child(thumb)
-                                        .child(
-                                            div()
-                                                .flex_grow(2.0)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(fg)
-                                                .child(SharedString::from(playlist.name)),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_grow(1.0)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(muted)
-                                                .child(SharedString::from(playlist.owner)),
-                                        )
-                                }
-                                }
+                                )
+                                .into_any_element()
                             })
-                            .into_any_element()
-                        })
-                        .collect();
+                            .collect();
 
-                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                    rows
-                }),
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    },
+                ),
             )
             .track_scroll(&app.search_scroll)
             .flex_grow(1.0)
@@ -2554,13 +2650,7 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 .flex_row()
                 .items_center()
                 .gap_3()
-                .child(
-                    div()
-                        .flex_grow(1.0)
-                        .text_lg()
-                        .text_color(fg)
-                        .child(title),
-                )
+                .child(div().flex_grow(1.0).text_lg().text_color(fg).child(title))
                 .when(is_top, |el| el.child(range_switcher(app, cx))),
         )
         .child(if count == 0 {
@@ -2576,80 +2666,82 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             uniform_list(
                 "artist-rows",
                 count,
-                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                    let theme = &this.state.ui.active_theme;
-                    let fg = theme.text.gpui(WINDOW_FG());
-                    let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
-                    let selected = this.state.ui.selected_artist_index;
-                    let visual = visual_range_in(&this.state, ActiveView::ArtistList);
+                cx.processor(
+                    move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let palette = DesktopPalette::resolve(theme);
+                        let selected_bg = palette.row_selected;
+                        let selected = this.state.ui.selected_artist_index;
+                        let visual = visual_range_in(&this.state, ActiveView::ArtistList);
 
-                    let rows: Vec<AnyElement> = range
-                        .map(|ix| {
-                            let Some(artist) = this.state.artist_list().get(ix).cloned() else {
-                                return div().id(ix).into_any_element();
-                            };
-                            let thumb = thumb_element(
-                                this,
-                                artist.image_url.as_deref(),
-                                26.0,
-                                true,
-                                muted,
-                            );
-                            pill_row(
-                                ix,
-                                LIST_PILL,
-                                row_selected(ix, selected, visual),
-                                selected_bg,
-                                palette.row_hover,
-                                |row| {
-                                    row.gap_3()
-                                        .on_click(cx.listener(
-                                            move |this: &mut EchoApp, _event, _window, cx| {
-                                                if let Some(event) =
-                                                    echo_core::intent::open_artist_at(
-                                                        &mut this.state,
-                                                        ix,
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                let Some(artist) = this.state.artist_list().get(ix).cloned() else {
+                                    return div().id(ix).into_any_element();
+                                };
+                                let thumb = thumb_element(
+                                    this,
+                                    artist.image_url.as_deref(),
+                                    26.0,
+                                    true,
+                                    muted,
+                                );
+                                pill_row(
+                                    ix,
+                                    LIST_PILL,
+                                    row_selected(ix, selected, visual),
+                                    selected_bg,
+                                    palette.row_hover,
+                                    |row| {
+                                        row.gap_3()
+                                            .on_click(cx.listener(
+                                                move |this: &mut EchoApp, _event, _window, cx| {
+                                                    if let Some(event) =
+                                                        echo_core::intent::open_artist_at(
+                                                            &mut this.state,
+                                                            ix,
+                                                        )
+                                                    {
+                                                        this.dispatch(event);
+                                                    }
+                                                    cx.notify();
+                                                },
+                                            ))
+                                            .when_some(
+                                                row_number(&this.state, ix, selected),
+                                                |row, number| {
+                                                    row.child(
+                                                        div()
+                                                            .flex_none()
+                                                            .w(px(24.0))
+                                                            .text_xs()
+                                                            .text_color(muted)
+                                                            .child(number),
                                                     )
-                                                {
-                                                    this.dispatch(event);
-                                                }
-                                                cx.notify();
-                                            },
-                                        ))
-                                        .when_some(
-                                            row_number(&this.state, ix, selected),
-                                            |row, number| {
-                                                row.child(
-                                                    div()
-                                                        .flex_none()
-                                                        .w(px(24.0))
-                                                        .text_xs()
-                                                        .text_color(muted)
-                                                        .child(number),
-                                                )
-                                            },
-                                        )
-                                        .child(thumb)
-                                        .child(
-                                            div()
-                                                .flex_grow(1.0)
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(fg)
-                                                .child(SharedString::from(artist.name)),
-                                        )
-                                },
-                            )
-                            .into_any_element()
-                        })
-                        .collect();
+                                                },
+                                            )
+                                            .child(thumb)
+                                            .child(
+                                                div()
+                                                    .flex_grow(1.0)
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .whitespace_nowrap()
+                                                    .text_color(fg)
+                                                    .child(SharedString::from(artist.name)),
+                                            )
+                                    },
+                                )
+                                .into_any_element()
+                            })
+                            .collect();
 
-                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                    rows
-                }),
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    },
+                ),
             )
             .track_scroll(&app.artist_list_scroll)
             .flex_grow(1.0)
@@ -2690,13 +2782,15 @@ fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
                 )
                 .when_some(progress, |el, (done, total)| {
                     el.child(
-                        div().flex_none().text_xs().text_color(muted).child(
-                            SharedString::from(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(SharedString::from(
                                 tr(&app.state, "desktop.whats_new_checking")
                                     .replace("{done}", &done.to_string())
                                     .replace("{total}", &total.to_string()),
-                            ),
-                        ),
+                            )),
                     )
                 }),
         )
@@ -2717,90 +2811,92 @@ fn whats_new(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
             uniform_list(
                 "whats-new-rows",
                 count,
-                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                    let theme = &this.state.ui.active_theme;
-                    let fg = theme.text.gpui(WINDOW_FG());
-                    let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
-                    let selected = this.state.ui.selected_whats_new_index;
-                    let visual = visual_range_in(&this.state, ActiveView::WhatsNew);
+                cx.processor(
+                    move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let palette = DesktopPalette::resolve(theme);
+                        let selected_bg = palette.row_selected;
+                        let selected = this.state.ui.selected_whats_new_index;
+                        let visual = visual_range_in(&this.state, ActiveView::WhatsNew);
 
-                    let rows: Vec<AnyElement> = range
-                        .map(|ix| {
-                            let Some(album) = this.state.data.whats_new.get(ix).cloned() else {
-                                return div().id(ix).into_any_element();
-                            };
-                            let thumb = thumb_element(
-                                this,
-                                album.thumb_url.as_deref().or(album.image_url.as_deref()),
-                                26.0,
-                                false,
-                                muted,
-                            );
-                            let released = album
-                                .release_date
-                                .clone()
-                                .unwrap_or_else(|| album.release_year.clone());
-                            pill_row(
-                                ix,
-                                LIST_PILL,
-                                row_selected(ix, selected, visual),
-                                selected_bg,
-                                palette.row_hover,
-                                |row| {
-                                    row.gap_3()
-                                        .on_click(cx.listener(
-                                            move |this: &mut EchoApp, _event, _window, cx| {
-                                                if let Some(event) =
-                                                    echo_core::intent::open_whats_new_album(
-                                                        &mut this.state,
-                                                        ix,
-                                                    )
-                                                {
-                                                    this.dispatch(event);
-                                                }
-                                                cx.notify();
-                                            },
-                                        ))
-                                        .child(thumb)
-                                        .child(
-                                            div()
-                                                .flex_grow(2.0)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_color(fg)
-                                                .child(SharedString::from(album.name)),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_grow(1.5)
-                                                .flex_basis(px(0.0))
-                                                .overflow_hidden()
-                                                .text_ellipsis()
-                                                .whitespace_nowrap()
-                                                .text_sm()
-                                                .text_color(muted)
-                                                .child(SharedString::from(album.artists)),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .text_xs()
-                                                .text_color(muted)
-                                                .child(SharedString::from(released)),
-                                        )
-                                },
-                            )
-                            .into_any_element()
-                        })
-                        .collect();
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                let Some(album) = this.state.data.whats_new.get(ix).cloned() else {
+                                    return div().id(ix).into_any_element();
+                                };
+                                let thumb = thumb_element(
+                                    this,
+                                    album.thumb_url.as_deref().or(album.image_url.as_deref()),
+                                    26.0,
+                                    false,
+                                    muted,
+                                );
+                                let released = album
+                                    .release_date
+                                    .clone()
+                                    .unwrap_or_else(|| album.release_year.clone());
+                                pill_row(
+                                    ix,
+                                    LIST_PILL,
+                                    row_selected(ix, selected, visual),
+                                    selected_bg,
+                                    palette.row_hover,
+                                    |row| {
+                                        row.gap_3()
+                                            .on_click(cx.listener(
+                                                move |this: &mut EchoApp, _event, _window, cx| {
+                                                    if let Some(event) =
+                                                        echo_core::intent::open_whats_new_album(
+                                                            &mut this.state,
+                                                            ix,
+                                                        )
+                                                    {
+                                                        this.dispatch(event);
+                                                    }
+                                                    cx.notify();
+                                                },
+                                            ))
+                                            .child(thumb)
+                                            .child(
+                                                div()
+                                                    .flex_grow(2.0)
+                                                    .flex_basis(px(0.0))
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .whitespace_nowrap()
+                                                    .text_color(fg)
+                                                    .child(SharedString::from(album.name)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_grow(1.5)
+                                                    .flex_basis(px(0.0))
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .whitespace_nowrap()
+                                                    .text_sm()
+                                                    .text_color(muted)
+                                                    .child(SharedString::from(album.artists)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .child(SharedString::from(released)),
+                                            )
+                                    },
+                                )
+                                .into_any_element()
+                            })
+                            .collect();
 
-                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                    rows
-                }),
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    },
+                ),
             )
             .track_scroll(&app.whats_new_scroll)
             .flex_grow(1.0)
@@ -2950,46 +3046,52 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 uniform_list(
                     "artist-top-track-rows",
                     top_len,
-                    cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                        let theme = &this.state.ui.active_theme;
-                        let fg = theme.text.gpui(WINDOW_FG());
-                        let muted = theme.text_muted.gpui(WINDOW_FG());
-                        let accent = theme.primary.gpui(WINDOW_FG());
-                        let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
-                        // Combined index space: Popular rows come first, so `ix` compares
-                        // against the page cursor directly.
-                        let selected = this.state.ui.artist_page_album_index;
-                        let playing_id = this.state.playback.playing_track_id.clone();
+                    cx.processor(
+                        move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                            let theme = &this.state.ui.active_theme;
+                            let fg = theme.text.gpui(WINDOW_FG());
+                            let muted = theme.text_muted.gpui(WINDOW_FG());
+                            let accent = theme.primary.gpui(WINDOW_FG());
+                            let palette = DesktopPalette::resolve(theme);
+                            let selected_bg = palette.row_selected;
+                            // Combined index space: Popular rows come first, so `ix` compares
+                            // against the page cursor directly.
+                            let selected = this.state.ui.artist_page_album_index;
+                            let playing_id = this.state.playback.playing_track_id.clone();
 
-                        let rows: Vec<AnyElement> = range
-                            .map(|ix| {
-                                let Some(track) = this
-                                    .state
-                                    .data
-                                    .artist_page_data
-                                    .as_ref()
-                                    .and_then(|data| data.top_tracks.get(ix))
-                                    .cloned()
-                                else {
-                                    return div().id(ix).into_any_element();
-                                };
-                                let is_playing =
-                                    playing_id.as_deref() == Some(track.id.as_str());
-                                let is_liked =
-                                    this.state.data.liked_tracks.contains(&track.id);
-                                let secondary =
-                                    this.state.ui.active_theme.secondary.gpui(WINDOW_FG());
-                                let title_color = if is_playing { accent } else { fg };
-                                let thumb = thumb_element(
-                                    this,
-                                    track.image_url.as_deref(),
-                                    26.0,
-                                    false,
-                                    muted,
-                                );
-                                pill_row(ix, LIST_PILL, ix == selected, selected_bg, palette.row_hover, |row| {
-                                    row.gap_3()
+                            let rows: Vec<AnyElement> = range
+                                .map(|ix| {
+                                    let Some(track) = this
+                                        .state
+                                        .data
+                                        .artist_page_data
+                                        .as_ref()
+                                        .and_then(|data| data.top_tracks.get(ix))
+                                        .cloned()
+                                    else {
+                                        return div().id(ix).into_any_element();
+                                    };
+                                    let is_playing =
+                                        playing_id.as_deref() == Some(track.id.as_str());
+                                    let is_liked = this.state.data.liked_tracks.contains(&track.id);
+                                    let secondary =
+                                        this.state.ui.active_theme.secondary.gpui(WINDOW_FG());
+                                    let title_color = if is_playing { accent } else { fg };
+                                    let thumb = thumb_element(
+                                        this,
+                                        track.image_url.as_deref(),
+                                        26.0,
+                                        false,
+                                        muted,
+                                    );
+                                    pill_row(
+                                        ix,
+                                        LIST_PILL,
+                                        ix == selected,
+                                        selected_bg,
+                                        palette.row_hover,
+                                        |row| {
+                                            row.gap_3()
                                         .on_click(cx.listener(
                                             move |this: &mut EchoApp,
                                                   event: &gpui::ClickEvent,
@@ -3049,14 +3151,16 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                     track.duration_ms,
                                                 ))),
                                         )
+                                        },
+                                    )
+                                    .into_any_element()
                                 })
-                                .into_any_element()
-                            })
-                            .collect();
+                                .collect();
 
-                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                        rows
-                    }),
+                            echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                            rows
+                        },
+                    ),
                 )
                 .track_scroll(&app.artist_top_tracks_scroll)
                 .flex_none()
@@ -3088,83 +3192,94 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
             uniform_list(
                 "artist-album-rows",
                 count,
-                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
-                    let theme = &this.state.ui.active_theme;
-                    let fg = theme.text.gpui(WINDOW_FG());
-                    let muted = theme.text_muted.gpui(WINDOW_FG());
-                    let palette = DesktopPalette::resolve(theme);
-                    let selected_bg = palette.row_selected;
-                    // Album rows sit after the Popular rows in the page's combined index space.
-                    let selected = this.state.ui.artist_page_album_index;
-                    let top_len = this.artist_page_top_len();
+                cx.processor(
+                    move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let palette = DesktopPalette::resolve(theme);
+                        let selected_bg = palette.row_selected;
+                        // Album rows sit after the Popular rows in the page's combined index space.
+                        let selected = this.state.ui.artist_page_album_index;
+                        let top_len = this.artist_page_top_len();
 
-                    let rows: Vec<AnyElement> = range
-                        .map(|ix| {
-                            let Some(album) = this
-                                .state
-                                .data
-                                .artist_page_data
-                                .as_ref()
-                                .and_then(|data| data.albums.get(ix))
-                                .cloned()
-                            else {
-                                return div().id(ix).into_any_element();
-                            };
-                            let thumb_url =
-                                album.thumb_url.clone().or_else(|| album.image_url.clone());
-                            let thumb =
-                                thumb_element(this, thumb_url.as_deref(), 26.0, false, muted);
-                            let tracks_label = album
-                                .track_count
-                                .map(|n| format!("{n} tracks"))
-                                .unwrap_or_default();
-                            pill_row(ix, LIST_PILL, ix + top_len == selected, selected_bg, palette.row_hover, |row| {
-                                row.gap_3()
-                                .on_click(cx.listener(
-                                    move |this: &mut EchoApp, _event, _window, cx| {
-                                        let index = ix + this.artist_page_top_len();
-                                        if let Some(event) = echo_core::intent::activate_artist_page_row(
-                                            &mut this.state,
-                                            index,
-                                        ) {
-                                            this.dispatch(event);
-                                        }
-                                        cx.notify();
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                let Some(album) = this
+                                    .state
+                                    .data
+                                    .artist_page_data
+                                    .as_ref()
+                                    .and_then(|data| data.albums.get(ix))
+                                    .cloned()
+                                else {
+                                    return div().id(ix).into_any_element();
+                                };
+                                let thumb_url =
+                                    album.thumb_url.clone().or_else(|| album.image_url.clone());
+                                let thumb =
+                                    thumb_element(this, thumb_url.as_deref(), 26.0, false, muted);
+                                let tracks_label = album
+                                    .track_count
+                                    .map(|n| format!("{n} tracks"))
+                                    .unwrap_or_default();
+                                pill_row(
+                                    ix,
+                                    LIST_PILL,
+                                    ix + top_len == selected,
+                                    selected_bg,
+                                    palette.row_hover,
+                                    |row| {
+                                        row.gap_3()
+                                            .on_click(cx.listener(
+                                                move |this: &mut EchoApp, _event, _window, cx| {
+                                                    let index = ix + this.artist_page_top_len();
+                                                    if let Some(event) =
+                                                        echo_core::intent::activate_artist_page_row(
+                                                            &mut this.state,
+                                                            index,
+                                                        )
+                                                    {
+                                                        this.dispatch(event);
+                                                    }
+                                                    cx.notify();
+                                                },
+                                            ))
+                                            .child(thumb)
+                                            .child(
+                                                div()
+                                                    .flex_grow(1.0)
+                                                    .overflow_hidden()
+                                                    .text_ellipsis()
+                                                    .whitespace_nowrap()
+                                                    .text_color(fg)
+                                                    .child(SharedString::from(album.name)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .child(SharedString::from(album.release_year)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .w(px(70.0))
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .child(SharedString::from(tracks_label)),
+                                            )
                                     },
-                                ))
-                                .child(thumb)
-                                .child(
-                                    div()
-                                        .flex_grow(1.0)
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .whitespace_nowrap()
-                                        .text_color(fg)
-                                        .child(SharedString::from(album.name)),
                                 )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(SharedString::from(album.release_year)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .w(px(70.0))
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(SharedString::from(tracks_label)),
-                                )
+                                .into_any_element()
                             })
-                            .into_any_element()
-                        })
-                        .collect();
+                            .collect();
 
-                    echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
-                    rows
-                }),
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    },
+                ),
             )
             .track_scroll(&app.artist_albums_scroll)
             .flex_grow(1.0)
@@ -3175,7 +3290,10 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
 
 /// Index of the lyric line playing at `progress_ms`: the last line that has started, or the
 /// first before any has.
-pub(crate) fn current_lyric_index(lines: &[echo_core::models::LyricLine], progress_ms: u32) -> usize {
+pub(crate) fn current_lyric_index(
+    lines: &[echo_core::models::LyricLine],
+    progress_ms: u32,
+) -> usize {
     lines
         .iter()
         .take_while(|line| line.start_ms <= progress_ms)
@@ -3229,7 +3347,13 @@ fn lyric_row(text: SharedString, color: Hsla, height: f32, large: bool) -> Div {
         .overflow_hidden()
         .text_ellipsis()
         .whitespace_nowrap()
-        .map(|el| if large { el.text_xl().text_center() } else { el.text_sm() })
+        .map(|el| {
+            if large {
+                el.text_xl().text_center()
+            } else {
+                el.text_sm()
+            }
+        })
         .line_height(px(height))
         .text_color(color)
         .child(text)
@@ -3274,24 +3398,35 @@ fn lyric_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
     uniform_list(
         "lyric-lines",
         lines.len(),
-        cx.processor(|this: &mut EchoApp, range: std::ops::Range<usize>, _window, _cx| {
-            let colors = LyricColors::resolve(this);
-            let lines = this
-                .state
-                .playback
-                .current_lyrics
-                .as_ref()
-                .map(|lyrics| lyrics.lines.as_slice())
-                .unwrap_or_default();
-            let current = current_lyric_index(lines, this.state.playback.display_progress_ms());
+        cx.processor(
+            |this: &mut EchoApp, range: std::ops::Range<usize>, _window, _cx| {
+                let colors = LyricColors::resolve(this);
+                let lines = this
+                    .state
+                    .playback
+                    .current_lyrics
+                    .as_ref()
+                    .map(|lyrics| lyrics.lines.as_slice())
+                    .unwrap_or_default();
+                let current = current_lyric_index(lines, this.state.playback.display_progress_ms());
 
-            range
-                .map(|ix| {
-                    let text = lines.get(ix).map(|line| line.text.clone()).unwrap_or_default();
-                    lyric_row(text.into(), colors.line(ix, current), MODAL_LYRIC_ROW, false).id(ix)
-                })
-                .collect()
-        }),
+                range
+                    .map(|ix| {
+                        let text = lines
+                            .get(ix)
+                            .map(|line| line.text.clone())
+                            .unwrap_or_default();
+                        lyric_row(
+                            text.into(),
+                            colors.line(ix, current),
+                            MODAL_LYRIC_ROW,
+                            false,
+                        )
+                        .id(ix)
+                    })
+                    .collect()
+            },
+        ),
     )
     .track_scroll(&app.lyrics_scroll)
     .flex_grow(1.0)
@@ -3330,20 +3465,18 @@ fn lyric_window(app: &EchoApp, colors: LyricColors, rows: usize, row_height: f32
         .w_full()
         .h(px(rows as f32 * row_height))
         .overflow_hidden()
-        .child(
-            div().absolute().w_full().with_animation(
-                ("lyric-glide", current),
-                Animation::new(LYRIC_GLIDE).with_easing(ease_out_quint()),
-                move |el, t| {
-                    el.top(px(-row_height * t))
-                        .children(column.iter().map(|(offset, text, color)| {
-                            let distance = (*offset as f32 + 1.0 - t).abs();
-                            lyric_row(text.clone(), *color, row_height, true)
-                                .opacity(lyric_opacity(distance, reach))
-                        }))
-                },
-            ),
-        )
+        .child(div().absolute().w_full().with_animation(
+            ("lyric-glide", current),
+            Animation::new(LYRIC_GLIDE).with_easing(ease_out_quint()),
+            move |el, t| {
+                el.top(px(-row_height * t))
+                    .children(column.iter().map(|(offset, text, color)| {
+                        let distance = (*offset as f32 + 1.0 - t).abs();
+                        lyric_row(text.clone(), *color, row_height, true)
+                            .opacity(lyric_opacity(distance, reach))
+                    }))
+            },
+        ))
         .into_any_element()
 }
 
@@ -3415,7 +3548,9 @@ pub fn backdrop_layer(
             |_, _, _| (),
             move |bounds, _, window, _| {
                 let image_bounds = backdrop.image_bounds(bounds);
-                window.paint_image(bounds, image_bounds, radii, image, 0, false).ok();
+                window
+                    .paint_image(bounds, image_bounds, radii, image, 0, false)
+                    .ok();
             },
         )
         .absolute()
@@ -3425,16 +3560,29 @@ pub fn backdrop_layer(
         .absolute()
         .inset_0()
         .child(layer(first))
-        .when(blend > 0.0, |el| el.child(div().absolute().inset_0().opacity(blend).child(layer(second))))
+        .when(blend > 0.0, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .opacity(blend)
+                    .child(layer(second)),
+            )
+        })
 }
 
 /// The immersive toggle. Callers pick its colors: the search bar paints it muted in the theme,
 /// the immersive view accented in the cover's colors. It is the one control the immersive view
 /// keeps, so it lives here rather than inline in the search bar.
 fn immersive_button(color: Hsla, hover: Hsla, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    crate::icon_button("immersive", "icons/full-screen.svg", color, hover, cx, |this, cx| {
-        this.toggle_immersive(cx)
-    })
+    crate::icon_button(
+        "immersive",
+        "icons/full-screen.svg",
+        color,
+        hover,
+        cx,
+        |this, cx| this.toggle_immersive(cx),
+    )
 }
 
 /// Edge of the immersive cover, in pixels, for a body of `width` x `height`: the largest square
@@ -3548,7 +3696,12 @@ pub fn immersive_view(
             .into_any_element(),
     };
     let lyrics = lyric_status(app, muted).unwrap_or_else(|| {
-        lyric_window(app, LyricColors::immersive(&colors), rows, IMMERSIVE_LYRIC_ROW)
+        lyric_window(
+            app,
+            LyricColors::immersive(&colors),
+            rows,
+            IMMERSIVE_LYRIC_ROW,
+        )
     });
 
     div()
@@ -3709,7 +3862,13 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .gap_1()
                 .overflow_hidden()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .child(div().pb_2().text_sm().text_color(muted).child(tr(&app.state, "desktop.theme")))
+                .child(
+                    div()
+                        .pb_2()
+                        .text_sm()
+                        .text_color(muted)
+                        .child(tr(&app.state, "desktop.theme")),
+                )
                 .child(if names.is_empty() {
                     div()
                         .py_4()
@@ -3868,8 +4027,17 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             .flex()
             .flex_col()
             .pb_2()
-            .child(div().pb_1().text_xs().text_color(fg).child(tr(state, title_key)))
-            .children(rows.iter().map(|(keys, what_key)| entry(keys, tr(state, what_key))))
+            .child(
+                div()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(fg)
+                    .child(tr(state, title_key)),
+            )
+            .children(
+                rows.iter()
+                    .map(|(keys, what_key)| entry(keys, tr(state, what_key))),
+            )
     };
 
     div()
@@ -3906,8 +4074,18 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                         .items_center()
                         .justify_between()
                         .pb_2()
-                        .child(div().text_sm().text_color(fg).child(tr(&app.state, "desktop.help.title")))
-                        .child(div().text_xs().text_color(muted).child(tr(&app.state, "desktop.help.esc_close"))),
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(fg)
+                                .child(tr(&app.state, "desktop.help.title")),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(muted)
+                                .child(tr(&app.state, "desktop.help.esc_close")),
+                        ),
                 )
                 .child(
                     div()
@@ -3919,12 +4097,9 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                         .overflow_y_scroll()
                         .track_scroll(&app.help_scroll)
                         .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .w(px(320.0))
-                                .flex_none()
-                                .children(KEY_HELP.iter().map(|(title, rows)| section(title, rows))),
+                            div().flex().flex_col().w(px(320.0)).flex_none().children(
+                                KEY_HELP.iter().map(|(title, rows)| section(title, rows)),
+                            ),
                         )
                         .child(
                             div()
@@ -4010,14 +4185,8 @@ pub fn settings_modal(
             .child(control)
     };
 
-    let heading = |label: SharedString| {
-        div()
-            .pt_3()
-            .pb_1()
-            .text_xs()
-            .text_color(muted)
-            .child(label)
-    };
+    let heading =
+        |label: SharedString| div().pt_3().pb_1().text_xs().text_color(muted).child(label);
 
     // A segmented control: one button per option, the active one accented.
     let choices = |id: &'static str,
@@ -4277,32 +4446,33 @@ pub fn settings_modal(
     );
 
     let pregain = config.normalisation_pregain;
-    let step_button = |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
-        div()
-            .id(id)
-            .w(px(22.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.menu_border)
-            .text_xs()
-            .text_color(muted)
-            .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_hover))
-            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                this.set_audio_quality(
-                    |config| {
-                        // Matches librespot's usable range; beyond this the limiter dominates.
-                        config.normalisation_pregain = (config.normalisation_pregain + delta)
-                            .clamp(-10.0, 10.0);
-                    },
-                    cx,
-                );
-            }))
-            .child(label)
-    };
+    let step_button =
+        |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
+            div()
+                .id(id)
+                .w(px(22.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.menu_border)
+                .text_xs()
+                .text_color(muted)
+                .cursor_pointer()
+                .hover(move |style| style.bg(palette.menu_hover))
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    this.set_audio_quality(
+                        |config| {
+                            // Matches librespot's usable range; beyond this the limiter dominates.
+                            config.normalisation_pregain =
+                                (config.normalisation_pregain + delta).clamp(-10.0, 10.0);
+                        },
+                        cx,
+                    );
+                }))
+                .child(label)
+        };
     let pregain_row = row(
         s("desktop.settings.pregain"),
         Some(s("desktop.settings.pregain_desc")),
@@ -4359,24 +4529,25 @@ pub fn settings_modal(
             path_value
         }));
 
-    let small_button = |id: &'static str, label: SharedString, cmd: &'static str, cx: &mut Context<EchoApp>| {
-        div()
-            .id(id)
-            .flex_none()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(palette.menu_border)
-            .text_xs()
-            .text_color(muted)
-            .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_hover))
-            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                this.run_setting(cmd.to_string(), cx);
-            }))
-            .child(label)
-    };
+    let small_button =
+        |id: &'static str, label: SharedString, cmd: &'static str, cx: &mut Context<EchoApp>| {
+            div()
+                .id(id)
+                .flex_none()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.menu_border)
+                .text_xs()
+                .text_color(muted)
+                .cursor_pointer()
+                .hover(move |style| style.bg(palette.menu_hover))
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    this.run_setting(cmd.to_string(), cx);
+                }))
+                .child(label)
+        };
 
     // --- Updates ---------------------------------------------------------------------
     // The one control here that is neither a `:` command nor a config write: it runs a network
@@ -4441,7 +4612,11 @@ pub fn settings_modal(
         .py_1()
         .rounded_md()
         .border_1()
-        .border_color(if update_active { accent } else { palette.menu_border })
+        .border_color(if update_active {
+            accent
+        } else {
+            palette.menu_border
+        })
         .text_xs()
         .text_color(if update_active { accent } else { muted })
         .when(update_active, |el| {
@@ -4500,7 +4675,12 @@ pub fn settings_modal(
                         .items_center()
                         .justify_between()
                         .pb_2()
-                        .child(div().text_sm().text_color(fg).child(s("desktop.settings.title")))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(fg)
+                                .child(s("desktop.settings.title")),
+                        )
                         .child(
                             div()
                                 .text_xs()
@@ -4544,7 +4724,8 @@ pub fn settings_modal(
                         .child(pixelate_row)
                         .child(backdrop_row)
                         .when(!cfg!(target_os = "macos"), |el| {
-                            el.child(heading(s("desktop.settings.window"))).child(tray_row)
+                            el.child(heading(s("desktop.settings.window")))
+                                .child(tray_row)
                         })
                         .child(heading(s("desktop.settings.library")))
                         .child(sort_row)
@@ -4571,18 +4752,12 @@ pub fn settings_modal(
                                         .child(s("desktop.settings.folder_desc")),
                                 )
                                 .child(local_field)
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_row()
-                                        .gap_1()
-                                        .child(small_button(
-                                            "settings-rescan",
-                                            s("desktop.settings.rescan"),
-                                            "rescanlocal",
-                                            cx,
-                                        )),
-                                ),
+                                .child(div().flex().flex_row().gap_1().child(small_button(
+                                    "settings-rescan",
+                                    s("desktop.settings.rescan"),
+                                    "rescanlocal",
+                                    cx,
+                                ))),
                         )
                         .child(heading(s("desktop.settings.updates.section")))
                         .child(version_row)
@@ -4823,7 +4998,11 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                                 )
                                 .when(local, |el| {
                                     el.child(
-                                        div().flex_none().text_xs().text_color(muted).child(local_label),
+                                        div()
+                                            .flex_none()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(local_label),
                                     )
                                 })
                         }))
@@ -4924,7 +5103,11 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     } else if let Some(node) = app.state.data.library_view.get(menu.index) {
         match node {
             LibraryNode::Folder(_) => {
-                items.push((tr(&app.state, "desktop.menu.rename"), MenuAction::Rename, false));
+                items.push((
+                    tr(&app.state, "desktop.menu.rename"),
+                    MenuAction::Rename,
+                    false,
+                ));
                 items.push((
                     tr(&app.state, "desktop.menu.delete_folder"),
                     MenuAction::DeleteFolder,
@@ -4940,14 +5123,22 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                     items.push((
                         tr(
                             &app.state,
-                            if pinned { "desktop.menu.unpin" } else { "desktop.menu.pin" },
+                            if pinned {
+                                "desktop.menu.unpin"
+                            } else {
+                                "desktop.menu.pin"
+                            },
                         ),
                         MenuAction::TogglePin,
                         false,
                     ));
                 }
                 if !special {
-                    items.push((tr(&app.state, "desktop.menu.rename"), MenuAction::Rename, false));
+                    items.push((
+                        tr(&app.state, "desktop.menu.rename"),
+                        MenuAction::Rename,
+                        false,
+                    ));
                 }
                 if *indent >= 1 {
                     items.push((
@@ -5127,62 +5318,77 @@ pub fn track_context_menu(
                 .overflow_hidden()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .children(items.into_iter().enumerate().map(|(ix, (label, item, danger))| {
-                    let is_add = add_row == Some(ix);
-                    let is_selected = ix == selected;
-                    // A hover-opened flyout leaves the keyboard selection where it was, so its
-                    // parent row keeps the hover wash for as long as the flyout is up — the
-                    // selected wash would read as a second cursor.
-                    let holds_submenu = is_add && submenu_open && !is_selected;
-                    let row_bounds = row_bounds.clone();
-                    div()
-                        .id(label.clone())
-                        .relative()
-                        .mx_1()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .text_sm()
-                        .text_color(if danger { danger_color } else { fg })
-                        .when(is_selected, |el| el.bg(palette.menu_selected))
-                        .when(holds_submenu, |el| el.bg(palette.menu_hover))
-                        .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_hover))
-                        })
-                        .cursor_pointer()
-                        // Pointer moves drive the flyout: opening it on the add row, closing it
-                        // on any other row the pointer settles on. See
-                        // [`EchoApp::hover_track_menu_row`].
-                        .on_mouse_move(cx.listener(
-                            move |this: &mut EchoApp, event: &gpui::MouseMoveEvent, _window, cx| {
-                                this.hover_track_menu_row(ix, event.position, cx);
-                            },
-                        ))
-                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            if is_add {
-                                this.open_playlist_submenu(true, cx);
-                            } else {
-                                this.run_track_menu_action(item, cx);
-                            }
-                        }))
-                        .when(is_add, |el| {
-                            // The flyout is a sibling of the menu, so it needs this row's
-                            // rectangle in window space to anchor to.
-                            el.child(
-                                canvas(move |bounds, _window, _cx| row_bounds.set(bounds), |_, _, _, _| {})
-                                    .absolute()
-                                    .size_full(),
-                            )
-                        })
-                        .child(div().flex_grow(1.0).child(label))
-                        .when(is_add, |el| {
-                            el.child(div().flex_none().text_xs().text_color(muted).child("▸"))
-                        })
-                })),
+                .children(
+                    items
+                        .into_iter()
+                        .enumerate()
+                        .map(|(ix, (label, item, danger))| {
+                            let is_add = add_row == Some(ix);
+                            let is_selected = ix == selected;
+                            // A hover-opened flyout leaves the keyboard selection where it was, so its
+                            // parent row keeps the hover wash for as long as the flyout is up — the
+                            // selected wash would read as a second cursor.
+                            let holds_submenu = is_add && submenu_open && !is_selected;
+                            let row_bounds = row_bounds.clone();
+                            div()
+                                .id(label.clone())
+                                .relative()
+                                .mx_1()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap_2()
+                                .text_sm()
+                                .text_color(if danger { danger_color } else { fg })
+                                .when(is_selected, |el| el.bg(palette.menu_selected))
+                                .when(holds_submenu, |el| el.bg(palette.menu_hover))
+                                .when(!is_selected, |el| {
+                                    el.hover(move |style| style.bg(palette.menu_hover))
+                                })
+                                .cursor_pointer()
+                                // Pointer moves drive the flyout: opening it on the add row, closing it
+                                // on any other row the pointer settles on. See
+                                // [`EchoApp::hover_track_menu_row`].
+                                .on_mouse_move(cx.listener(
+                                    move |this: &mut EchoApp,
+                                          event: &gpui::MouseMoveEvent,
+                                          _window,
+                                          cx| {
+                                        this.hover_track_menu_row(ix, event.position, cx);
+                                    },
+                                ))
+                                .on_click(cx.listener(
+                                    move |this: &mut EchoApp, _event, _window, cx| {
+                                        if is_add {
+                                            this.open_playlist_submenu(true, cx);
+                                        } else {
+                                            this.run_track_menu_action(item, cx);
+                                        }
+                                    },
+                                ))
+                                .when(is_add, |el| {
+                                    // The flyout is a sibling of the menu, so it needs this row's
+                                    // rectangle in window space to anchor to.
+                                    el.child(
+                                        canvas(
+                                            move |bounds, _window, _cx| row_bounds.set(bounds),
+                                            |_, _, _, _| {},
+                                        )
+                                        .absolute()
+                                        .size_full(),
+                                    )
+                                })
+                                .child(div().flex_grow(1.0).child(label))
+                                .when(is_add, |el| {
+                                    el.child(
+                                        div().flex_none().text_xs().text_color(muted).child("▸"),
+                                    )
+                                })
+                        }),
+                ),
         )
         .children(submenu)
 }
@@ -5209,7 +5415,12 @@ fn playlist_submenu(
     let choices: Vec<(SharedString, bool)> =
         echo_core::action_menu::playlist_add_choices(&app.state)
             .into_iter()
-            .map(|playlist| (SharedString::from(playlist.name), playlist.owner_id == "local"))
+            .map(|playlist| {
+                (
+                    SharedString::from(playlist.name),
+                    playlist.owner_id == "local",
+                )
+            })
             .collect();
 
     // A right-click near the window's right edge would otherwise hang the flyout off-screen,
@@ -5218,8 +5429,14 @@ fn playlist_submenu(
     // only needed to keep the panel on screen, and measuring costs a frame of jitter.
     let height = px((choices.len().max(1) as f32 * SUBMENU_ROW_HEIGHT + 10.0).min(SUBMENU_MAX_H));
     let flipped = row.right() + px(SUBMENU_WIDTH) > viewport.width - px(8.0);
-    let left = if flipped { row.left() - px(SUBMENU_WIDTH) } else { row.right() };
-    let top = (row.top() - px(5.0)).min(viewport.height - height - px(8.0)).max(px(8.0));
+    let left = if flipped {
+        row.left() - px(SUBMENU_WIDTH)
+    } else {
+        row.right()
+    };
+    let top = (row.top() - px(5.0))
+        .min(viewport.height - height - px(8.0))
+        .max(px(8.0));
 
     div()
         .id("track-menu-submenu")
@@ -5239,9 +5456,12 @@ fn playlist_submenu(
         .occlude()
         .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
         .child(
-            canvas(move |painted, _window, _cx| bounds.set(painted), |_, _, _, _| {})
-                .absolute()
-                .size_full(),
+            canvas(
+                move |painted, _window, _cx| bounds.set(painted),
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
         )
         .child(if choices.is_empty() {
             div()
@@ -5293,7 +5513,11 @@ fn playlist_submenu(
                         )
                         .when(local, |el| {
                             el.child(
-                                div().flex_none().text_xs().text_color(muted).child(local_label),
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .child(local_label),
                             )
                         })
                 }))
@@ -5318,20 +5542,23 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let (message, confirm_label): (String, SharedString) =
         if let Some(name) = &ui.folder_delete_prompt {
             (
-                tr(&app.state, "desktop.prompt.delete_folder")
-                    .replace("{}", name),
+                tr(&app.state, "desktop.prompt.delete_folder").replace("{}", name),
                 delete_label,
             )
         } else if let Some(ids) = &ui.playlist_delete_prompt {
             let name = ids
                 .first()
                 .and_then(|id| {
-                    app.state.data.library_view.iter().find_map(|node| match node {
-                        LibraryNode::Playlist { playlist, .. } if &playlist.id == id => {
-                            Some(playlist.name.clone())
-                        }
-                        _ => None,
-                    })
+                    app.state
+                        .data
+                        .library_view
+                        .iter()
+                        .find_map(|node| match node {
+                            LibraryNode::Playlist { playlist, .. } if &playlist.id == id => {
+                                Some(playlist.name.clone())
+                            }
+                            _ => None,
+                        })
                 })
                 .unwrap_or_else(|| tr(&app.state, "desktop.prompt.this_playlist").to_string());
             (
@@ -5410,29 +5637,52 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .flex_col()
                 .gap_3()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-                .child(div().text_sm().text_color(fg).child(SharedString::from(message)))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(fg)
+                        .child(SharedString::from(message)),
+                )
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .justify_end()
                         .gap_2()
-                        .child(button("prompt-cancel", tr(&app.state, "desktop.prompt.cancel"), muted, palette.menu_border, palette.menu_hover).on_click(cx.listener(
-                            |this: &mut EchoApp, _event, _window, cx| {
-                                echo_core::intent::cancel_prompt(&mut this.state);
-                                cx.notify();
-                            },
-                        )))
-                        .child(button("prompt-confirm", confirm_label, danger_color, palette.danger_border, palette.danger_wash).on_click(
-                            cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                                if let Some(event) =
-                                    echo_core::intent::confirm_prompt(&mut this.state)
-                                {
-                                    this.dispatch(event);
-                                }
-                                cx.notify();
-                            }),
-                        )),
+                        .child(
+                            button(
+                                "prompt-cancel",
+                                tr(&app.state, "desktop.prompt.cancel"),
+                                muted,
+                                palette.menu_border,
+                                palette.menu_hover,
+                            )
+                            .on_click(cx.listener(
+                                |this: &mut EchoApp, _event, _window, cx| {
+                                    echo_core::intent::cancel_prompt(&mut this.state);
+                                    cx.notify();
+                                },
+                            )),
+                        )
+                        .child(
+                            button(
+                                "prompt-confirm",
+                                confirm_label,
+                                danger_color,
+                                palette.danger_border,
+                                palette.danger_wash,
+                            )
+                            .on_click(cx.listener(
+                                |this: &mut EchoApp, _event, _window, cx| {
+                                    if let Some(event) =
+                                        echo_core::intent::confirm_prompt(&mut this.state)
+                                    {
+                                        this.dispatch(event);
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        ),
                 ),
         )
 }

@@ -1,7 +1,7 @@
+use crossterm::event::{KeyCode, KeyEvent};
 use echo_core::action_menu;
 use echo_core::app::AppState;
 use echo_core::events::AppEvent;
-use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) {
     if state.ui.playlist_add_modal_open {

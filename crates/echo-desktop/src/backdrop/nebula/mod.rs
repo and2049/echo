@@ -10,9 +10,9 @@ mod march;
 
 use std::f32::consts::TAU;
 
+use super::Tone;
 use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
-use super::Tone;
 
 const SIZE: (usize, usize) = (256, 160);
 const ASPECT: f32 = 1.6;
@@ -27,7 +27,9 @@ const FADE_DEPTH: f32 = 0.7;
 pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raster {
     let (lo, hi) = tone.shape_luminance();
     let n = palette.colors.len();
-    let colors: Vec<Rgb> = (0..n).map(|ix| palette.color(ix).with_luminance_in(lo, hi)).collect();
+    let colors: Vec<Rgb> = (0..n)
+        .map(|ix| palette.color(ix).with_luminance_in(lo, hi))
+        .collect();
     let mut raster = Raster::new(SIZE.0, SIZE.1, base);
     raster.map(|x, y, _| {
         let sample = march::march((x - 0.5) * ASPECT, y - 0.5, TAU * phase);
@@ -35,7 +37,10 @@ pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raste
         let ix = (along as usize).min(n - 1);
         let f = along - ix as f32;
         let color = colors[ix].mix(colors[(ix + 1).min(n - 1)], f * f * (3.0 - 2.0 * f));
-        base.mix(color, ((sample.glow - GLOW_FLOOR) / EXPOSURE).max(0.0).tanh())
+        base.mix(
+            color,
+            ((sample.glow - GLOW_FLOOR) / EXPOSURE).max(0.0).tanh(),
+        )
     });
     raster.settle(base, FADE.0, FADE.1, FADE_DEPTH);
     raster
@@ -51,7 +56,9 @@ mod tests {
         let base = Rgb::from_u8(20, 4, 16);
         let raster = paint(&palette, base, Tone::Dark, 0.0);
         let top: Vec<Rgb> = (0..SIZE.0).map(|x| raster.get(x, SIZE.1 / 4)).collect();
-        let (min, max) = top.iter().fold((1.0f32, 0.0f32), |(lo, hi), c| (lo.min(c.luminance()), hi.max(c.luminance())));
+        let (min, max) = top.iter().fold((1.0f32, 0.0f32), |(lo, hi), c| {
+            (lo.min(c.luminance()), hi.max(c.luminance()))
+        });
         assert!(max > base.luminance() + 0.08 && max - min > 0.05);
         assert!(top.iter().all(|c| c.r >= c.g && c.b >= c.g));
     }

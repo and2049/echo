@@ -5,19 +5,39 @@
 
 use std::f32::consts::TAU;
 
+use super::Tone;
 use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
-use super::Tone;
 
 const SIZE: (usize, usize) = (128, 80);
 /// Per node, prominent color first: the middle of its path, its sweep either way, the turns it
 /// makes per loop on each axis (a negative count runs the other way, a 1:2 ratio a figure
 /// eight) and where along each it starts, in turns. All as fractions of the canvas.
 const NODES: [Node; 4] = [
-    Node { center: (0.30, 0.38), sweep: (0.24, 0.22), turns: (1, 1), start: (0.00, 0.25) },
-    Node { center: (0.70, 0.32), sweep: (0.22, 0.20), turns: (-1, 1), start: (0.50, 0.00) },
-    Node { center: (0.40, 0.68), sweep: (0.28, 0.16), turns: (1, 2), start: (0.25, 0.60) },
-    Node { center: (0.72, 0.66), sweep: (0.20, 0.24), turns: (-1, 1), start: (0.75, 0.10) },
+    Node {
+        center: (0.30, 0.38),
+        sweep: (0.24, 0.22),
+        turns: (1, 1),
+        start: (0.00, 0.25),
+    },
+    Node {
+        center: (0.70, 0.32),
+        sweep: (0.22, 0.20),
+        turns: (-1, 1),
+        start: (0.50, 0.00),
+    },
+    Node {
+        center: (0.40, 0.68),
+        sweep: (0.28, 0.16),
+        turns: (1, 2),
+        start: (0.25, 0.60),
+    },
+    Node {
+        center: (0.72, 0.66),
+        sweep: (0.20, 0.24),
+        turns: (-1, 1),
+        start: (0.75, 0.10),
+    },
 ];
 /// Squared distances start from here, so a node's color plateaus around it instead of spiking.
 const SOFTNESS: f32 = 0.02;
@@ -35,8 +55,10 @@ struct Node {
 
 impl Node {
     fn position(&self, phase: f32) -> (f32, f32) {
-        let x = self.center.0 + self.sweep.0 * (TAU * (self.turns.0 as f32 * phase + self.start.0)).cos();
-        let y = self.center.1 + self.sweep.1 * (TAU * (self.turns.1 as f32 * phase + self.start.1)).sin();
+        let x = self.center.0
+            + self.sweep.0 * (TAU * (self.turns.0 as f32 * phase + self.start.0)).cos();
+        let y = self.center.1
+            + self.sweep.1 * (TAU * (self.turns.1 as f32 * phase + self.start.1)).sin();
         (x, y)
     }
 }
@@ -46,12 +68,22 @@ pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raste
     let nodes: Vec<((f32, f32), Rgb)> = NODES
         .iter()
         .enumerate()
-        .map(|(ix, node)| (node.position(phase), palette.color(ix).with_luminance_in(lo, hi)))
+        .map(|(ix, node)| {
+            (
+                node.position(phase),
+                palette.color(ix).with_luminance_in(lo, hi),
+            )
+        })
         .collect();
     let ambient = 1.0 / (AMBIENT_DISTANCE * AMBIENT_DISTANCE + SOFTNESS);
     let mut raster = Raster::new(SIZE.0, SIZE.1, base);
     raster.map(|x, y, _| {
-        let (mut r, mut g, mut b, mut total) = (base.r * ambient, base.g * ambient, base.b * ambient, ambient);
+        let (mut r, mut g, mut b, mut total) = (
+            base.r * ambient,
+            base.g * ambient,
+            base.b * ambient,
+            ambient,
+        );
         for ((nx, ny), color) in &nodes {
             let (dx, dy) = (x - nx, y - ny);
             let weight = 1.0 / (dx * dx + dy * dy + SOFTNESS);
@@ -84,7 +116,8 @@ mod tests {
 
     #[test]
     fn a_node_colors_the_pixel_under_it() {
-        let palette = CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230), Rgb::from_u8(230, 40, 40)]);
+        let palette =
+            CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230), Rgb::from_u8(230, 40, 40)]);
         let base = Rgb::from_u8(4, 6, 20);
         let raster = paint(&palette, base, Tone::Dark, 0.3);
         let (x, y) = NODES[0].position(0.3);

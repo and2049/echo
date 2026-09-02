@@ -1,8 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::handlers::browse;
 use echo_core::app::{ActiveView, AppState, LibraryTab, SearchTab};
 use echo_core::events::AppEvent;
-use crate::handlers::browse;
 
 const PAGE_ROWS: usize = 20;
 const SEQUENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -112,7 +112,9 @@ pub fn execute(state: &mut AppState, command: NavigationCommand) -> Option<AppEv
         NavigationCommand::CurrentContext => unreachable!(),
     };
     set_selected_index(state, target);
-    if state.ui.active_view == ActiveView::Library && state.ui.active_library_tab == LibraryTab::Browse {
+    if state.ui.active_view == ActiveView::Library
+        && state.ui.active_library_tab == LibraryTab::Browse
+    {
         browse::select_node_from_library_index(state);
         return browse::load_event_if_needed(state);
     }
@@ -199,9 +201,15 @@ mod tests {
             .collect();
         state.ui.selected_track_index = 12;
 
-        let first_g = command_for_key(&mut state, &KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let first_g = command_for_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         assert!(first_g.consumed && first_g.command.is_none());
-        let second_g = command_for_key(&mut state, &KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let second_g = command_for_key(
+            &mut state,
+            &KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         execute(&mut state, second_g.command.unwrap());
         assert_eq!(state.ui.selected_track_index, 0);
 

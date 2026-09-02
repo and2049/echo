@@ -55,7 +55,12 @@ pub fn read_clipboard() -> Result<String> {
     #[cfg(target_os = "windows")]
     let candidates: &[(&str, &[&str])] = &[(
         "powershell",
-        &["-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"],
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-Clipboard -Raw",
+        ],
     )];
     #[cfg(target_os = "macos")]
     let candidates: &[(&str, &[&str])] = &[("pbpaste", &[])];

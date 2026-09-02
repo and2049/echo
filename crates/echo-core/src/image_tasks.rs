@@ -88,7 +88,9 @@ pub fn spawn_thumbnail_processing(url: String, tx: mpsc::Sender<WorkerEvent>) {
         };
 
         // Always report back, even on failure, so Loading entries resolve.
-        let _ = tx.send(WorkerEvent::ThumbnailProcessed { url, artwork }).await;
+        let _ = tx
+            .send(WorkerEvent::ThumbnailProcessed { url, artwork })
+            .await;
     });
 }
 

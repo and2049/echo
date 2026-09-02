@@ -38,13 +38,21 @@ impl V3 {
     }
 
     fn scale(self, k: f32) -> V3 {
-        V3 { x: self.x * k, y: self.y * k, z: self.z * k }
+        V3 {
+            x: self.x * k,
+            y: self.y * k,
+            z: self.z * k,
+        }
     }
 
     /// One octave of the fold: rotate the axes and push each by a sine of itself.
     fn fold(self, frequency: f32, time: f32) -> V3 {
         let push = |v: f32| (v * frequency - time).sin() / frequency;
-        V3 { x: self.y + push(self.x), y: self.z + push(self.y), z: self.x + push(self.z) }
+        V3 {
+            x: self.y + push(self.x),
+            y: self.z + push(self.y),
+            z: self.x + push(self.z),
+        }
     }
 }
 
@@ -66,12 +74,20 @@ pub fn march(u: f32, v: f32, time: f32) -> Sample {
             continue;
         }
         let filament = |v: f32| (v * FILAMENT_FREQUENCY).sin() * FILAMENT_STRENGTH;
-        let filaments = V3 { x: filament(p.x), y: filament(p.y), z: filament(p.z) }.len();
+        let filaments = V3 {
+            x: filament(p.x),
+            y: filament(p.y),
+            z: filament(p.z),
+        }
+        .len();
         let weight = z * z / (0.001 + (len * len + filaments * filaments).sqrt());
         glow += weight;
         hue += weight * (p.x * HUE_FREQUENCY).sin();
     }
-    Sample { glow, hue: (hue / glow + 1.0) / 2.0 }
+    Sample {
+        glow,
+        hue: (hue / glow + 1.0) / 2.0,
+    }
 }
 
 #[cfg(test)]
@@ -83,7 +99,14 @@ mod tests {
     fn the_field_is_periodic_in_time_and_finite() {
         for (u, v) in [(0.0, 0.0), (0.6, -0.3), (-0.7, 0.4)] {
             let (a, b) = (march(u, v, 0.0), march(u, v, TAU));
-            assert!((a.glow - b.glow).abs() < 1e-3 * a.glow && (a.hue - b.hue).abs() < 1e-3, "{u},{v}: {} {} {} {}", a.glow, b.glow, a.hue, b.hue);
+            assert!(
+                (a.glow - b.glow).abs() < 1e-3 * a.glow && (a.hue - b.hue).abs() < 1e-3,
+                "{u},{v}: {} {} {} {}",
+                a.glow,
+                b.glow,
+                a.hue,
+                b.hue
+            );
             assert!(a.glow.is_finite() && a.glow > 0.0 && (0.0..=1.0).contains(&a.hue));
         }
     }

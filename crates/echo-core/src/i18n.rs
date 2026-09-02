@@ -6,7 +6,8 @@ static TRANSLATIONS: OnceLock<HashMap<&'static str, serde_json::Value>> = OnceLo
 pub fn init() {
     let mut map = HashMap::new();
 
-    let en: serde_json::Value = serde_json::from_str(include_str!("../../../locales/en.json")).unwrap();
+    let en: serde_json::Value =
+        serde_json::from_str(include_str!("../../../locales/en.json")).unwrap();
     let zh: serde_json::Value =
         serde_json::from_str(include_str!("../../../locales/zh-CN.json")).unwrap();
     let zh_tw: serde_json::Value =
@@ -58,10 +59,7 @@ mod tests {
         for lang in ["en", "zh-CN", "zh-TW"] {
             let setup = &map[lang]["desktop"]["setup"];
             for key in ["step2", "copy", "copied"] {
-                assert!(
-                    setup[key].is_string(),
-                    "{lang} missing desktop.setup.{key}"
-                );
+                assert!(setup[key].is_string(), "{lang} missing desktop.setup.{key}");
             }
         }
     }

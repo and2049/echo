@@ -127,7 +127,8 @@ async fn upgrade(target: Option<String>, check_only: bool) -> Result<i32, Update
     let asset = plan.asset_name()?;
 
     let mut progress = Progress::new(&asset);
-    let staged = update::download(plan.clone(), &release, |percent| progress.update(percent)).await?;
+    let staged =
+        update::download(plan.clone(), &release, |percent| progress.update(percent)).await?;
     progress.finish();
 
     for path in &plan.targets {

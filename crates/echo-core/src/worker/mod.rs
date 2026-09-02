@@ -185,10 +185,17 @@ fn sync_retry_delay(attempt: u32) -> std::time::Duration {
 fn write_sync_log(log: &str) {
     use std::io::Write;
     let path = crate::config::debug_log_path("echo-debug-sync.log");
-    if std::fs::metadata(&path).map(|meta| meta.len() > 1_000_000).unwrap_or(false) {
+    if std::fs::metadata(&path)
+        .map(|meta| meta.len() > 1_000_000)
+        .unwrap_or(false)
+    {
         let _ = std::fs::remove_file(&path);
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(file, "{log}");
     }
 }
@@ -430,7 +437,12 @@ mod tests {
             true
         ));
         // Nothing was playing before → the first snapshot is truth.
-        assert!(should_publish_sync_snapshot(None, Some("new"), 60_000, false));
+        assert!(should_publish_sync_snapshot(
+            None,
+            Some("new"),
+            60_000,
+            false
+        ));
         // No item in the snapshot → nothing to show yet.
         assert!(!should_publish_sync_snapshot(Some("old"), None, 0, true));
     }
@@ -693,7 +705,12 @@ impl Worker {
                             ));
                             write_sync_log(&log);
                             sync_inflight.store(false, Ordering::SeqCst);
-                            send_sync_snapshot(&tx, &output_available, last_snapshot.take().expect("snapshot just stored")).await;
+                            send_sync_snapshot(
+                                &tx,
+                                &output_available,
+                                last_snapshot.take().expect("snapshot just stored"),
+                            )
+                            .await;
                             return;
                         }
                         // Spotify still reported the previous track - retry

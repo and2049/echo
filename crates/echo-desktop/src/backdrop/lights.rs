@@ -11,9 +11,9 @@
 
 use std::f32::consts::TAU;
 
+use super::Tone;
 use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
-use super::Tone;
 
 const SIZE: usize = 96;
 const BLUR_RADIUS: usize = 11;
@@ -23,10 +23,34 @@ const BLUR_RADIUS: usize = 11;
 /// are a quarter loop apart, and each fade is set so the disc blooms at the top of its orbit,
 /// clear of the bottom fade, so one light blooms every quarter loop.
 const DISCS: [Disc; 4] = [
-    Disc { radius: 0.26, axes: (0.34, 0.22), tilt: 0.08, start: 0.89, fade: 0.50 },
-    Disc { radius: 0.28, axes: (-0.30, 0.26), tilt: -0.06, start: 0.43, fade: 0.00 },
-    Disc { radius: 0.20, axes: (0.36, 0.20), tilt: 0.15, start: 0.06, fade: 0.75 },
-    Disc { radius: 0.22, axes: (-0.28, 0.28), tilt: 0.00, start: 0.75, fade: 0.25 },
+    Disc {
+        radius: 0.26,
+        axes: (0.34, 0.22),
+        tilt: 0.08,
+        start: 0.89,
+        fade: 0.50,
+    },
+    Disc {
+        radius: 0.28,
+        axes: (-0.30, 0.26),
+        tilt: -0.06,
+        start: 0.43,
+        fade: 0.00,
+    },
+    Disc {
+        radius: 0.20,
+        axes: (0.36, 0.20),
+        tilt: 0.15,
+        start: 0.06,
+        fade: 0.75,
+    },
+    Disc {
+        radius: 0.22,
+        axes: (-0.28, 0.28),
+        tilt: 0.00,
+        start: 0.75,
+        fade: 0.25,
+    },
 ];
 const MIDDLE: (f32, f32) = (0.5, 0.5);
 /// The fade never goes below this, so a disc keeps a trace of its color on the way out.
@@ -108,7 +132,10 @@ mod tests {
     fn a_white_cover_still_paints_readable_shapes() {
         let palette = CoverPalette::from_colors(vec![Rgb::WHITE]);
         let raster = paint(&palette, Rgb::BLACK, Tone::Dark, 0.75);
-        assert!(at(&raster, DISCS[0].position(0.75)).luminance() <= Tone::Dark.shape_luminance().1 + 0.01);
+        assert!(
+            at(&raster, DISCS[0].position(0.75)).luminance()
+                <= Tone::Dark.shape_luminance().1 + 0.01
+        );
     }
 
     #[test]
@@ -116,7 +143,10 @@ mod tests {
         let base = Rgb::from_u8(240, 242, 250);
         let raster = paint(&blue(), base, Tone::Light, 0.75);
         let light = at(&raster, DISCS[0].position(0.75));
-        assert!(light.luminance() >= Tone::Light.shape_luminance().0 - 0.05 && light.luminance() < base.luminance());
+        assert!(
+            light.luminance() >= Tone::Light.shape_luminance().0 - 0.05
+                && light.luminance() < base.luminance()
+        );
         assert!(light.saturation() > 0.3);
     }
 
@@ -126,7 +156,8 @@ mod tests {
             let (mut min_x, mut max_x, mut min_y, mut max_y) = (1.0f32, 0.0f32, 1.0f32, 0.0f32);
             for step in 0..64 {
                 let (x, y) = disc.position(step as f32 / 64.0);
-                (min_x, max_x, min_y, max_y) = (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y));
+                (min_x, max_x, min_y, max_y) =
+                    (min_x.min(x), max_x.max(x), min_y.min(y), max_y.max(y));
             }
             assert!(min_x < MIDDLE.0 - 0.15 && max_x > MIDDLE.0 + 0.15);
             assert!(min_y < MIDDLE.1 - 0.15 && max_y > MIDDLE.1 + 0.15);
@@ -139,24 +170,38 @@ mod tests {
     #[test]
     fn every_disc_blooms_at_the_top_of_its_orbit() {
         for disc in &DISCS {
-            let top = (0..64).map(|s| s as f32 / 64.0).min_by(|a, b| disc.position(*a).1.total_cmp(&disc.position(*b).1)).unwrap();
+            let top = (0..64)
+                .map(|s| s as f32 / 64.0)
+                .min_by(|a, b| disc.position(*a).1.total_cmp(&disc.position(*b).1))
+                .unwrap();
             assert!(disc.presence(top) > 0.9, "{top}");
         }
     }
 
     #[test]
     fn presence_runs_from_the_floor_to_full_on_a_square() {
-        let disc = Disc { radius: 0.2, axes: (0.3, 0.2), tilt: 0.0, start: 0.0, fade: 0.0 };
+        let disc = Disc {
+            radius: 0.2,
+            axes: (0.3, 0.2),
+            tilt: 0.0,
+            start: 0.0,
+            fade: 0.0,
+        };
         assert!((disc.presence(0.75) - PRESENCE_FLOOR).abs() < 1e-6);
         assert!((disc.presence(0.25) - 1.0).abs() < 1e-6);
-        assert!((disc.presence(0.0) - (PRESENCE_FLOOR + (1.0 - PRESENCE_FLOOR) * 0.25)).abs() < 1e-6);
+        assert!(
+            (disc.presence(0.0) - (PRESENCE_FLOOR + (1.0 - PRESENCE_FLOOR) * 0.25)).abs() < 1e-6
+        );
     }
 
     #[test]
     fn smaller_discs_paint_last() {
         let order = paint_order();
-        assert!(order.windows(2).all(|w| DISCS[w[0]].radius >= DISCS[w[1]].radius));
+        assert!(
+            order
+                .windows(2)
+                .all(|w| DISCS[w[0]].radius >= DISCS[w[1]].radius)
+        );
         assert_eq!(order[0], 1);
     }
-
 }

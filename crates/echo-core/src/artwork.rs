@@ -58,7 +58,12 @@ pub struct Rgba {
 }
 
 impl Rgba {
-    pub const TRANSPARENT: Self = Self { r: 0, g: 0, b: 0, a: 0 };
+    pub const TRANSPARENT: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
 
     pub const fn from_rgba(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
@@ -157,7 +162,11 @@ impl Cell {
     /// A uniform cell needs no half-block: drawing a blank with matching colors keeps the frame
     /// diff smaller and avoids a seam on terminals that render `▀` a pixel off.
     pub fn glyph(&self) -> char {
-        if self.top == self.bottom { ' ' } else { HALF_BLOCK }
+        if self.top == self.bottom {
+            ' '
+        } else {
+            HALF_BLOCK
+        }
     }
 }
 
@@ -224,7 +233,8 @@ mod tests {
 
     #[test]
     fn an_oversized_cover_is_capped_to_the_max_edge() {
-        let art = Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 0, MAX_COVER_EDGE).expect("decode");
+        let art =
+            Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 0, MAX_COVER_EDGE).expect("decode");
         assert_eq!(art.width.max(art.height), MAX_COVER_EDGE);
         assert_eq!(art.pixels.len() as u32, art.width * art.height * 4);
     }
@@ -247,7 +257,8 @@ mod tests {
     fn pixelation_survives_the_downscale() {
         // A pixelated cover keeps hard blocks; check it still decodes to the capped size and did
         // not go transparent or empty along the way.
-        let art = Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 8, MAX_COVER_EDGE).expect("decode");
+        let art =
+            Artwork::decode(&red_png(MAX_COVER_EDGE + 160), 8, MAX_COVER_EDGE).expect("decode");
         assert_eq!(art.width.max(art.height), MAX_COVER_EDGE);
         assert_eq!(&art.pixels[0..4], &[255, 0, 0, 255]);
     }
@@ -284,7 +295,11 @@ mod tests {
             let v = if x < 2 { 0 } else { 255 };
             px.extend_from_slice(&[v, v, v, 255]);
         }
-        let img = Artwork { width: w, height: h, pixels: px };
+        let img = Artwork {
+            width: w,
+            height: h,
+            pixels: px,
+        };
         assert_eq!(img.sample_box(0, 0, 2, 1).r, 0);
         assert_eq!(img.sample_box(2, 0, 4, 1).r, 255);
         // Averaging across the seam gives the midpoint.
@@ -319,7 +334,11 @@ mod tests {
                 }
             }
         }
-        let img = Artwork { width: w, height: h, pixels: px };
+        let img = Artwork {
+            width: w,
+            height: h,
+            pixels: px,
+        };
         let cells = sample_cells(&img, 4, 1);
         assert_eq!(cells[0].top.r, 255);
         assert_eq!(cells[0].bottom.b, 255);

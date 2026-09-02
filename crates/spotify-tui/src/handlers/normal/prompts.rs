@@ -2,9 +2,9 @@
 //! `echo_core::intent` (`prompt_active`/`confirm_prompt`/`cancel_prompt`), shared with the
 //! desktop app's confirm modal.
 
+use crossterm::event::{KeyCode, KeyEvent};
 use echo_core::app::AppState;
 use echo_core::events::AppEvent;
-use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) {
     if !echo_core::intent::prompt_active(state) {

@@ -205,4 +205,3 @@ fn launch_in_terminal() -> ! {
         .spawn();
     std::process::exit(1);
 }
-

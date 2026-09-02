@@ -48,8 +48,22 @@ fn indexed(index: u8) -> Hsla {
         0..=15 => {
             use NamedColor::*;
             const ANSI: [NamedColor; 16] = [
-                Black, Red, Green, Yellow, Blue, Magenta, Cyan, Gray, DarkGray, LightRed,
-                LightGreen, LightYellow, LightBlue, LightMagenta, LightCyan, White,
+                Black,
+                Red,
+                Green,
+                Yellow,
+                Blue,
+                Magenta,
+                Cyan,
+                Gray,
+                DarkGray,
+                LightRed,
+                LightGreen,
+                LightYellow,
+                LightBlue,
+                LightMagenta,
+                LightCyan,
+                White,
             ];
             named(ANSI[index as usize])
         }

@@ -225,7 +225,10 @@ impl SpotifyWorker {
         Ok((out, metadata))
     }
 
-    pub async fn fetch_top_tracks(&self, range: crate::models::TopItemsRange) -> Result<Vec<Track>> {
+    pub async fn fetch_top_tracks(
+        &self,
+        range: crate::models::TopItemsRange,
+    ) -> Result<Vec<Track>> {
         use futures_util::StreamExt;
         let mut stream = Box::pin(self.client.current_user_top_tracks(Some(time_range(range))));
         let mut out = Vec::new();

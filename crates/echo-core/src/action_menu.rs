@@ -12,7 +12,11 @@ use crate::models::{
 ///
 /// Consumes `ctx` — build an owned context (e.g. `ActionMenuContext::from(&track)`) before
 /// taking the mutable state borrow.
-pub fn run(state: &mut AppState, ctx: ActionMenuContext, action: ActionMenuAction) -> Option<AppEvent> {
+pub fn run(
+    state: &mut AppState,
+    ctx: ActionMenuContext,
+    action: ActionMenuAction,
+) -> Option<AppEvent> {
     match action {
         ActionMenuAction::GoToAlbum => {
             if ctx.source == TrackSource::Local {
@@ -94,7 +98,11 @@ pub fn run(state: &mut AppState, ctx: ActionMenuContext, action: ActionMenuActio
         }
         ActionMenuAction::ToggleSavedAlbum => {
             if let Some(album_id) = ctx.album_id {
-                let saved = state.data.saved_albums.iter().any(|album| album.id == album_id);
+                let saved = state
+                    .data
+                    .saved_albums
+                    .iter()
+                    .any(|album| album.id == album_id);
                 return Some(if saved {
                     AppEvent::RemoveAlbums(vec![album_id])
                 } else {
@@ -151,7 +159,12 @@ pub fn label(state: &AppState, ctx: &ActionMenuContext, action: ActionMenuAction
                 .album_id
                 .as_ref()
                 .is_some_and(|id| state.data.saved_albums.iter().any(|album| &album.id == id));
-            if saved { "Remove album from library" } else { "Save album to library" }.to_string()
+            if saved {
+                "Remove album from library"
+            } else {
+                "Save album to library"
+            }
+            .to_string()
         }
         ActionMenuAction::CopyLink => "Copy Spotify link".to_string(),
         ActionMenuAction::CopyPath => "Copy file path".to_string(),

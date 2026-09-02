@@ -5,14 +5,13 @@ use crate::{
     events::{AppEvent, WorkerEvent},
 };
 
-mod auth;
 mod artist;
+mod auth;
 mod data;
 mod images;
 mod library;
 mod misc;
 mod playback;
-
 
 pub fn apply_worker_event(
     worker_event: WorkerEvent,
@@ -39,7 +38,9 @@ pub fn apply_worker_event(
         }
         WorkerEvent::AudioOutputRecovered => misc::handle_audio_output_recovered(state),
         WorkerEvent::SleepTimerExpired => misc::handle_sleep_timer_expired(state),
-        WorkerEvent::PlaylistsLoaded(playlists) => library::handle_playlists_loaded(state, playlists),
+        WorkerEvent::PlaylistsLoaded(playlists) => {
+            library::handle_playlists_loaded(state, playlists)
+        }
         WorkerEvent::AlbumsLoaded(albums) => library::handle_albums_loaded(state, albums),
         WorkerEvent::LocalLibraryLoaded { library, report } => {
             library::handle_local_library_loaded(state, library, report)
@@ -47,20 +48,46 @@ pub fn apply_worker_event(
         WorkerEvent::LocalPlaylistsLoaded(playlists) => {
             library::handle_local_playlists_loaded(state, playlists)
         }
-        WorkerEvent::LikedStatusUpdate(results) => library::handle_liked_status_update(state, results),
+        WorkerEvent::LikedStatusUpdate(results) => {
+            library::handle_liked_status_update(state, results)
+        }
         WorkerEvent::Tick => playback::handle_tick(state, app_tx),
         WorkerEvent::PlaybackStarted { item } => {
             playback::handle_playback_started(state, app_tx, worker_tx, item)
         }
-        WorkerEvent::SyncPlaybackState { is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item, context } => {
-            playback::handle_sync_playback_state(state, app_tx, worker_tx, is_playing, is_shuffled, repeat_mode, volume, device_name, progress_ms, item, context)
-        }
+        WorkerEvent::SyncPlaybackState {
+            is_playing,
+            is_shuffled,
+            repeat_mode,
+            volume,
+            device_name,
+            progress_ms,
+            item,
+            context,
+        } => playback::handle_sync_playback_state(
+            state,
+            app_tx,
+            worker_tx,
+            is_playing,
+            is_shuffled,
+            repeat_mode,
+            volume,
+            device_name,
+            progress_ms,
+            item,
+            context,
+        ),
         WorkerEvent::PlaybackControlState { is_playing } => {
             playback::handle_playback_control_state(state, is_playing)
         }
-        WorkerEvent::TrackMetadataLoaded { track_id, title, artist, image_url } => {
-            playback::handle_track_metadata_loaded(state, worker_tx, track_id, title, artist, image_url)
-        }
+        WorkerEvent::TrackMetadataLoaded {
+            track_id,
+            title,
+            artist,
+            image_url,
+        } => playback::handle_track_metadata_loaded(
+            state, worker_tx, track_id, title, artist, image_url,
+        ),
         WorkerEvent::TrackImageProcessed { track_id, artwork } => {
             playback::handle_track_image_processed(state, track_id, artwork)
         }
@@ -75,10 +102,13 @@ pub fn apply_worker_event(
         WorkerEvent::TracksLoaded(tracks, context) => {
             data::handle_tracks_loaded(state, worker_tx, tracks, context)
         }
-        WorkerEvent::TracksLoadFailed { context_id: _, message } => {
-            data::handle_tracks_load_failed(state, message)
+        WorkerEvent::TracksLoadFailed {
+            context_id: _,
+            message,
+        } => data::handle_tracks_load_failed(state, message),
+        WorkerEvent::SearchResultsLoaded(results) => {
+            data::handle_search_results_loaded(state, results)
         }
-        WorkerEvent::SearchResultsLoaded(results) => data::handle_search_results_loaded(state, results),
         WorkerEvent::QueueLoaded(tracks) => data::handle_queue_loaded(state, tracks),
         WorkerEvent::DevicesLoaded(devices) => data::handle_devices_loaded(state, devices),
         WorkerEvent::TracksQueued(ids) => {
@@ -89,26 +119,36 @@ pub fn apply_worker_event(
         }
         WorkerEvent::TopTracksLoaded(tracks) => data::handle_top_tracks_loaded(state, tracks),
         WorkerEvent::TopArtistsLoaded(artists) => data::handle_top_artists_loaded(state, artists),
-        WorkerEvent::RecentlyPlayedLoaded(tracks) => data::handle_recently_played_loaded(state, tracks),
-        WorkerEvent::FollowedArtistsLoaded(artists) => data::handle_followed_artists_loaded(state, artists),
-        WorkerEvent::WhatsNewLoaded { albums, done, total } => {
-            data::handle_whats_new_loaded(state, albums, done, total)
+        WorkerEvent::RecentlyPlayedLoaded(tracks) => {
+            data::handle_recently_played_loaded(state, tracks)
         }
-        WorkerEvent::ArtistPageOpened { artist_id, artist_name, artist_image_url } => {
-            artist::handle_page_opened(state, worker_tx, artist_id, artist_name, artist_image_url)
+        WorkerEvent::FollowedArtistsLoaded(artists) => {
+            data::handle_followed_artists_loaded(state, artists)
         }
+        WorkerEvent::WhatsNewLoaded {
+            albums,
+            done,
+            total,
+        } => data::handle_whats_new_loaded(state, albums, done, total),
+        WorkerEvent::ArtistPageOpened {
+            artist_id,
+            artist_name,
+            artist_image_url,
+        } => artist::handle_page_opened(state, worker_tx, artist_id, artist_name, artist_image_url),
         WorkerEvent::ArtistAlbumsLoaded { artist_id, albums } => {
             artist::handle_albums_loaded(state, artist_id, albums)
         }
         WorkerEvent::ArtistAlbumsLoadFailed { artist_id, message } => {
             artist::handle_albums_load_failed(state, artist_id, message)
         }
-        WorkerEvent::ArtistAlbumsRateLimited { artist_id, retry_after_secs } => {
-            artist::handle_albums_rate_limited(state, artist_id, retry_after_secs)
-        }
-        WorkerEvent::ArtistImageResolved { artist_id, image_url } => {
-            artist::handle_image_resolved(state, worker_tx, artist_id, image_url)
-        }
+        WorkerEvent::ArtistAlbumsRateLimited {
+            artist_id,
+            retry_after_secs,
+        } => artist::handle_albums_rate_limited(state, artist_id, retry_after_secs),
+        WorkerEvent::ArtistImageResolved {
+            artist_id,
+            image_url,
+        } => artist::handle_image_resolved(state, worker_tx, artist_id, image_url),
         WorkerEvent::ArtistTopTracksLoaded { artist_id, tracks } => {
             artist::handle_top_tracks_loaded(state, artist_id, tracks)
         }

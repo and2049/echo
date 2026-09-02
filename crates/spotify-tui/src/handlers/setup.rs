@@ -1,6 +1,6 @@
+use crossterm::event::{KeyCode, KeyEvent};
 use echo_core::app::AppState;
 use echo_core::events::AppEvent;
-use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
     match key.code {
