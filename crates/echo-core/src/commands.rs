@@ -37,6 +37,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("spotifylogin", "Re-authenticate with Spotify"),
     ("rename <name>", "Rename the selected playlist or folder"),
     ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
+    ("backdrop <name>", "Immersive view backdrop (desktop)"),
     ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
     ("seek <s|+s|-s>", "Seek to, or by, a number of seconds"),
     ("sleep <30m|1h|off>", "Pause playback after a delay"),
@@ -103,6 +104,12 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                 .collect(),
             "sleep" => ["15m", "30m", "45m", "1h", "90m", "off"]
                 .into_iter()
+                .filter(|o| o.starts_with(arg_str))
+                .map(String::from)
+                .collect(),
+            "backdrop" => crate::config::BackdropMode::ALL
+                .into_iter()
+                .map(|mode| mode.name())
                 .filter(|o| o.starts_with(arg_str))
                 .map(String::from)
                 .collect(),
@@ -414,6 +421,17 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                         }
                     ),
                 );
+            }
+            "backdrop" => {
+                let names = crate::config::BackdropMode::ALL.map(|mode| mode.name()).join("|");
+                match args.next().and_then(crate::config::BackdropMode::parse) {
+                    Some(mode) => {
+                        state.ui.library_config.immersive_backdrop = mode;
+                        state.save_library_config();
+                        set_status(state, format!("Backdrop: {}", mode.name()));
+                    }
+                    None => set_status(state, format!("Usage: backdrop <{names}>")),
+                }
             }
             "redraw" => {
                 state.ui.needs_terminal_clear = true;
@@ -841,6 +859,19 @@ mod tests {
     fn submit_command(state: &mut AppState, command: &str) -> Option<AppEvent> {
         state.ui.command_buffer = command.to_string();
         submit(state)
+    }
+
+    #[test]
+    fn backdrop_sets_a_known_mode_and_lists_the_rest() {
+        use crate::config::BackdropMode;
+        let mut state = AppState::new();
+        submit_command(&mut state, "backdrop nebula");
+        assert_eq!(state.ui.library_config.immersive_backdrop, BackdropMode::Nebula);
+        submit_command(&mut state, "backdrop plaid");
+        assert_eq!(state.ui.library_config.immersive_backdrop, BackdropMode::Nebula);
+        assert!(state.ui.status_message.as_deref().is_some_and(|m| m.contains("lights|mesh")));
+        assert_eq!(BackdropMode::parse("lights"), Some(BackdropMode::Lights));
+        assert_eq!(BackdropMode::parse("Lights"), None);
     }
 
     #[test]

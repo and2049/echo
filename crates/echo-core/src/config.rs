@@ -398,6 +398,9 @@ pub struct LibraryConfig {
     pub normalisation: bool,
     #[serde(default = "default_normalisation_pregain")]
     pub normalisation_pregain: f64,
+    /// The picture behind the desktop app's immersive view. Ignored by the TUI.
+    #[serde(default)]
+    pub immersive_backdrop: BackdropMode,
     /// Desktop window geometry, so a resized window comes back the same size. Ignored by the
     /// TUI. `None` until the desktop app has been run and closed at least once.
     #[serde(default)]
@@ -483,6 +486,7 @@ impl Default for LibraryConfig {
             bitrate: 320,
             normalisation: true,
             normalisation_pregain: default_normalisation_pregain(),
+            immersive_backdrop: BackdropMode::default(),
             sidebar_width: None,
             sidebar_collapsed: None,
             window_bounds: None,
@@ -505,6 +509,38 @@ pub enum SortMode {
     Default,
     Alphabetical,
     Creator,
+}
+
+/// The backdrop modes the desktop app's immersive view can paint; the desktop crate owns the
+/// painting, this is only the name that is saved and typed after `:backdrop`.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackdropMode {
+    #[default]
+    Lights,
+    Mesh,
+    Aurora,
+    Vinyl,
+    Nebula,
+}
+
+impl BackdropMode {
+    pub const ALL: [BackdropMode; 5] = [Self::Lights, Self::Mesh, Self::Aurora, Self::Vinyl, Self::Nebula];
+
+    /// The name saved in the config and typed after `:backdrop`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Lights => "lights",
+            Self::Mesh => "mesh",
+            Self::Aurora => "aurora",
+            Self::Vinyl => "vinyl",
+            Self::Nebula => "nebula",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.name() == name)
+    }
 }
 
 /// Root directory for echo's config, caches and local-library data.

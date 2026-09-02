@@ -230,6 +230,7 @@ echo 主要由鍵盤驅動。
 - `:vis`：切換音訊視覺化器。
 - `:visbins <number>`：設定音訊視覺化器頻率條數量（5-32）。
 - `:pixelate <pixels>`：在專輯封面上啟用復古 8 位元像素風格。設定為 0 可停用，或例如 16 以獲得像素化效果。
+- `:backdrop <lights|mesh|aurora|vinyl|nebula>`：選擇桌面應用沉浸檢視背後的動態畫面（設定中也可選擇）。
 - `:thumbs [on|off]`：切換資料庫側欄中的封面縮圖。封面快取於 `~/.config/echo/thumbs/`，之後啟動時即時載入。
 - `:index <number>`：設定曲目索引基數（從 1 開始或從 0 開始）。
 - `:quit`、`:q`、`:qa`、`:wq`：結束應用程式。

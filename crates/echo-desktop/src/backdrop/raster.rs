@@ -3,6 +3,8 @@
 //! cheap: a 96-pixel canvas blurred by 12 pixels reads as a 1400-pixel window blurred by 175,
 //! and the texture's bilinear upscale hides the coarse grid. Coordinates handed to the painting
 //! calls are fractions of the canvas, so a mode's layout is independent of the size it picks.
+//! Run with `ECHO_BACKDROP_BLUR=0` to skip every blur and see a mode's raw shapes when tuning
+//! its motion.
 
 use std::sync::Arc;
 
@@ -30,6 +32,11 @@ impl Raster {
         self.pixels[y * self.width + x]
     }
 
+    #[cfg(test)]
+    pub fn pixels(&self) -> &[Rgb] {
+        &self.pixels
+    }
+
     /// A filled disc centered at (`cx`, `cy`) — fractions of the width and height — with radius
     /// `r` as a fraction of the width, its edge softened over one pixel, blended in at `opacity`.
     pub fn disc(&mut self, cx: f32, cy: f32, r: f32, color: Rgb, opacity: f32) {
@@ -49,7 +56,7 @@ impl Raster {
     /// Three passes of a box blur `radius` pixels each side, which is a close Gaussian. Edges
     /// clamp, so the canvas never darkens toward its border.
     pub fn blur(&mut self, radius: usize) {
-        if radius == 0 {
+        if radius == 0 || std::env::var("ECHO_BACKDROP_BLUR").is_ok_and(|v| v == "0") {
             return;
         }
         for _ in 0..3 {
@@ -94,6 +101,16 @@ impl Raster {
                 self.pixels[ix] = f((x as f32 + 0.5) / w, (y as f32 + 0.5) / h, self.pixels[ix]);
             }
         }
+    }
+
+    /// Fades the picture toward `base` down the canvas: untouched above `from` (a fraction of
+    /// the height), `depth` of the way to `base` from `to` down, on a smooth ramp between. The
+    /// lyrics sit low, so every mode settles its bottom this way to keep them readable.
+    pub fn settle(&mut self, base: Rgb, from: f32, to: f32, depth: f32) {
+        self.map(|_, y, color| {
+            let t = ((y - from) / (to - from)).clamp(0.0, 1.0);
+            color.mix(base, depth * t * t * (3.0 - 2.0 * t))
+        });
     }
 
     /// The canvas as a texture gpui can draw, in its BGRA byte order, with `guard` texels of
@@ -163,6 +180,16 @@ mod tests {
         raster.map(|x, y, _| Rgb::new(x, y, 0.0));
         assert_eq!(raster.get(0, 0), Rgb::new(0.125, 0.25, 0.0));
         assert_eq!(raster.get(3, 1), Rgb::new(0.875, 0.75, 0.0));
+    }
+
+    #[test]
+    fn settle_fades_only_the_bottom_and_stops_short_of_base() {
+        let mut raster = Raster::new(1, 10, Rgb::WHITE);
+        raster.settle(Rgb::BLACK, 0.5, 0.9, 0.8);
+        assert_eq!(raster.get(0, 0), Rgb::WHITE);
+        assert_eq!(raster.get(0, 4), Rgb::WHITE);
+        assert!(raster.get(0, 6).luminance() < 1.0 && raster.get(0, 6).luminance() > 0.2);
+        assert!((raster.get(0, 9).luminance() - 0.2).abs() < 1e-5);
     }
 
     #[test]
