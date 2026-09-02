@@ -9,12 +9,11 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
             KeyCode::Esc | KeyCode::Char('q') => {
                 action_menu::cancel_playlist_add(state);
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Char('j') | KeyCode::Down
                 if state.ui.selected_playlist_modal_index + 1
-                    < action_menu::playlist_add_choices(state).len()
-                {
-                    state.ui.selected_playlist_modal_index += 1;
-                }
+                    < action_menu::playlist_add_choices(state).len() =>
+            {
+                state.ui.selected_playlist_modal_index += 1;
             }
             KeyCode::Char('k') | KeyCode::Up if state.ui.selected_playlist_modal_index > 0 => {
                 state.ui.selected_playlist_modal_index -= 1;
@@ -35,15 +34,13 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
             KeyCode::Esc | KeyCode::Char('q') => {
                 state.ui.device_modal_open = false;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if state.ui.selected_device_index + 1 < state.data.devices.len() {
-                    state.ui.selected_device_index += 1;
-                }
+            KeyCode::Char('j') | KeyCode::Down
+                if state.ui.selected_device_index + 1 < state.data.devices.len() =>
+            {
+                state.ui.selected_device_index += 1;
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if state.ui.selected_device_index > 0 {
-                    state.ui.selected_device_index -= 1;
-                }
+            KeyCode::Char('k') | KeyCode::Up if state.ui.selected_device_index > 0 => {
+                state.ui.selected_device_index -= 1;
             }
             KeyCode::Enter => {
                 let index = state.ui.selected_device_index;
@@ -78,15 +75,13 @@ pub fn handle(state: &mut AppState, key: &KeyEvent) -> (bool, Option<AppEvent>) 
                 state.ui.action_menu_context = None;
                 state.ui.selected_action_index = 0;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if state.ui.selected_action_index + 1 < action_count {
-                    state.ui.selected_action_index += 1;
-                }
+            KeyCode::Char('j') | KeyCode::Down
+                if state.ui.selected_action_index + 1 < action_count =>
+            {
+                state.ui.selected_action_index += 1;
             }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if state.ui.selected_action_index > 0 {
-                    state.ui.selected_action_index -= 1;
-                }
+            KeyCode::Char('k') | KeyCode::Up if state.ui.selected_action_index > 0 => {
+                state.ui.selected_action_index -= 1;
             }
             KeyCode::Enter => {
                 if let Some(ctx) = state.ui.action_menu_context.clone() {

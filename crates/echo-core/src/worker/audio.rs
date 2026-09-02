@@ -242,6 +242,7 @@ impl Sink for EchoRodioSink {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_librespot_daemon(
     _access_token: String,
     device_name: String,

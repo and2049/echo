@@ -819,7 +819,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
             "visbins" => {
                 if let Some(bins_str) = args.next() {
                     if let Ok(bins) = bins_str.parse::<usize>() {
-                        if bins >= 5 && bins <= 32 {
+                        if (5..=32).contains(&bins) {
                             state.ui.vis_bins = bins;
                             state.ui.library_config.vis_bins = bins;
                             state.save_library_config();

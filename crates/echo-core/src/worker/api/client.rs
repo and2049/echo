@@ -476,13 +476,12 @@ impl EchoSpotifyClient {
             .map(|items| {
                 let mut tracks = Vec::new();
                 for item in items {
-                    if let Some(track) = item.get("track").and_then(parse::track) {
-                        if !tracks
+                    if let Some(track) = item.get("track").and_then(parse::track)
+                        && !tracks
                             .iter()
                             .any(|existing: &Track| existing.id == track.id)
-                        {
-                            tracks.push(track);
-                        }
+                    {
+                        tracks.push(track);
                     }
                 }
                 tracks

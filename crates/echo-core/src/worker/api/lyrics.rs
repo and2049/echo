@@ -39,17 +39,17 @@ fn parse_lrc(lrc: &str) -> Vec<LyricLine> {
         }
 
         // Parse [mm:ss.xx]
-        if line.starts_with('[') {
-            if let Some(close_bracket) = line.find(']') {
-                let time_str = &line[1..close_bracket];
-                let text = line[close_bracket + 1..].trim();
+        if line.starts_with('[')
+            && let Some(close_bracket) = line.find(']')
+        {
+            let time_str = &line[1..close_bracket];
+            let text = line[close_bracket + 1..].trim();
 
-                if let Some(ms) = parse_time(time_str) {
-                    lines.push(LyricLine {
-                        start_ms: ms,
-                        text: text.to_string(),
-                    });
-                }
+            if let Some(ms) = parse_time(time_str) {
+                lines.push(LyricLine {
+                    start_ms: ms,
+                    text: text.to_string(),
+                });
             }
         }
     }

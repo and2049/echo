@@ -78,12 +78,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if let Some(ref data) = state.data.artist_page_data {
-                    if !data.albums.is_empty()
-                        && state.ui.artist_page_album_index < data.albums.len().saturating_sub(1)
-                    {
-                        state.ui.artist_page_album_index += 1;
-                    }
+                if let Some(ref data) = state.data.artist_page_data
+                    && !data.albums.is_empty()
+                    && state.ui.artist_page_album_index < data.albums.len().saturating_sub(1)
+                {
+                    state.ui.artist_page_album_index += 1;
                 }
             }
             ActiveView::SearchResults => {
@@ -294,7 +293,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             {
                 let t = &state.data.search_results.tracks[state.ui.selected_search_index];
                 Some(echo_core::models::ActionMenuContext::from(t))
-            } else if !state.playback.playing_track_id.is_none() {
+            } else if state.playback.playing_track_id.is_some() {
                 Some(echo_core::models::ActionMenuContext {
                     track_id: state.playback.playing_track_id.clone().unwrap_or_default(),
                     source: state

@@ -56,12 +56,11 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 state.ui.playlist_add_modal_open = false;
                 state.ui.selected_playlist_modal_index = 0;
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Char('j') | KeyCode::Down
                 if state.ui.selected_playlist_modal_index + 1
-                    < echo_core::action_menu::playlist_add_choices(state).len()
-                {
-                    state.ui.selected_playlist_modal_index += 1;
-                }
+                    < echo_core::action_menu::playlist_add_choices(state).len() =>
+            {
+                state.ui.selected_playlist_modal_index += 1;
             }
             KeyCode::Char('k') | KeyCode::Up if state.ui.selected_playlist_modal_index > 0 => {
                 state.ui.selected_playlist_modal_index -= 1;
@@ -163,10 +162,10 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::ArtistPage => {
-                if let Some(ref data) = state.data.artist_page_data {
-                    if state.ui.artist_page_album_index + 1 < data.albums.len() {
-                        state.ui.artist_page_album_index += 1;
-                    }
+                if let Some(ref data) = state.data.artist_page_data
+                    && state.ui.artist_page_album_index + 1 < data.albums.len()
+                {
+                    state.ui.artist_page_album_index += 1;
                 }
             }
             ActiveView::WhatsNew => {

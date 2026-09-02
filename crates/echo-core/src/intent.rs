@@ -431,7 +431,7 @@ pub fn transfer_to_device(state: &mut AppState, index: usize) -> Option<AppEvent
     let device = state.data.devices.get(index)?;
     state.ui.device_modal_open = false;
     let id = device.id.clone();
-    (!id.is_empty()).then(|| AppEvent::TransferPlayback(id))
+    (!id.is_empty()).then_some(AppEvent::TransferPlayback(id))
 }
 
 // Global search and result activation.
