@@ -537,12 +537,12 @@ mod tests {
         let (a, b, t) = backdrop.frame(1.5 / KEYFRAMES as f32);
         assert!(Arc::ptr_eq(&a, &backdrop.frames[1]) && Arc::ptr_eq(&b, &backdrop.frames[2]));
         assert!((t - 0.5).abs() < 1e-4);
-        let (a, b, t) = backdrop.frame(0.999);
+        let (a, b, t) = backdrop.frame((KEYFRAMES as f32 - 0.5) / KEYFRAMES as f32);
         assert!(
             Arc::ptr_eq(&a, &backdrop.frames[KEYFRAMES - 1])
                 && Arc::ptr_eq(&b, &backdrop.frames[0])
         );
-        assert!(t > 0.9);
+        assert!((t - 0.5).abs() < 1e-4);
         let (a, _, _) = backdrop.frame(1.0);
         assert!(Arc::ptr_eq(&a, &backdrop.frames[0]));
     }
