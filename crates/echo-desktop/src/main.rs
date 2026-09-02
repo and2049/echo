@@ -424,11 +424,13 @@ impl EchoApp {
 
         // Progress tick: elapsed time is interpolated at render time, so while playing the bar
         // needs a repaint even when no worker event arrives. The visualizer needs a much faster
-        // cadence, so the interval tightens while it is live.
+        // cadence, so the interval tightens while it is live; the immersive backdrop's drift
+        // sets its own, slower one.
         cx.spawn(async move |this, cx| {
             loop {
                 let interval = this.update(cx, |app: &mut EchoApp, cx| {
-                    if app.state.playback.is_playing {
+                    let animating = app.immersive && !cx.reduce_motion();
+                    if app.state.playback.is_playing || animating {
                         cx.notify();
                     }
                     // Status messages carry an expiry the TUI checks each frame; here the
@@ -446,14 +448,18 @@ impl EchoApp {
                     let visualizing = app.state.playback.is_playing
                         && app.state.ui.library_config.enable_visualizer
                         && app.state.playback.audio_visualization.is_some();
-                    if visualizing { 66 } else { 500 }
+                    if visualizing {
+                        Duration::from_millis(66)
+                    } else if animating {
+                        backdrop::FRAME
+                    } else {
+                        Duration::from_millis(500)
+                    }
                 });
                 let Ok(interval) = interval else {
                     break; // entity dropped — app is shutting down
                 };
-                cx.background_executor()
-                    .timer(Duration::from_millis(interval))
-                    .await;
+                cx.background_executor().timer(interval).await;
             }
         })
         .detach();
@@ -2927,8 +2933,13 @@ impl Render for EchoApp {
                 .as_ref()
                 .or(playback.previous_track_image.as_ref());
             let fallback = backdrop::theme_palette(&self.state.ui.active_theme);
-            self.backdrops.get(self.backdrop_mode, cover, &fallback)
+            let backdrop = self.backdrops.get(self.backdrop_mode, cover, &fallback);
+            self.backdrops.release(|image| {
+                window.drop_image(image).ok();
+            });
+            backdrop
         });
+        let phase = if cx.reduce_motion() { 0.0 } else { self.backdrops.phase() };
         let titlebar = owns_frame.then(|| {
             views::titlebar(self, backdrop.as_ref().map(|b| &b.colors), window, cx)
                 .into_any_element()
@@ -3153,7 +3164,7 @@ impl Render for EchoApp {
             // The window's backdrop: the one fill covering every corner, so it rounds all four.
             .map(|el| views::round_client_corners(el, corners, views::ClientCorners::All))
             .when_some(backdrop.as_ref(), |el, backdrop| {
-                el.child(views::backdrop_layer(backdrop.clone(), corners))
+                el.child(views::backdrop_layer(backdrop.clone(), phase, corners))
             })
             .when_some(titlebar, |el, bar| el.child(bar))
             .map(|el| {
