@@ -21,7 +21,7 @@ use gpui::{
 
 use crate::backdrop::{Backdrop, ImmersiveColors};
 use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
-use crate::{EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
+use crate::{ControlColors, EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
 /// The add-to-playlist flyout's box. The row height is the measured height of one choice, used
@@ -3229,7 +3229,7 @@ fn lyric_row(text: SharedString, color: Hsla, height: f32, large: bool) -> Div {
         .overflow_hidden()
         .text_ellipsis()
         .whitespace_nowrap()
-        .map(|el| if large { el.text_xl() } else { el.text_sm() })
+        .map(|el| if large { el.text_xl().text_center() } else { el.text_sm() })
         .line_height(px(height))
         .text_color(color)
         .child(text)
@@ -3454,24 +3454,27 @@ pub(crate) fn lyric_opacity(distance: f32, reach: f32) -> f32 {
 }
 
 const IMMERSIVE_MARGIN: f32 = 48.0;
-const ICON_BUTTON_EDGE: f32 = 32.0;
-/// The caption under the cover: the gap, then the title (text_2xl, 32px line) and artist
-/// (text_lg, 28px line) with gap_1 between. The lyrics column pads its bottom by this much so
-/// its centered panel lands on the cover's center rather than the block's — see
-/// [`immersive_view`].
-const IMMERSIVE_CAPTION_HEIGHT: f32 = IMMERSIVE_CAPTION_GAP + 32.0 + 4.0 + 28.0;
-const IMMERSIVE_CAPTION_GAP: f32 = 24.0;
+/// Both halves stack a cover-high box, a gap and a caption-high block, centered; so the
+/// right's lyrics box centers on the cover and its controls block tops out with the title.
+/// The caption block is the title's 32px text_2xl line, gap_1, the artist's 28px text_lg line;
+/// the controls block is the seek row, gap_1, the transport row, the same 64.
+const IMMERSIVE_CAPTION_HEIGHT: f32 = IMMERSIVE_GAP + IMMERSIVE_CAPTION_BLOCK;
+const IMMERSIVE_CAPTION_BLOCK: f32 = 32.0 + 4.0 + 28.0;
+const IMMERSIVE_GAP: f32 = 24.0;
+const IMMERSIVE_SEEK_ROW: f32 = 24.0;
+const IMMERSIVE_TRANSPORT_ROW: f32 = IMMERSIVE_CAPTION_BLOCK - 4.0 - IMMERSIVE_SEEK_ROW;
 const IMMERSIVE_COVER_SCALE: f32 = 0.75;
 const IMMERSIVE_COVER_MAX: f32 = 480.0;
-/// The lyric window fills up to this share of the body height, centered on the cover.
+/// The lyric window fills up to this share of the body height, and never more than the cover.
 const IMMERSIVE_LYRICS_SHARE: f32 = 0.5;
 const IMMERSIVE_LYRIC_ROW: f32 = 40.0;
 
 /// The immersive view: the cover with the track's title and artist under it, that whole block
-/// centered in the left half; the synced lyrics in a half-height panel on the right, centered
-/// on the cover (not the block, which would read as off-center against the caption); and the
-/// toggle as the only control. Everything else — sidebar, navigation, search, playback bar —
-/// is gone until it is toggled off. Every color comes from `backdrop`, derived from the cover
+/// centered in the left half; on the right the synced lyrics, centered on the cover, with the
+/// seek bar and transport under them level with the caption; and top right, in the search
+/// bar's slots, the toggle, the queue (where the theme picker sits otherwise) and settings.
+/// Everything else — sidebar, navigation, search, playback bar — is gone until it is toggled
+/// off. Lyric lines are centered so each shares its axis with the seek bar and play button. Every color comes from `backdrop`, derived from the cover
 /// (see [`crate::backdrop`]); the backdrop's picture and window fill are the root's, so they
 /// reach under the titlebar too.
 pub fn immersive_view(
@@ -3482,6 +3485,13 @@ pub fn immersive_view(
 ) -> impl IntoElement {
     let colors = backdrop.colors;
     let (fg, muted) = (colors.text, colors.text_muted);
+    let controls = ControlColors {
+        fg,
+        muted,
+        accent: colors.accent,
+        hover: colors.wash,
+        track: colors.wash,
+    };
     let playback = &app.state.playback;
     let has_track = playback.playing_track_id.is_some();
     let title: SharedString = if playback.playing_track_title.is_empty() {
@@ -3493,7 +3503,10 @@ pub fn immersive_view(
     let viewport = window.viewport_size();
     let body_height = f32::from(viewport.height) - TITLEBAR_HEIGHT;
     let edge = immersive_cover_edge(f32::from(viewport.width), body_height);
-    let rows = lyric_window_rows(body_height * IMMERSIVE_LYRICS_SHARE, IMMERSIVE_LYRIC_ROW);
+    let rows = lyric_window_rows(
+        edge.min(body_height * IMMERSIVE_LYRICS_SHARE),
+        IMMERSIVE_LYRIC_ROW,
+    );
     let cover = playback
         .playing_track_image
         .as_ref()
@@ -3544,7 +3557,7 @@ pub fn immersive_view(
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(px(IMMERSIVE_CAPTION_GAP))
+                .gap(px(IMMERSIVE_GAP))
                 .child(cover)
                 .child(
                     div()
@@ -3581,22 +3594,60 @@ pub fn immersive_view(
                 .w(relative(0.5))
                 .h_full()
                 .pr(px(IMMERSIVE_MARGIN))
-                // Centering inside a box shortened by the caption puts the panel's midpoint half
-                // a caption above the window's, exactly where the cover's midpoint is.
-                .pb(px(IMMERSIVE_CAPTION_HEIGHT))
                 .flex()
                 .flex_col()
                 .justify_center()
-                .child(lyrics),
+                .gap(px(IMMERSIVE_GAP))
+                .child(
+                    div()
+                        .h(px(edge))
+                        .flex()
+                        .flex_col()
+                        .justify_center()
+                        .child(lyrics),
+                )
+                .child(
+                    div()
+                        .h(px(IMMERSIVE_CAPTION_BLOCK))
+                        .px_4()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(app.seek_bar(controls, cx).h(px(IMMERSIVE_SEEK_ROW)))
+                        .child(
+                            app.transport_controls(controls, cx)
+                                .h(px(IMMERSIVE_TRANSPORT_ROW))
+                                .justify_center(),
+                        ),
+                ),
         )
-        // The exact pixels the search bar gives it (pr_4 plus the themes and settings buttons
-        // to its right), so toggling never moves the button out from under the pointer.
+        // The exact pixels the search bar gives its three buttons (pr_4 from the edge), so the
+        // toggle and settings never move out from under the pointer. The queue takes the theme
+        // picker's slot; opening it leaves the view.
         .child(
             div()
                 .absolute()
                 .top_2()
-                .right(px(16.0 + 2.0 * ICON_BUTTON_EDGE))
-                .child(immersive_button(colors.accent, colors.wash, cx)),
+                .right(px(16.0))
+                .flex()
+                .flex_row()
+                .child(immersive_button(colors.accent, colors.wash, cx))
+                .child(crate::icon_button(
+                    "queue",
+                    "icons/playlist.svg",
+                    muted,
+                    colors.wash,
+                    cx,
+                    |this, cx| this.toggle_queue(cx),
+                ))
+                .child(crate::icon_button(
+                    "settings",
+                    "icons/settings.svg",
+                    muted,
+                    colors.wash,
+                    cx,
+                    |this, cx| this.toggle_settings(cx),
+                )),
         )
 }
 
