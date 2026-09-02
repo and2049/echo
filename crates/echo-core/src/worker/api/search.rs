@@ -106,7 +106,6 @@ impl SpotifyWorker {
                 .map(|a| crate::models::Artist {
                     id: a.id.id().to_string(),
                     name: a.name,
-                    followers: 0,
                     image_url: a.images.first().map(|i| i.url.clone()),
                 })
                 .collect();

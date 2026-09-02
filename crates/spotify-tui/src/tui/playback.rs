@@ -212,7 +212,7 @@ pub fn render_playback_bar(frame: &mut Frame, state: &mut AppState, area: Rect) 
         let total_width = playback_chunks[0].width;
         let center_x = main_layout[1].x;
 
-        let mut format_lyric = |line: &str, style: ratatui::style::Style| -> Line {
+        let format_lyric = |line: &str, style: ratatui::style::Style| -> Line {
             let stabilized = stabilize_terminal_emoji_width(line);
             let line_width = unicode_width::UnicodeWidthStr::width(stabilized.as_str()) as u16;
 

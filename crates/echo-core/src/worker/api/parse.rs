@@ -155,11 +155,6 @@ pub(crate) fn artist(artist: &serde_json::Value) -> Option<Artist> {
     Some(Artist {
         id: artist.get("id")?.as_str()?.to_string(),
         name: artist.get("name")?.as_str()?.to_string(),
-        followers: artist
-            .get("followers")
-            .and_then(|v| v.get("total"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or_default() as u32,
         image_url: artist
             .get("images")
             .and_then(|v| v.as_array())

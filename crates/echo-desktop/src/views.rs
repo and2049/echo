@@ -2505,8 +2505,6 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                                     true,
                                                     muted,
                                                 );
-                                                // No followers column: the count is gone from the
-                                                // dev-mode API, so it would always read 0.
                                                 row.child(thumb).child(
                                                     div()
                                                         .flex_grow(1.0)
