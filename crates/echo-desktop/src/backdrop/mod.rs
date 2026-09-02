@@ -15,7 +15,7 @@
 //!    `mod.rs` holds that `paint`. Modes clamp their colors to [`Tone::shape_luminance`] and
 //!    settle their bottom toward the base so the lyrics stay readable.
 //!
-//! Motion costs nothing per frame: a [`Backdrop`] is [`KEYFRAMES`] pictures painted once around
+//! Motion costs nothing per frame: a [`Backdrop`] is [`keyframes`] pictures painted once around
 //! the loop and uploaded once, and each frame paints the two nearest with the second at a
 //! crossfade opacity. Modes paint soft, slow fields, so the crossfade reads as motion.
 //! [`BackdropCache`] keeps the last result and the clock. A change of cover, theme fallback or
@@ -129,8 +129,16 @@ impl ImmersiveColors {
 
 /// Replicated edge texels around the picture; see [`raster::Raster::into_render_image`].
 const BLEED_GUARD: usize = 2;
-/// Pictures painted around one loop of the motion.
+/// Pictures painted around one loop of the motion. Soft modes crossfade cleanly at 64; the
+/// nebula's sharp streaks step between pictures that far apart, so it gets twice as many.
 const KEYFRAMES: usize = 64;
+
+fn keyframes(mode: BackdropMode) -> usize {
+    match mode {
+        BackdropMode::Nebula => 2 * KEYFRAMES,
+        _ => KEYFRAMES,
+    }
+}
 /// One trip around the loop.
 pub const LOOP: Duration = Duration::from_secs(30);
 /// How often the view repaints while the backdrop moves: 20 frames a second is plenty for a
@@ -189,14 +197,15 @@ pub struct Built {
 
 impl Build {
     fn keyframe(&self, k: usize) -> Arc<RenderImage> {
-        let phase = k as f32 / KEYFRAMES as f32;
+        let phase = k as f32 / keyframes(self.mode) as f32;
         painter(self.mode)(&self.palette, self.colors.base, self.colors.tone, phase).into_render_image(BLEED_GUARD)
     }
 
     pub fn run(self) -> Built {
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(KEYFRAMES);
-        let per_thread = KEYFRAMES.div_ceil(threads);
-        let mut frames: Vec<Option<Arc<RenderImage>>> = vec![None; KEYFRAMES];
+        let count = keyframes(self.mode);
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(count);
+        let per_thread = count.div_ceil(threads);
+        let mut frames: Vec<Option<Arc<RenderImage>>> = vec![None; count];
         std::thread::scope(|scope| {
             for (chunk_ix, chunk) in frames.chunks_mut(per_thread).enumerate() {
                 let build = &self;
@@ -402,10 +411,10 @@ mod tests {
                 let palette = palette.clone().with_variety();
                 let colors = ImmersiveColors::derive(&palette);
                 let paint = |phase| painter(mode)(&palette, colors.base, colors.tone, phase);
-                let (start, end, half) = (paint(0.0), paint(1.0), paint(0.5));
+                let (start, end, later) = (paint(0.0), paint(1.0), paint(0.3));
                 let seam = start.pixels().iter().zip(end.pixels()).map(|(a, b)| (a.luminance() - b.luminance()).abs());
                 assert!(seam.fold(0.0f32, f32::max) < 1e-3, "{mode:?} seams");
-                let motion = start.pixels().iter().zip(half.pixels()).map(|(a, b)| (a.luminance() - b.luminance()).abs());
+                let motion = start.pixels().iter().zip(later.pixels()).map(|(a, b)| (a.luminance() - b.luminance()).abs());
                 assert!(motion.fold(0.0f32, f32::max) > 0.02, "{mode:?} is still");
                 let (lo, hi) = colors.tone.shape_luminance();
                 let base = colors.base.luminance();
@@ -481,13 +490,19 @@ mod tests {
         assert!(Arc::ptr_eq(&third, &cache.get(BackdropMode::Mesh, Some(&b), &theme)));
         cache.install(current.run());
         let installed = cache.get(BackdropMode::Mesh, Some(&b), &theme);
-        assert!(!Arc::ptr_eq(&third, &installed) && installed.frames.len() == KEYFRAMES);
+        assert!(!Arc::ptr_eq(&third, &installed) && installed.frames.len() == keyframes(BackdropMode::Mesh));
         released = 0;
         cache.release(|_| released += 1);
         assert_eq!(released, KEYFRAMES + 2);
         assert!(!Arc::ptr_eq(&second, &installed));
         let fallback = cache.get(BackdropMode::Mesh, None, &theme);
         assert!(Arc::ptr_eq(&fallback, &cache.get(BackdropMode::Mesh, None, &theme)));
+    }
+
+    #[test]
+    fn the_nebula_gets_more_keyframes_than_the_soft_modes() {
+        assert!(keyframes(BackdropMode::Nebula) >= keyframes(BackdropMode::Lights) * 3 / 2);
+        assert!(BackdropMode::ALL.iter().all(|mode| keyframes(*mode) >= KEYFRAMES));
     }
 
     #[test]

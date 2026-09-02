@@ -1,5 +1,5 @@
 //! The vinyl backdrop: the palette laid around the middle of the canvas as a conic gradient
-//! that turns once per loop, like a record on its platter, over faint grooves that crawl
+//! that turns [`TURNS`] times per loop, like a record on its platter, over faint grooves that crawl
 //! outward and a plain label at the hub. Sectors blend on a smooth ramp.
 
 use std::f32::consts::TAU;
@@ -12,6 +12,8 @@ const SIZE: (usize, usize) = (256, 160);
 const ASPECT: f32 = 1.6;
 /// The palette goes around the hub this many times, so its lighter tints past the end join in.
 const LAPS: usize = 2;
+/// Revolutions per loop; whole numbers keep the loop seamless.
+const TURNS: f32 = 2.0;
 /// Groove rings from the hub to the far corner, and how far each dips toward the base.
 const GROOVES: f32 = 9.0;
 const GROOVE_DEPTH: f32 = 0.3;
@@ -28,12 +30,12 @@ pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raste
     let mut raster = Raster::new(SIZE.0, SIZE.1, base);
     raster.map(|x, y, _| {
         let (dx, dy) = ((x - 0.5) * ASPECT, y - 0.5);
-        let along = (dy.atan2(dx) / TAU + phase).rem_euclid(1.0) * sectors as f32;
+        let along = (dy.atan2(dx) / TAU + TURNS * phase).rem_euclid(1.0) * sectors as f32;
         let ix = along as usize % sectors;
         let f = along.fract();
         let color = colors[ix].mix(colors[(ix + 1) % sectors], f * f * (3.0 - 2.0 * f));
         let r = (dx * dx + dy * dy).sqrt();
-        let groove = 0.5 + 0.5 * (TAU * (r * GROOVES - phase)).cos();
+        let groove = 0.5 + 0.5 * (TAU * (r * GROOVES - TURNS * phase)).cos();
         let hub = 1.0 - ((r - HUB) / HUB_RIM).clamp(0.0, 1.0);
         color.mix(base, GROOVE_DEPTH * groove).mix(base, hub)
     });
@@ -64,7 +66,7 @@ mod tests {
             let raster = paint(&two_tone(), base, Tone::Dark, phase);
             raster.get(SIZE.0 * 3 / 4, SIZE.1 / 4)
         };
-        let (start, quarter) = (sample(0.0), sample(0.25));
+        let (start, quarter) = (sample(0.0), sample(0.125));
         assert!((start.r - quarter.r).abs() > 0.05 || (start.b - quarter.b).abs() > 0.05);
     }
 }
