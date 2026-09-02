@@ -3398,25 +3398,34 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
-/// The backdrop's picture over the whole window, under everything else. Painted straight
-/// from the texture as a fill (its guard border just outside the window) rather than through
-/// `img`, which takes the texture's aspect ratio as the box's and would paint a square.
+/// The backdrop's picture over the whole window, under everything else: the keyframe before
+/// `phase` with the one after it crossfaded on top. Painted straight from the texture as a fill
+/// (its guard border just outside the window) rather than through `img`, which takes the
+/// texture's aspect ratio as the box's and would paint a square.
 pub fn backdrop_layer(
     backdrop: std::sync::Arc<Backdrop>,
+    phase: f32,
     corners: Option<gpui::Tiling>,
 ) -> impl IntoElement {
     let radii = client_corner_radii(corners, ClientCorners::All);
-    canvas(
-        |_, _, _| (),
-        move |bounds, _, window, _| {
-            let image_bounds = backdrop.image_bounds(bounds);
-            window
-                .paint_image(bounds, image_bounds, radii, backdrop.image.clone(), 0, false)
-                .ok();
-        },
-    )
-    .absolute()
-    .inset_0()
+    let (first, second, blend) = backdrop.frame(phase);
+    let layer = |image: std::sync::Arc<gpui::RenderImage>| {
+        let backdrop = backdrop.clone();
+        canvas(
+            |_, _, _| (),
+            move |bounds, _, window, _| {
+                let image_bounds = backdrop.image_bounds(bounds);
+                window.paint_image(bounds, image_bounds, radii, image, 0, false).ok();
+            },
+        )
+        .absolute()
+        .inset_0()
+    };
+    div()
+        .absolute()
+        .inset_0()
+        .child(layer(first))
+        .when(blend > 0.0, |el| el.child(div().absolute().inset_0().opacity(blend).child(layer(second))))
 }
 
 /// The immersive toggle. Callers pick its colors: the search bar paints it muted in the theme,

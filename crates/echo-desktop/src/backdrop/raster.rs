@@ -31,8 +31,8 @@ impl Raster {
     }
 
     /// A filled disc centered at (`cx`, `cy`) — fractions of the width and height — with radius
-    /// `r` as a fraction of the width, its edge softened over one pixel.
-    pub fn disc(&mut self, cx: f32, cy: f32, r: f32, color: Rgb) {
+    /// `r` as a fraction of the width, its edge softened over one pixel, blended in at `opacity`.
+    pub fn disc(&mut self, cx: f32, cy: f32, r: f32, color: Rgb, opacity: f32) {
         let (cx, cy, r) = (cx * self.width as f32, cy * self.height as f32, r * self.width as f32);
         for y in 0..self.height {
             for x in 0..self.width {
@@ -40,7 +40,7 @@ impl Raster {
                 let coverage = (r + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
                 if coverage > 0.0 {
                     let ix = y * self.width + x;
-                    self.pixels[ix] = self.pixels[ix].mix(color, coverage);
+                    self.pixels[ix] = self.pixels[ix].mix(color, coverage * opacity);
                 }
             }
         }
@@ -129,16 +129,25 @@ mod tests {
     #[test]
     fn disc_paints_inside_and_leaves_outside() {
         let mut raster = Raster::new(20, 20, Rgb::BLACK);
-        raster.disc(0.5, 0.5, 0.25, Rgb::WHITE);
+        raster.disc(0.5, 0.5, 0.25, Rgb::WHITE, 1.0);
         assert_eq!(raster.get(10, 10), Rgb::WHITE);
         assert_eq!(raster.get(0, 0), Rgb::BLACK);
         assert_eq!(raster.get(19, 10), Rgb::BLACK);
     }
 
     #[test]
+    fn disc_opacity_scales_the_blend() {
+        let mut raster = Raster::new(20, 20, Rgb::BLACK);
+        raster.disc(0.5, 0.5, 0.25, Rgb::WHITE, 0.5);
+        assert_eq!(raster.get(10, 10), Rgb::new(0.5, 0.5, 0.5));
+        raster.disc(0.5, 0.5, 0.25, Rgb::BLACK, 0.0);
+        assert_eq!(raster.get(10, 10), Rgb::new(0.5, 0.5, 0.5));
+    }
+
+    #[test]
     fn blur_keeps_the_mean_and_flattens() {
         let mut raster = Raster::new(24, 24, Rgb::BLACK);
-        raster.disc(0.5, 0.5, 0.2, Rgb::WHITE);
+        raster.disc(0.5, 0.5, 0.2, Rgb::WHITE, 1.0);
         let before = mean(&raster);
         let peak_before = raster.get(12, 12).luminance();
         raster.blur(3);

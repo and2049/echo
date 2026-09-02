@@ -8,18 +8,24 @@
 //!    derived from the palette by fixed formulas so text is always readable on the base. A
 //!    light cover flips the whole set to a light [`Tone`]: pale base, dark text.
 //! 3. [`BackdropMode`] — the picture behind everything, painted from the palette onto a
-//!    [`raster::Raster`] and uploaded once as a texture. One mode today; a new one is a variant
+//!    [`raster::Raster`] as a function of a loop phase. One mode today; a new one is a variant
 //!    here, a `paint` function in its own file, and nothing else — the view, the cache and the
 //!    color roles do not change.
 //!
-//! [`BackdropCache`] keeps the last result: a backdrop is rebuilt only when the cover, the
-//! theme fallback or the mode changes, never per frame.
+//! Motion costs nothing per frame: a [`Backdrop`] is [`KEYFRAMES`] pictures painted once around
+//! the loop and uploaded once, and each frame paints the two nearest with the second at a
+//! crossfade opacity. The clouds are blurred far wider than they move between keyframes, so the
+//! crossfade reads as motion. [`BackdropCache`] keeps the last result and the clock: a backdrop
+//! is rebuilt only when the cover, the theme fallback or the mode changes, and the textures a
+//! rebuild replaces are handed back through [`BackdropCache::release`], because gpui's atlas
+//! never evicts on its own.
 
 pub mod blurred_shapes;
 mod palette;
 mod raster;
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use echo_core::artwork::SharedArtwork;
 use echo_core::theme::ResolvedTheme;
@@ -38,9 +44,9 @@ pub enum BackdropMode {
 }
 
 impl BackdropMode {
-    fn paint(self, palette: &CoverPalette, colors: &ImmersiveColors) -> raster::Raster {
+    fn paint(self, palette: &CoverPalette, colors: &ImmersiveColors, phase: f32) -> raster::Raster {
         match self {
-            Self::BlurredShapes => blurred_shapes::paint(palette, colors.base, colors.tone),
+            Self::BlurredShapes => blurred_shapes::paint(palette, colors.base, colors.tone, phase),
         }
     }
 }
@@ -105,24 +111,42 @@ impl ImmersiveColors {
 
 /// Replicated edge texels around the picture; see [`raster::Raster::into_render_image`].
 const BLEED_GUARD: usize = 2;
+/// Pictures painted around one loop of the motion.
+const KEYFRAMES: usize = 64;
+/// One trip around the loop.
+pub const LOOP: Duration = Duration::from_secs(30);
+/// How often the view repaints while the backdrop moves: 20 frames a second is plenty for a
+/// drift this slow and blurred, and every frame re-renders the whole window.
+pub const FRAME: Duration = Duration::from_millis(50);
 
 pub struct Backdrop {
     pub colors: ImmersiveColors,
-    /// The picture plus its guard border: paint it at [`Backdrop::image_bounds`].
-    pub image: Arc<RenderImage>,
+    /// The pictures plus their guard borders, one per keyframe: paint them at
+    /// [`Backdrop::image_bounds`].
+    frames: Vec<Arc<RenderImage>>,
 }
 
 impl Backdrop {
     fn build(mode: BackdropMode, palette: &CoverPalette) -> Self {
         let colors = ImmersiveColors::derive(palette);
-        let image = mode.paint(palette, &colors).into_render_image(BLEED_GUARD);
-        Self { colors, image }
+        let frames = (0..KEYFRAMES)
+            .map(|k| mode.paint(palette, &colors, k as f32 / KEYFRAMES as f32).into_render_image(BLEED_GUARD))
+            .collect();
+        Self { colors, frames }
     }
 
-    /// Where to paint the whole texture so that its picture, minus the guard, exactly fills
+    /// The two keyframes around `phase` (in `0..1`) and how far the picture is from the first
+    /// toward the second: paint the first, then the second at that opacity.
+    pub fn frame(&self, phase: f32) -> (Arc<RenderImage>, Arc<RenderImage>, f32) {
+        let at = phase.rem_euclid(1.0) * KEYFRAMES as f32;
+        let ix = at as usize % KEYFRAMES;
+        (self.frames[ix].clone(), self.frames[(ix + 1) % KEYFRAMES].clone(), at - at.floor())
+    }
+
+    /// Where to paint a whole texture so that its picture, minus the guard, exactly fills
     /// `bounds`: each guard texel lands one stretched texel outside.
     pub fn image_bounds(&self, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-        let texels = self.image.size(0);
+        let texels = self.frames[0].size(0);
         let guard = BLEED_GUARD as f32;
         let picture_w = u32::from(texels.width) as f32 - 2.0 * guard;
         let picture_h = u32::from(texels.height) as f32 - 2.0 * guard;
@@ -134,10 +158,22 @@ impl Backdrop {
     }
 }
 
-/// The last backdrop and what it was built from.
-#[derive(Default)]
+/// The last backdrop, what it was built from, the loop clock, and the textures replaced
+/// backdrops left in the atlas.
 pub struct BackdropCache {
     last: Option<(BackdropMode, Source, Arc<Backdrop>)>,
+    started: Instant,
+    retired: Vec<Arc<RenderImage>>,
+}
+
+impl Default for BackdropCache {
+    fn default() -> Self {
+        Self {
+            last: None,
+            started: Instant::now(),
+            retired: Vec::new(),
+        }
+    }
 }
 
 enum Source {
@@ -181,10 +217,24 @@ impl BackdropCache {
             }
             _ => {
                 let backdrop = Arc::new(Backdrop::build(mode, &source.palette()));
-                self.last = Some((mode, source, backdrop.clone()));
+                if let Some((_, _, old)) = self.last.replace((mode, source, backdrop.clone())) {
+                    self.retired.extend(old.frames.iter().cloned());
+                }
                 backdrop
             }
         }
+    }
+
+    /// Where the loop is right now, in `0..1`; the clock runs from the cache's creation so
+    /// toggling the view never restarts the motion.
+    pub fn phase(&self) -> f32 {
+        (self.started.elapsed().as_secs_f32() / LOOP.as_secs_f32()).fract()
+    }
+
+    /// Hands every texture a rebuild has replaced to `drop`, which should remove it from the
+    /// window's atlas.
+    pub fn release(&mut self, drop: impl FnMut(Arc<RenderImage>)) {
+        self.retired.drain(..).for_each(drop);
     }
 }
 
@@ -222,6 +272,10 @@ mod tests {
         rgb(color).luminance()
     }
 
+    fn white_backdrop() -> Backdrop {
+        Backdrop::build(BackdropMode::BlurredShapes, &CoverPalette::from_colors(vec![Rgb::WHITE]))
+    }
+
     #[test]
     fn roles_keep_text_readable_on_the_base() {
         for primary in [Rgb::WHITE, Rgb::BLACK, Rgb::from_u8(30, 60, 230), Rgb::from_u8(250, 240, 200)] {
@@ -244,13 +298,29 @@ mod tests {
 
     #[test]
     fn image_bounds_put_the_guard_just_outside() {
-        let backdrop = Backdrop::build(BackdropMode::BlurredShapes, &CoverPalette::from_colors(vec![Rgb::WHITE]));
-        let texels = u32::from(backdrop.image.size(0).width) as f32;
+        let backdrop = white_backdrop();
+        let texels = u32::from(backdrop.frames[0].size(0).width) as f32;
         let picture = texels - 2.0 * BLEED_GUARD as f32;
         let bounds = Bounds { origin: point(gpui::px(10.0), gpui::px(20.0)), size: size(gpui::px(picture * 10.0), gpui::px(picture * 5.0)) };
         let image = backdrop.image_bounds(bounds);
         assert_eq!(image.origin, point(gpui::px(10.0 - 20.0), gpui::px(20.0 - 10.0)));
         assert_eq!(image.size, size(gpui::px(texels * 10.0), gpui::px(texels * 5.0)));
+    }
+
+    #[test]
+    fn frames_crossfade_neighbours_and_wrap() {
+        let backdrop = white_backdrop();
+        assert_eq!(backdrop.frames.len(), KEYFRAMES);
+        let (a, b, t) = backdrop.frame(0.0);
+        assert!(Arc::ptr_eq(&a, &backdrop.frames[0]) && Arc::ptr_eq(&b, &backdrop.frames[1]) && t == 0.0);
+        let (a, b, t) = backdrop.frame(1.5 / KEYFRAMES as f32);
+        assert!(Arc::ptr_eq(&a, &backdrop.frames[1]) && Arc::ptr_eq(&b, &backdrop.frames[2]));
+        assert!((t - 0.5).abs() < 1e-4);
+        let (a, b, t) = backdrop.frame(0.999);
+        assert!(Arc::ptr_eq(&a, &backdrop.frames[KEYFRAMES - 1]) && Arc::ptr_eq(&b, &backdrop.frames[0]));
+        assert!(t > 0.9);
+        let (a, _, _) = backdrop.frame(1.0);
+        assert!(Arc::ptr_eq(&a, &backdrop.frames[0]));
     }
 
     #[test]
@@ -261,10 +331,21 @@ mod tests {
         let mut cache = BackdropCache::default();
         let first = cache.get(BackdropMode::BlurredShapes, Some(&a), &theme);
         assert!(Arc::ptr_eq(&first, &cache.get(BackdropMode::BlurredShapes, Some(&a), &theme)));
+        let mut released = 0;
+        cache.release(|_| released += 1);
+        assert_eq!(released, 0);
         let second = cache.get(BackdropMode::BlurredShapes, Some(&b), &theme);
         assert!(!Arc::ptr_eq(&first, &second));
+        cache.release(|_| released += 1);
+        assert_eq!(released, KEYFRAMES);
         let fallback = cache.get(BackdropMode::BlurredShapes, None, &theme);
         assert!(Arc::ptr_eq(&fallback, &cache.get(BackdropMode::BlurredShapes, None, &theme)));
         assert!(!Arc::ptr_eq(&fallback, &second));
+    }
+
+    #[test]
+    fn the_clock_wraps_within_the_loop() {
+        let phase = BackdropCache::default().phase();
+        assert!((0.0..1.0).contains(&phase));
     }
 }
