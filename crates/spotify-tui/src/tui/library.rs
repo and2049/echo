@@ -510,61 +510,6 @@ fn render_library_thumbnails(
     }
 }
 
-#[cfg(test)]
-mod thumb_tests {
-    use super::thumb_first_visible;
-
-    fn visible_height(first: usize, selected: usize, heights: &[u16]) -> u16 {
-        heights[first..=selected].iter().sum()
-    }
-
-    #[test]
-    fn selection_is_always_fully_visible() {
-        let uniform = vec![3u16; 50];
-        let mixed: Vec<u16> = (0..50).map(|i| if i % 4 == 0 { 1 } else { 3 }).collect();
-        for heights in [&uniform, &mixed] {
-            for viewport in [3u16, 7, 20] {
-                for selected in [0usize, 1, 10, 49, 60] {
-                    let first = thumb_first_visible(selected, heights, viewport);
-                    let clamped = selected.min(heights.len() - 1);
-                    assert!(first <= clamped);
-                    assert!(visible_height(first, clamped, heights) <= viewport);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn empty_list_starts_at_zero() {
-        assert_eq!(thumb_first_visible(0, &[], 5), 0);
-    }
-
-    #[test]
-    fn short_list_starts_at_top() {
-        assert_eq!(thumb_first_visible(2, &[3, 3, 3], 24), 0);
-    }
-
-    #[test]
-    fn selection_is_last_visible_once_past_first_page() {
-        // 15 rows of height 3, viewport 9 -> rows 8..=10 visible.
-        assert_eq!(thumb_first_visible(10, &[3u16; 15], 9), 8);
-    }
-
-    #[test]
-    fn single_line_folders_let_more_rows_fit() {
-        // folder(1) + three playlists(3) = 10 cells: all fit in a 10-tall
-        // viewport, whereas uniform 3-tall rows would not.
-        let heights = [1u16, 3, 3, 3];
-        assert_eq!(thumb_first_visible(3, &heights, 10), 0);
-        assert_eq!(thumb_first_visible(3, &[3u16, 3, 3, 3], 10), 1);
-    }
-
-    #[test]
-    fn oversized_selected_row_renders_clipped() {
-        assert_eq!(thumb_first_visible(2, &[3u16, 3, 3], 2), 2);
-    }
-}
-
 fn draw_thumb_placeholder(buf: &mut Buffer, area: Rect, style: Style, symbol: &str) {
     if area.width < 2 || area.height == 0 {
         return;
@@ -612,7 +557,7 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
         .data
         .active_tracklist_context
         .as_ref()
-        .map_or(false, |context| context.id == "LIKED_SONGS");
+        .is_some_and(|context| context.id == "LIKED_SONGS");
 
     let track_rows: Vec<Row> = state
         .data
@@ -938,5 +883,60 @@ pub fn render_track_list(frame: &mut Frame, state: &mut AppState, tracks_area: R
                 gradient_area,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod thumb_tests {
+    use super::thumb_first_visible;
+
+    fn visible_height(first: usize, selected: usize, heights: &[u16]) -> u16 {
+        heights[first..=selected].iter().sum()
+    }
+
+    #[test]
+    fn selection_is_always_fully_visible() {
+        let uniform = vec![3u16; 50];
+        let mixed: Vec<u16> = (0..50).map(|i| if i % 4 == 0 { 1 } else { 3 }).collect();
+        for heights in [&uniform, &mixed] {
+            for viewport in [3u16, 7, 20] {
+                for selected in [0usize, 1, 10, 49, 60] {
+                    let first = thumb_first_visible(selected, heights, viewport);
+                    let clamped = selected.min(heights.len() - 1);
+                    assert!(first <= clamped);
+                    assert!(visible_height(first, clamped, heights) <= viewport);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_list_starts_at_zero() {
+        assert_eq!(thumb_first_visible(0, &[], 5), 0);
+    }
+
+    #[test]
+    fn short_list_starts_at_top() {
+        assert_eq!(thumb_first_visible(2, &[3, 3, 3], 24), 0);
+    }
+
+    #[test]
+    fn selection_is_last_visible_once_past_first_page() {
+        // 15 rows of height 3, viewport 9 -> rows 8..=10 visible.
+        assert_eq!(thumb_first_visible(10, &[3u16; 15], 9), 8);
+    }
+
+    #[test]
+    fn single_line_folders_let_more_rows_fit() {
+        // folder(1) + three playlists(3) = 10 cells: all fit in a 10-tall
+        // viewport, whereas uniform 3-tall rows would not.
+        let heights = [1u16, 3, 3, 3];
+        assert_eq!(thumb_first_visible(3, &heights, 10), 0);
+        assert_eq!(thumb_first_visible(3, &[3u16, 3, 3, 3], 10), 1);
+    }
+
+    #[test]
+    fn oversized_selected_row_renders_clipped() {
+        assert_eq!(thumb_first_visible(2, &[3u16, 3, 3], 2), 2);
     }
 }

@@ -467,6 +467,12 @@ pub struct AppState {
     pub data: DataState,
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppState {
     pub fn new() -> Self {
         let config = crate::config::AppConfig::load();
@@ -507,10 +513,9 @@ impl AppState {
                 active_theme_config,
                 config.library.clone(),
             ),
-            playback: {
-                let mut pb = PlaybackState::default();
-                pb.volume = config.library.volume;
-                pb
+            playback: PlaybackState {
+                volume: config.library.volume,
+                ..Default::default()
             },
             data: DataState::new(),
         }
@@ -1111,7 +1116,7 @@ mod tests {
         let effective = state.playback.display_progress_ms();
         // 10000 + ~3000ms = ~13000, allow 120ms tolerance
         assert!(
-            effective >= 12940 && effective <= 13060,
+            (12940..=13060).contains(&effective),
             "expected ~13000, got {effective}"
         );
     }
@@ -1151,17 +1156,21 @@ mod tests {
 
     #[test]
     fn seek_target_clamps_relative_offsets() {
-        let mut playback = PlaybackState::default();
-        playback.duration_ms = 60_000;
-        playback.progress_ms = 2_000;
+        let playback = PlaybackState {
+            duration_ms: 60_000,
+            progress_ms: 2_000,
+            ..Default::default()
+        };
         assert_eq!(playback.seek_target(-5), 0);
         assert_eq!(playback.seek_target(90), 60_000);
     }
 
     #[test]
     fn mute_restores_previous_volume() {
-        let mut playback = PlaybackState::default();
-        playback.volume = 37;
+        let mut playback = PlaybackState {
+            volume: 37,
+            ..Default::default()
+        };
         assert_eq!(playback.toggle_mute_target(), 0);
         playback.volume = 0;
         assert_eq!(playback.toggle_mute_target(), 37);

@@ -126,17 +126,14 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
         for (index, artist) in artists.into_iter().take(WHATS_NEW_MAX_ARTISTS).enumerate() {
             let done = index + 1;
             let mut from_network = false;
-            match api
+            if let Ok(response) = api
                 .artist_albums_with_policy(&artist.id, ArtistAlbumsCachePolicy::UseCache)
                 .await
             {
-                Ok(response) => {
-                    from_network = response.refreshed.is_some();
-                    if let Some(albums) = response.refreshed.or(response.cached) {
-                        merged.extend(albums);
-                    }
+                from_network = response.refreshed.is_some();
+                if let Some(albums) = response.refreshed.or(response.cached) {
+                    merged.extend(albums);
                 }
-                Err(_) => {}
             }
             if done % 3 == 0 && done < total {
                 let _ = tx

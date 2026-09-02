@@ -403,190 +403,6 @@ pub(crate) fn reorder_insert_before(from: usize, to: usize) -> usize {
     if to > from { to + 1 } else { to }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sync_snapshot_publish_gate_rejects_the_stale_pre_command_track() {
-        // Track actually changed → publish.
-        assert!(should_publish_sync_snapshot(
-            Some("old"),
-            Some("new"),
-            60_000,
-            true
-        ));
-        // Same track restarted from the top → publish only when the caller allows it.
-        assert!(should_publish_sync_snapshot(
-            Some("old"),
-            Some("old"),
-            1_000,
-            true
-        ));
-        assert!(!should_publish_sync_snapshot(
-            Some("old"),
-            Some("old"),
-            1_000,
-            false
-        ));
-        // Same track mid-song: Spotify's eventually-consistent echo → retry, never publish.
-        assert!(!should_publish_sync_snapshot(
-            Some("old"),
-            Some("old"),
-            60_000,
-            true
-        ));
-        // Nothing was playing before → the first snapshot is truth.
-        assert!(should_publish_sync_snapshot(
-            None,
-            Some("new"),
-            60_000,
-            false
-        ));
-        // No item in the snapshot → nothing to show yet.
-        assert!(!should_publish_sync_snapshot(Some("old"), None, 0, true));
-    }
-
-    #[test]
-    fn sync_retry_budget_covers_spotify_propagation() {
-        assert_eq!(sync_retry_delay(0), std::time::Duration::ZERO);
-        for attempt in 1..SYNC_RETRY_ATTEMPTS {
-            assert!(sync_retry_delay(attempt) > sync_retry_delay(attempt - 1));
-        }
-        let total: std::time::Duration = (0..SYNC_RETRY_ATTEMPTS).map(sync_retry_delay).sum();
-        // A shorter budget than Spotify's /me/player propagation window re-introduces the
-        // stale now-playing bar; keep at least ~5s of total retry sleep.
-        assert!(total >= std::time::Duration::from_secs(5));
-    }
-
-    #[test]
-    fn reorder_insert_before_maps_post_move_indices() {
-        assert_eq!(reorder_insert_before(0, 2), 3);
-        assert_eq!(reorder_insert_before(2, 0), 0);
-        assert_eq!(reorder_insert_before(3, 4), 5);
-        assert_eq!(reorder_insert_before(4, 3), 3);
-    }
-
-    #[test]
-    fn resolves_local_queue_tracks_from_library_ids() {
-        let library = crate::models::LocalLibrary {
-            tracks: vec![
-                crate::models::LocalTrack {
-                    id: "local:a".to_string(),
-                    path: PathBuf::from("/music/a.wav"),
-                    title: "A".to_string(),
-                    artist: "Artist A".to_string(),
-                    album: "Album A".to_string(),
-                    duration_ms: 1_000,
-                    artwork_path: None,
-                    file_size: 10,
-                    modified_unix_secs: 20,
-                },
-                crate::models::LocalTrack {
-                    id: "local:b".to_string(),
-                    path: PathBuf::from("/music/b.wav"),
-                    title: "B".to_string(),
-                    artist: "Artist B".to_string(),
-                    album: "Album B".to_string(),
-                    duration_ms: 2_000,
-                    artwork_path: None,
-                    file_size: 11,
-                    modified_unix_secs: 21,
-                },
-            ],
-        };
-
-        let tracks = resolve_local_queue_tracks(
-            &["local:b".to_string(), "local:missing".to_string()],
-            &library,
-        );
-
-        assert_eq!(tracks.len(), 1);
-        assert_eq!(tracks[0].id, "local:b");
-        assert_eq!(tracks[0].source, TrackSource::Local);
-        assert_eq!(
-            tracks[0].local_path.as_deref(),
-            Some(Path::new("/music/b.wav"))
-        );
-    }
-
-    #[test]
-    fn merged_search_results_keep_spotify_and_local_tracks() {
-        let spotify = crate::models::SearchResults {
-            tracks: vec![crate::models::SearchTrack {
-                id: "spotify".to_string(),
-                source: TrackSource::Spotify,
-                local_path: None,
-                name: "Spotify".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                duration_ms: 1,
-                image_url: None,
-                album_id: None,
-                artist_id: None,
-            }],
-            albums: Vec::new(),
-            artists: Vec::new(),
-            playlists: Vec::new(),
-        };
-        let local = crate::models::SearchResults {
-            tracks: vec![crate::models::SearchTrack {
-                id: "local:a".to_string(),
-                source: TrackSource::Local,
-                local_path: Some(PathBuf::from("/music/a.wav")),
-                name: "Local".to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                duration_ms: 1,
-                image_url: None,
-                album_id: None,
-                artist_id: None,
-            }],
-            albums: Vec::new(),
-            artists: Vec::new(),
-            playlists: Vec::new(),
-        };
-
-        let merged = merged_search_results(Some(spotify), local);
-
-        assert_eq!(merged.tracks.len(), 2);
-        assert_eq!(merged.tracks[1].source, TrackSource::Local);
-    }
-
-    #[test]
-    fn local_watch_filter_accepts_audio_and_folder_artwork() {
-        assert!(local_watch_path_relevant(Path::new("/music/song.FLAC")));
-        assert!(local_watch_path_relevant(Path::new(
-            "/music/Album/cover.jpg"
-        )));
-        assert!(local_watch_path_relevant(Path::new(
-            "/music/Album/FOLDER.PNG"
-        )));
-    }
-
-    #[test]
-    fn local_watch_filter_ignores_unrelated_files() {
-        assert!(!local_watch_path_relevant(Path::new("/music/notes.txt")));
-        assert!(!local_watch_path_relevant(Path::new("/music/cover.gif")));
-    }
-
-    #[test]
-    fn sync_interval_playing_is_30_seconds() {
-        assert_eq!(
-            sync_interval_duration(true),
-            std::time::Duration::from_secs(30)
-        );
-    }
-
-    #[test]
-    fn sync_interval_paused_is_5_minutes() {
-        assert_eq!(
-            sync_interval_duration(false),
-            std::time::Duration::from_secs(300)
-        );
-    }
-}
-
 fn sync_interval_duration(is_playing: bool) -> std::time::Duration {
     if is_playing {
         std::time::Duration::from_secs(30)
@@ -951,16 +767,15 @@ impl Worker {
                                                     let mut seen = 0u32;
 
                                                     while let Some(item) = stream.next().await {
-                                                        if let Ok(saved_track) = item {
-                                                            if let Some(id) = saved_track.track.id {
+                                                        if let Ok(saved_track) = item
+                                                            && let Some(id) = saved_track.track.id {
                                                                 rebuilt.insert(id.id().to_string());
                                                             }
-                                                        }
                                                         seen += 1;
                                                         // rspotify pages this 50 at a time. A large library is a lot of
                                                         // requests back to back, so pause briefly between pages; this runs
                                                         // in the background and nothing waits on it.
-                                                        if seen % 50 == 0 {
+                                                        if seen.is_multiple_of(50) {
                                                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                                         }
                                                     }
@@ -977,11 +792,10 @@ impl Worker {
                                                     let mut fetched_count = 0;
 
                                                     while let Some(item) = stream.next().await {
-                                                        if let Ok(saved_track) = item {
-                                                            if let Some(id) = saved_track.track.id {
+                                                        if let Ok(saved_track) = item
+                                                            && let Some(id) = saved_track.track.id {
                                                                 tracks.insert(id.id().to_string());
                                                             }
-                                                        }
                                                         fetched_count += 1;
                                                         if fetched_count >= 100 {
                                                             break; // One page is enough to catch recent likes between full walks.
@@ -1231,13 +1045,12 @@ impl Worker {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let now = Instant::now();
                                     let debounce_key = PlayDebounceKey::PlayTrack(track_id.clone());
-                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
-                                        if *last_key == debounce_key
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce
+                                        && *last_key == debounce_key
                                             && now.duration_since(*last_time) < PLAY_DEBOUNCE
                                         {
                                             continue;
                                         }
-                                    }
                                     self.play_debounce = Some((debounce_key, now));
 
                                     let _guard = PlayGuard::try_acquire(&self.play_in_flight);
@@ -1316,13 +1129,12 @@ impl Worker {
                                 if let Some(ref mut sp) = spotify_opt {
                                     let now = Instant::now();
                                     let debounce_key = PlayDebounceKey::PlayContext(context_id.clone());
-                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
-                                        if *last_key == debounce_key
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce
+                                        && *last_key == debounce_key
                                             && now.duration_since(*last_time) < PLAY_DEBOUNCE
                                         {
                                             continue;
                                         }
-                                    }
                                     self.play_debounce = Some((debounce_key, now));
 
                                     let _guard = PlayGuard::try_acquire(&self.play_in_flight);
@@ -1393,8 +1205,8 @@ impl Worker {
                                     }
                                 } else if let Some(ref mut sp) = spotify_opt {
                                     let now = Instant::now();
-                                    if let Some((ref last_key, ref last_time)) = self.play_debounce {
-                                        if matches!(last_key, PlayDebounceKey::TogglePlayback)
+                                    if let Some((ref last_key, ref last_time)) = self.play_debounce
+                                        && matches!(last_key, PlayDebounceKey::TogglePlayback)
                                             && now.duration_since(*last_time) < PLAY_DEBOUNCE
                                         {
                                             let _ = self.tx.send(WorkerEvent::PlaybackControlState {
@@ -1402,7 +1214,6 @@ impl Worker {
                                             }).await;
                                             continue;
                                         }
-                                    }
                                     self.play_debounce = Some((PlayDebounceKey::TogglePlayback, now));
 
                                     let _guard = if playing {
@@ -1453,15 +1264,14 @@ impl Worker {
                                     let snapshot = local_playback.set_volume(u32::from(vol));
                                     emit_local_snapshot(&self.tx, &self.media_tx, snapshot, false).await;
                                 } else {
-                                    let mixer_used = self.spotify_mixer.lock().as_ref().map_or(false, |mixer| {
+                                    let mixer_used = self.spotify_mixer.lock().as_ref().is_some_and(|mixer| {
                                         mixer.set_volume(volume::volume_to_mixer(u32::from(vol)));
                                         true
                                     });
-                                    if !mixer_used {
-                                        if let Some(ref mut sp) = spotify_opt {
+                                    if !mixer_used
+                                        && let Some(ref mut sp) = spotify_opt {
                                             let _ = sp.set_volume(vol).await;
                                         }
-                                    }
                                 }
                             }
                             AppEvent::SeekTo(progress_ms) => {
@@ -1488,7 +1298,7 @@ impl Worker {
                             }
                             AppEvent::NextTrack { current_track_id: ui_current_track_id } => {
                                 if active_playback_source == Some(ActivePlaybackSource::Local) {
-                                    match local_playback.next() {
+                                    match local_playback.next_track() {
                                         Ok(snapshot) => {
                                             is_playing.store(snapshot.is_playing, std::sync::atomic::Ordering::SeqCst);
                                             if let Some(item) = snapshot.item.as_ref() {
@@ -1689,7 +1499,7 @@ impl Worker {
                                         if !items.is_empty() {
                                             let res = sp.client.playlist_remove_all_occurrences_of_items(pid.clone(), items, None).await;
 
-                                            if let Ok(_) = res {
+                                            if res.is_ok() {
                                                 let _ = std::fs::write(crate::config::debug_log_path("echo-debug-remove-success.log"), "Remove succeeded API call");
                                                 invalidate_playlist_context_cache(&playlist_id);
                                                 if let Ok(playlists) = sp.fetch_playlists().await {
@@ -1762,8 +1572,8 @@ impl Worker {
                                         let mut created = false;
 
                                         // 1. Try standard current_user approach first
-                                        if let Ok(me) = client.current_user().await {
-                                            if client.user_playlist_create(
+                                        if let Ok(me) = client.current_user().await
+                                            && client.user_playlist_create(
                                                 me.id.clone(),
                                                 &name,
                                                 Some(false),
@@ -1772,13 +1582,12 @@ impl Worker {
                                             ).await.is_ok() {
                                                 created = true;
                                             }
-                                        }
 
                                         // 2. Workaround: If current_user failed (e.g. 429 rate limit on /me),
                                         // fetch playlists and try creating with the owner ID of existing playlists.
                                         // current_user_playlists_manual is on /me/playlists which often escapes the /me block.
-                                        if !created {
-                                            if let Ok(page) = client.current_user_playlists_manual(None, None).await {
+                                        if !created
+                                            && let Ok(page) = client.current_user_playlists_manual(None, None).await {
                                                 // Collect unique owner IDs from playlists
                                                 let mut owner_ids = std::collections::HashSet::new();
                                                 for p in &page.items {
@@ -1800,7 +1609,6 @@ impl Worker {
                                                     }
                                                 }
                                             }
-                                        }
 
                                         if created {
                                             // Refresh playlists
@@ -1888,7 +1696,7 @@ impl Worker {
                             }
                             AppEvent::SaveAlbums(album_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(|id| rspotify::model::LibraryId::Album(id))).collect();
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(rspotify::model::LibraryId::Album)).collect();
                                     if !ids.is_empty() {
                                         let _ = sp.client.library_add(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
@@ -1900,7 +1708,7 @@ impl Worker {
                             }
                             AppEvent::RemoveAlbums(album_ids) => {
                                 if let Some(ref sp) = spotify_opt {
-                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(|id| rspotify::model::LibraryId::Album(id))).collect();
+                                    let ids: Vec<_> = album_ids.iter().filter_map(|id_str| rspotify::model::AlbumId::from_id(id_str).ok().map(rspotify::model::LibraryId::Album)).collect();
                                     if !ids.is_empty() {
                                         let _ = sp.client.library_remove(ids).await;
                                         if let Ok(albums) = sp.fetch_albums().await {
@@ -1948,11 +1756,10 @@ impl Worker {
                                 }
                             }
                             AppEvent::FetchDevices => {
-                                if let Some(ref sp) = spotify_opt {
-                                    if let Ok(devices) = sp.fetch_devices().await {
+                                if let Some(ref sp) = spotify_opt
+                                    && let Ok(devices) = sp.fetch_devices().await {
                                         let _ = self.tx.send(WorkerEvent::DevicesLoaded(devices)).await;
                                     }
-                                }
                             }
                             AppEvent::TransferPlayback(device_id) => {
                                 if let Some(ref sp) = spotify_opt {
@@ -2046,5 +1853,189 @@ impl Worker {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_snapshot_publish_gate_rejects_the_stale_pre_command_track() {
+        // Track actually changed → publish.
+        assert!(should_publish_sync_snapshot(
+            Some("old"),
+            Some("new"),
+            60_000,
+            true
+        ));
+        // Same track restarted from the top → publish only when the caller allows it.
+        assert!(should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            1_000,
+            true
+        ));
+        assert!(!should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            1_000,
+            false
+        ));
+        // Same track mid-song: Spotify's eventually-consistent echo → retry, never publish.
+        assert!(!should_publish_sync_snapshot(
+            Some("old"),
+            Some("old"),
+            60_000,
+            true
+        ));
+        // Nothing was playing before → the first snapshot is truth.
+        assert!(should_publish_sync_snapshot(
+            None,
+            Some("new"),
+            60_000,
+            false
+        ));
+        // No item in the snapshot → nothing to show yet.
+        assert!(!should_publish_sync_snapshot(Some("old"), None, 0, true));
+    }
+
+    #[test]
+    fn sync_retry_budget_covers_spotify_propagation() {
+        assert_eq!(sync_retry_delay(0), std::time::Duration::ZERO);
+        for attempt in 1..SYNC_RETRY_ATTEMPTS {
+            assert!(sync_retry_delay(attempt) > sync_retry_delay(attempt - 1));
+        }
+        let total: std::time::Duration = (0..SYNC_RETRY_ATTEMPTS).map(sync_retry_delay).sum();
+        // A shorter budget than Spotify's /me/player propagation window re-introduces the
+        // stale now-playing bar; keep at least ~5s of total retry sleep.
+        assert!(total >= std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn reorder_insert_before_maps_post_move_indices() {
+        assert_eq!(reorder_insert_before(0, 2), 3);
+        assert_eq!(reorder_insert_before(2, 0), 0);
+        assert_eq!(reorder_insert_before(3, 4), 5);
+        assert_eq!(reorder_insert_before(4, 3), 3);
+    }
+
+    #[test]
+    fn resolves_local_queue_tracks_from_library_ids() {
+        let library = crate::models::LocalLibrary {
+            tracks: vec![
+                crate::models::LocalTrack {
+                    id: "local:a".to_string(),
+                    path: PathBuf::from("/music/a.wav"),
+                    title: "A".to_string(),
+                    artist: "Artist A".to_string(),
+                    album: "Album A".to_string(),
+                    duration_ms: 1_000,
+                    artwork_path: None,
+                    file_size: 10,
+                    modified_unix_secs: 20,
+                },
+                crate::models::LocalTrack {
+                    id: "local:b".to_string(),
+                    path: PathBuf::from("/music/b.wav"),
+                    title: "B".to_string(),
+                    artist: "Artist B".to_string(),
+                    album: "Album B".to_string(),
+                    duration_ms: 2_000,
+                    artwork_path: None,
+                    file_size: 11,
+                    modified_unix_secs: 21,
+                },
+            ],
+        };
+
+        let tracks = resolve_local_queue_tracks(
+            &["local:b".to_string(), "local:missing".to_string()],
+            &library,
+        );
+
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].id, "local:b");
+        assert_eq!(tracks[0].source, TrackSource::Local);
+        assert_eq!(
+            tracks[0].local_path.as_deref(),
+            Some(Path::new("/music/b.wav"))
+        );
+    }
+
+    #[test]
+    fn merged_search_results_keep_spotify_and_local_tracks() {
+        let spotify = crate::models::SearchResults {
+            tracks: vec![crate::models::SearchTrack {
+                id: "spotify".to_string(),
+                source: TrackSource::Spotify,
+                local_path: None,
+                name: "Spotify".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_ms: 1,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            }],
+            albums: Vec::new(),
+            artists: Vec::new(),
+            playlists: Vec::new(),
+        };
+        let local = crate::models::SearchResults {
+            tracks: vec![crate::models::SearchTrack {
+                id: "local:a".to_string(),
+                source: TrackSource::Local,
+                local_path: Some(PathBuf::from("/music/a.wav")),
+                name: "Local".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_ms: 1,
+                image_url: None,
+                album_id: None,
+                artist_id: None,
+            }],
+            albums: Vec::new(),
+            artists: Vec::new(),
+            playlists: Vec::new(),
+        };
+
+        let merged = merged_search_results(Some(spotify), local);
+
+        assert_eq!(merged.tracks.len(), 2);
+        assert_eq!(merged.tracks[1].source, TrackSource::Local);
+    }
+
+    #[test]
+    fn local_watch_filter_accepts_audio_and_folder_artwork() {
+        assert!(local_watch_path_relevant(Path::new("/music/song.FLAC")));
+        assert!(local_watch_path_relevant(Path::new(
+            "/music/Album/cover.jpg"
+        )));
+        assert!(local_watch_path_relevant(Path::new(
+            "/music/Album/FOLDER.PNG"
+        )));
+    }
+
+    #[test]
+    fn local_watch_filter_ignores_unrelated_files() {
+        assert!(!local_watch_path_relevant(Path::new("/music/notes.txt")));
+        assert!(!local_watch_path_relevant(Path::new("/music/cover.gif")));
+    }
+
+    #[test]
+    fn sync_interval_playing_is_30_seconds() {
+        assert_eq!(
+            sync_interval_duration(true),
+            std::time::Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn sync_interval_paused_is_5_minutes() {
+        assert_eq!(
+            sync_interval_duration(false),
+            std::time::Duration::from_secs(300)
+        );
     }
 }

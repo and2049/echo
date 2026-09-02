@@ -535,10 +535,12 @@ pub fn window_frame(
                 })
                 .child(root),
         )
-        .children(edges.into_iter().filter_map(|(id, edge, tiled)| {
-            // A tiled edge is flush against a screen or neighbour and cannot be dragged.
-            (resizable && !tiled).then(|| resize_handle(id, edge))
-        }))
+        .children(
+            edges
+                .into_iter()
+                .filter(|&(_id, _edge, tiled)| resizable && !tiled)
+                .map(|(id, edge, _tiled)| resize_handle(id, edge)),
+        )
         .into_any_element()
 }
 
@@ -2128,7 +2130,7 @@ pub(crate) fn playing_context_label(state: &echo_core::app::AppState) -> Option<
                     .find(|playlist| playlist.id == context.context_id)
                     .map(|playlist| playlist.name.clone())
             })
-            .or_else(|| from_tracklist)
+            .or(from_tracklist)
             .unwrap_or_else(|| tr(state, "desktop.playing_from_playlist").to_string())
     };
     Some(tr(state, "desktop.playing_from").replace("{}", &name))
@@ -3596,7 +3598,11 @@ pub(crate) fn immersive_cover_edge(width: f32, height: f32) -> f32 {
 /// fit, made odd so one row is the exact center, and at least one.
 pub(crate) fn lyric_window_rows(panel_height: f32, row_height: f32) -> usize {
     let rows = (panel_height / row_height).max(1.0) as usize;
-    if rows % 2 == 0 { rows - 1 } else { rows }
+    if rows.is_multiple_of(2) {
+        rows - 1
+    } else {
+        rows
+    }
 }
 
 /// Opacity of a lyric row `distance` rows from the center when the row just past the window's

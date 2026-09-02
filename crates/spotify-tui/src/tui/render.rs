@@ -448,7 +448,7 @@ pub fn render_action_menu(frame: &mut Frame, state: &AppState) {
     let title_format = echo_core::i18n::t("actions.title", lang);
     let track_label = title_format.replace("{}", &ctx.track_name);
     let label_width = track_label.len() as u16;
-    let popup_w = label_width.max(32).min(50);
+    let popup_w = label_width.clamp(32, 50);
     let popup_h = (labels.len() as u16) + 4;
 
     let area = frame.area();

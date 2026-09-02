@@ -12,17 +12,12 @@ use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink};
 use crate::models::{PlaybackItem, Track, TrackSource};
 use crate::worker::volume::cubic_gain;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum RepeatMode {
+    #[default]
     Off,
     Track,
     Context,
-}
-
-impl Default for RepeatMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 impl RepeatMode {
@@ -149,7 +144,7 @@ impl LocalPlaybackEngine {
         Ok(self.snapshot())
     }
 
-    pub fn next(&mut self) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
+    pub fn next_track(&mut self) -> LocalPlaybackResult<LocalPlaybackSnapshot> {
         if self.queue.advance() {
             self.resume_position_ms = 0;
             self.start_current()?;
@@ -350,14 +345,13 @@ impl LocalPlaybackEngine {
         let sink = Sink::connect_new(stream.mixer());
         sink.set_volume(cubic_gain(self.volume));
         sink.append(source);
-        if resume_position_ms > 0 {
-            if let Err(error) = sink.try_seek(Duration::from_millis(u64::from(resume_position_ms)))
-            {
-                self.output_stream = None;
-                self.output_unavailable = true;
-                self.playing = false;
-                return Err(output_error(error));
-            }
+        if resume_position_ms > 0
+            && let Err(error) = sink.try_seek(Duration::from_millis(u64::from(resume_position_ms)))
+        {
+            self.output_stream = None;
+            self.output_unavailable = true;
+            self.playing = false;
+            return Err(output_error(error));
         }
         self.sink = Some(sink);
         self.playing = true;
@@ -443,6 +437,10 @@ impl LocalQueue {
 
     pub fn len(&self) -> usize {
         self.play_order.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.play_order.is_empty()
     }
 
     pub fn advance(&mut self) -> bool {
@@ -670,8 +668,10 @@ mod tests {
 
     #[test]
     fn output_errors_ignore_stale_stream_generations() {
-        let mut engine = LocalPlaybackEngine::default();
-        engine.stream_generation = 2;
+        let mut engine = LocalPlaybackEngine {
+            stream_generation: 2,
+            ..Default::default()
+        };
         engine
             .output_error_tx
             .send(OutputStreamFailure {
@@ -695,10 +695,12 @@ mod tests {
 
     #[test]
     fn disconnect_preserves_queue_and_saved_position() {
-        let mut engine = LocalPlaybackEngine::default();
-        engine.queue = queue();
-        engine.resume_position_ms = 4_200;
-        engine.playing = true;
+        let mut engine = LocalPlaybackEngine {
+            queue: queue(),
+            resume_position_ms: 4_200,
+            playing: true,
+            ..Default::default()
+        };
 
         engine.disconnect_output();
 

@@ -63,6 +63,7 @@ pub fn handle_playback_started(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_sync_playback_state(
     state: &mut AppState,
     app_tx: &mpsc::UnboundedSender<AppEvent>,

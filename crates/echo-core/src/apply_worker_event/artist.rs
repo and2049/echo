@@ -19,11 +19,11 @@ pub fn handle_page_opened(
     if state.data.pending_artist_page_id.as_deref() != Some(artist_id.as_str()) {
         return;
     }
-    if !state
+    if state
         .data
         .artist_page_data
         .as_ref()
-        .is_some_and(|data| data.artist_id == artist_id)
+        .is_none_or(|data| data.artist_id != artist_id)
     {
         state.data.artist_page_data = Some(crate::models::ArtistPageData {
             artist_id,

@@ -25,11 +25,12 @@ impl VisualizationSink {
         shared_bands: Arc<Mutex<[f32; BANDS]>>,
         enable_flag: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
-        let mut hann_window = vec![0.0; FFT_SIZE];
-        for i in 0..FFT_SIZE {
-            hann_window[i] = 0.5
-                * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (FFT_SIZE as f32 - 1.0)).cos());
-        }
+        let hann_window: Vec<f32> = (0..FFT_SIZE)
+            .map(|i| {
+                0.5 * (1.0
+                    - (2.0 * std::f32::consts::PI * i as f32 / (FFT_SIZE as f32 - 1.0)).cos())
+            })
+            .collect();
 
         Self {
             inner,
@@ -71,7 +72,7 @@ impl VisualizationSink {
         let min_freq_idx = 4.0; // ~21 Hz
         let max_freq_idx = (FFT_SIZE / 2) as f32; // ~22 kHz
 
-        for bucket in 0..BANDS {
+        for (bucket, band) in bands.iter_mut().enumerate() {
             let p_start = bucket as f32 / BANDS as f32;
             let p_end = (bucket + 1) as f32 / BANDS as f32;
 
@@ -82,15 +83,10 @@ impl VisualizationSink {
             let start_idx = start_idx.clamp(1, max_freq_idx as usize - 1);
             let end_idx = end_idx.clamp(start_idx, max_freq_idx as usize - 1);
 
-            let mut max_mag = 0.0f32;
-            if start_idx == end_idx {
-                max_mag = buffer[start_idx].norm();
-            } else {
-                for i in start_idx..=end_idx {
-                    max_mag = max_mag.max(buffer[i].norm());
-                }
-            }
-            bands[bucket] = max_mag;
+            *band = buffer[start_idx..=end_idx]
+                .iter()
+                .map(|bin| bin.norm())
+                .fold(0.0f32, f32::max);
         }
 
         let mut shared = self.shared_bands.lock();
