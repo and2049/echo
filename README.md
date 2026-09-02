@@ -229,6 +229,7 @@ While in Command Mode (`:`), you can use the following:
 - `:vis`: Toggle the audio visualizer.
 - `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
+- `:backdrop <lights|mesh|aurora|vinyl|nebula>`: Pick the moving picture behind the desktop app's immersive view (also in Settings).
 - `:thumbs [on|off]`: Toggle cover-art thumbnails in the library sidebar. Covers are cached in `~/.config/echo/thumbs/` so they load instantly on later launches.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.

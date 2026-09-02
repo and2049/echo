@@ -177,6 +177,15 @@
       "bins": "視覺化頻段數",
       "pixelate": "封面像素化",
       "pixelate_desc": "復古 8 位元專輯封面；關閉為全解析度",
+      "backdrop": "沉浸背景",
+      "backdrop_desc": "全螢幕播放檢視的背景",
+      "backdrops": {
+        "lights": "光斑",
+        "mesh": "漸層網",
+        "aurora": "極光",
+        "vinyl": "黑膠",
+        "nebula": "星雲"
+      },
       "numbering": "曲目編號",
       "numbering_desc": "首列為 1 或 0",
       "relative": "相對行號",

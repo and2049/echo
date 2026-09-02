@@ -204,7 +204,6 @@ pub(crate) struct EchoApp {
     pub(crate) sidebar_collapsed: bool,
     pub(crate) theme_modal_open: bool,
     pub(crate) immersive: bool,
-    pub(crate) backdrop_mode: backdrop::BackdropMode,
     pub(crate) backdrops: backdrop::BackdropCache,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
@@ -511,7 +510,6 @@ impl EchoApp {
             sidebar_collapsed,
             theme_modal_open: false,
             immersive: false,
-            backdrop_mode: backdrop::BackdropMode::default(),
             backdrops: backdrop::BackdropCache::default(),
             theme_modal_index: 0,
             sort_menu_open: false,
@@ -2933,7 +2931,19 @@ impl Render for EchoApp {
                 .as_ref()
                 .or(playback.previous_track_image.as_ref());
             let fallback = backdrop::theme_palette(&self.state.ui.active_theme);
-            let backdrop = self.backdrops.get(self.backdrop_mode, cover, &fallback);
+            let mode = self.state.ui.library_config.immersive_backdrop;
+            let backdrop = self.backdrops.get(mode, cover, &fallback);
+            if let Some(build) = self.backdrops.take_build() {
+                cx.spawn(async move |this, cx| {
+                    let built = cx.background_spawn(async move { build.run() }).await;
+                    this.update(cx, |app: &mut EchoApp, cx| {
+                        app.backdrops.install(built);
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
             self.backdrops.release(|image| {
                 window.drop_image(image).ok();
             });

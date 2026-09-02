@@ -4027,6 +4027,8 @@ pub fn settings_modal(
             .id(id)
             .flex()
             .flex_row()
+            .flex_wrap()
+            .justify_end()
             .gap_1()
             .children(options.into_iter().map(|(label, cmd, active)| {
                 div()
@@ -4059,6 +4061,25 @@ pub fn settings_modal(
                 ("简体".into(), "lang zh-CN".into(), language == "zh-CN"),
                 ("繁體".into(), "lang zh-TW".into(), language == "zh-TW"),
             ],
+            cx,
+        ),
+    );
+
+    let backdrop_row = row(
+        s("desktop.settings.backdrop"),
+        Some(s("desktop.settings.backdrop_desc")),
+        choices(
+            "backdrop",
+            echo_core::config::BackdropMode::ALL
+                .into_iter()
+                .map(|mode| {
+                    (
+                        s(&format!("desktop.settings.backdrops.{}", mode.name())),
+                        format!("backdrop {}", mode.name()),
+                        config.immersive_backdrop == mode,
+                    )
+                })
+                .collect(),
             cx,
         ),
     );
@@ -4508,6 +4529,7 @@ pub fn settings_modal(
                         ))
                         .child(language_row)
                         .child(pixelate_row)
+                        .child(backdrop_row)
                         .child(heading(s("desktop.settings.library")))
                         .child(sort_row)
                         .child(index_row)

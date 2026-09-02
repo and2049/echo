@@ -177,6 +177,15 @@
       "bins": "可视化频段数",
       "pixelate": "封面像素化",
       "pixelate_desc": "复古 8 位专辑封面；关闭为全分辨率",
+      "backdrop": "沉浸背景",
+      "backdrop_desc": "全屏播放视图的背景",
+      "backdrops": {
+        "lights": "光斑",
+        "mesh": "渐变网",
+        "aurora": "极光",
+        "vinyl": "黑胶",
+        "nebula": "星云"
+      },
       "numbering": "曲目编号",
       "numbering_desc": "首行为 1 或 0",
       "relative": "相对行号",

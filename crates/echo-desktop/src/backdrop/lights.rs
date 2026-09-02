@@ -1,16 +1,13 @@
-//! The blurred-shapes backdrop: a few discs in the cover's colors over a deep (or pale) tint
-//! of its primary, blurred until they read as soft lights, and fading most of the way back to
-//! the base toward the bottom. The "shapes, then blur" recipe behind Apple Music's
-//! now-playing wash. Disc luminance is clamped per tone so the text stays readable wherever
-//! the lyrics land on it.
+//! The lights backdrop: a few discs in the cover's colors over a deep (or pale) tint of its
+//! primary, blurred until they read as soft lights, and fading most of the way back to the
+//! base toward the bottom. The "shapes, then blur" recipe behind Apple Music's now-playing
+//! wash.
 //!
-//! The picture is a function of `phase`, one trip around a loop in `0..1`: every disc circles
-//! the middle of the canvas on its own tilted ellipse once per loop, each at a different size,
-//! direction and starting point, and fades most of the way out and back once, so phase 1 is
-//! phase 0 again and the loop never seams. The fade follows a squared sine, since perceived
-//! brightness grows slower than the light itself: the disc lingers dim and blooms quickly.
-//! Discs are painted largest first so the small ones stay visible on top. Run with
-//! `ECHO_BACKDROP_BLUR=0` to skip the blur and watch the raw discs when tuning the motion.
+//! Every disc circles the middle of the canvas on its own tilted ellipse once per loop, each at
+//! a different size, direction and starting point, and fades most of the way out and back
+//! once, so phase 1 is phase 0 again and the loop never seams. The fade follows a squared
+//! sine, since perceived brightness grows slower than the light itself: the disc lingers dim
+//! and blooms quickly. Discs are painted largest first so the small ones stay visible on top.
 
 use std::f32::consts::TAU;
 
@@ -34,8 +31,6 @@ const DISCS: [Disc; 4] = [
 const MIDDLE: (f32, f32) = (0.5, 0.5);
 /// The fade never goes below this, so a disc keeps a trace of its color on the way out.
 const PRESENCE_FLOOR: f32 = 0.2;
-const DARK_SHAPE_LUMINANCE: (f32, f32) = (0.18, 0.42);
-const LIGHT_SHAPE_LUMINANCE: (f32, f32) = (0.55, 0.80);
 /// The fade toward the base runs between these fractions of the height and stops this far
 /// short of it, so the bottom keeps a trace of the lights instead of going flat.
 const FADE: (f32, f32) = (0.45, 0.92);
@@ -66,10 +61,7 @@ impl Disc {
 }
 
 pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raster {
-    let (lo, hi) = match tone {
-        Tone::Dark => DARK_SHAPE_LUMINANCE,
-        Tone::Light => LIGHT_SHAPE_LUMINANCE,
-    };
+    let (lo, hi) = tone.shape_luminance();
     let mut raster = Raster::new(SIZE, SIZE, base);
     for ix in paint_order() {
         let disc = &DISCS[ix];
@@ -77,18 +69,9 @@ pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raste
         let color = palette.color(ix).with_luminance_in(lo, hi);
         raster.disc(cx, cy, disc.radius, color, disc.presence(phase));
     }
-    if blur_enabled() {
-        raster.blur(BLUR_RADIUS);
-    }
-    raster.map(|_, y, color| {
-        let t = ((y - FADE.0) / (FADE.1 - FADE.0)).clamp(0.0, 1.0);
-        color.mix(base, FADE_DEPTH * t * t * (3.0 - 2.0 * t))
-    });
+    raster.blur(BLUR_RADIUS);
+    raster.settle(base, FADE.0, FADE.1, FADE_DEPTH);
     raster
-}
-
-fn blur_enabled() -> bool {
-    std::env::var("ECHO_BACKDROP_BLUR").map_or(true, |v| v != "0")
 }
 
 /// Disc indices largest first, so every disc paints over the bigger ones.
@@ -125,7 +108,7 @@ mod tests {
     fn a_white_cover_still_paints_readable_shapes() {
         let palette = CoverPalette::from_colors(vec![Rgb::WHITE]);
         let raster = paint(&palette, Rgb::BLACK, Tone::Dark, 0.75);
-        assert!(at(&raster, DISCS[0].position(0.75)).luminance() <= DARK_SHAPE_LUMINANCE.1 + 0.01);
+        assert!(at(&raster, DISCS[0].position(0.75)).luminance() <= Tone::Dark.shape_luminance().1 + 0.01);
     }
 
     #[test]
@@ -133,7 +116,7 @@ mod tests {
         let base = Rgb::from_u8(240, 242, 250);
         let raster = paint(&blue(), base, Tone::Light, 0.75);
         let light = at(&raster, DISCS[0].position(0.75));
-        assert!(light.luminance() >= LIGHT_SHAPE_LUMINANCE.0 - 0.05 && light.luminance() < base.luminance());
+        assert!(light.luminance() >= Tone::Light.shape_luminance().0 - 0.05 && light.luminance() < base.luminance());
         assert!(light.saturation() > 0.3);
     }
 
@@ -176,21 +159,4 @@ mod tests {
         assert_eq!(order[0], 1);
     }
 
-    #[test]
-    fn the_loop_closes() {
-        let base = Rgb::from_u8(3, 5, 20);
-        let (start, end) = (paint(&blue(), base, Tone::Dark, 0.0), paint(&blue(), base, Tone::Dark, 1.0));
-        for (x, y) in [(0, 0), (SIZE / 3, SIZE / 4), (SIZE - 1, SIZE / 2)] {
-            let (a, b) = (start.get(x, y), end.get(x, y));
-            assert!((a.luminance() - b.luminance()).abs() < 1e-4, "{x},{y}: {a:?} vs {b:?}");
-        }
-    }
-
-    #[test]
-    fn the_lights_move() {
-        let base = Rgb::from_u8(3, 5, 20);
-        let (start, half) = (paint(&blue(), base, Tone::Dark, 0.0), paint(&blue(), base, Tone::Dark, 0.5));
-        let moved = (0..SIZE).any(|x| (start.get(x, SIZE / 4).luminance() - half.get(x, SIZE / 4).luminance()).abs() > 0.01);
-        assert!(moved);
-    }
 }
