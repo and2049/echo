@@ -19,6 +19,7 @@ use gpui::{
     svg, uniform_list,
 };
 
+use crate::backdrop::{Backdrop, ImmersiveColors};
 use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
 use crate::{EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
 
@@ -185,17 +186,24 @@ fn is_fixed_library_row(id: &str) -> bool {
 /// assumption the window manager would draw its own bar, but GNOME/Mutter does not implement
 /// xdg-decoration and forces client-side decorations, which left the window with no titlebar
 /// and no way to move or resize it. See [`window_frame`] for the resize edges.
+///
+/// `immersive` swaps the bar's own colors for the backdrop's: no fill, so the backdrop shows
+/// through, and its text and hover wash.
 pub fn titlebar(
     app: &mut EchoApp,
+    immersive: Option<&ImmersiveColors>,
     window: &mut Window,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
-    let palette = DesktopPalette::resolve(theme);
-    let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
-    let accent = theme.primary.gpui(WINDOW_FG());
-    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let (fg, surface, hover) = match immersive {
+        Some(colors) => (colors.text, gpui::transparent_black(), colors.wash),
+        None => (
+            theme.text.gpui(WINDOW_FG()),
+            theme.surface.gpui(crate::theme::PANEL_BG()),
+            DesktopPalette::resolve(theme).menu_hover,
+        ),
+    };
     let fullscreen = window.is_fullscreen();
     let maximized = window.is_maximized();
     let corners = client_corners(window);
@@ -281,7 +289,7 @@ pub fn titlebar(
                         "icons/win-minimize.svg",
                         gpui::WindowControlArea::Min,
                         fg,
-                        palette,
+                        hover,
                         None,
                     ))
                     .child(caption_button(
@@ -293,7 +301,7 @@ pub fn titlebar(
                         },
                         gpui::WindowControlArea::Max,
                         fg,
-                        palette,
+                        hover,
                         None,
                     ))
                     .child(caption_button(
@@ -301,7 +309,7 @@ pub fn titlebar(
                         "icons/win-close.svg",
                         gpui::WindowControlArea::Close,
                         fg,
-                        palette,
+                        hover,
                         close_radius,
                     )),
             )
@@ -321,13 +329,13 @@ fn caption_button(
     icon: &'static str,
     area: gpui::WindowControlArea,
     fg: gpui::Hsla,
-    palette: DesktopPalette,
+    hover: gpui::Hsla,
     top_right_radius: Option<gpui::Pixels>,
 ) -> impl IntoElement {
     let close = matches!(area, gpui::WindowControlArea::Close);
     // The close button hovers Windows-red with a white glyph; the rest get a faint wash.
     let hover_bg: gpui::Hsla =
-        if close { crate::theme::CLOSE_RED() } else { palette.menu_hover };
+        if close { crate::theme::CLOSE_RED() } else { hover };
     div()
         .id(id)
         .group(id)
@@ -398,28 +406,31 @@ pub(crate) fn client_corners(window: &Window) -> Option<gpui::Tiling> {
 /// the titlebar's, which are the only two surfaces reaching a corner. An edge that is tiled is
 /// flush against a screen or a neighbour, and stays square, as every other app's does.
 pub(crate) fn round_client_corners<E: Styled>(
-    mut el: E,
+    el: E,
     corners: Option<gpui::Tiling>,
     which: ClientCorners,
 ) -> E {
-    let Some(tiling) = corners else { return el };
-    let radius = px(CLIENT_CORNER_RADIUS);
+    let radii = client_corner_radii(corners, which);
+    el.rounded_tl(radii.top_left)
+        .rounded_tr(radii.top_right)
+        .rounded_bl(radii.bottom_left)
+        .rounded_br(radii.bottom_right)
+}
 
-    if !tiling.top && !tiling.left {
-        el = el.rounded_tl(radius);
+/// The radii [`round_client_corners`] applies, for painting that bypasses styles.
+pub(crate) fn client_corner_radii(
+    corners: Option<gpui::Tiling>,
+    which: ClientCorners,
+) -> gpui::Corners<gpui::Pixels> {
+    let Some(tiling) = corners else { return gpui::Corners::default() };
+    let all = matches!(which, ClientCorners::All);
+    let radius = |rounded: bool| if rounded { px(CLIENT_CORNER_RADIUS) } else { px(0.0) };
+    gpui::Corners {
+        top_left: radius(!tiling.top && !tiling.left),
+        top_right: radius(!tiling.top && !tiling.right),
+        bottom_left: radius(all && !tiling.bottom && !tiling.left),
+        bottom_right: radius(all && !tiling.bottom && !tiling.right),
     }
-    if !tiling.top && !tiling.right {
-        el = el.rounded_tr(radius);
-    }
-    if matches!(which, ClientCorners::All) {
-        if !tiling.bottom && !tiling.left {
-            el = el.rounded_bl(radius);
-        }
-        if !tiling.bottom && !tiling.right {
-            el = el.rounded_br(radius);
-        }
-    }
-    el
 }
 
 /// Wraps the whole app in the frame a window manager would normally provide.
@@ -1374,7 +1385,7 @@ fn search_bar(
             }),
         )
         .child(div().flex_grow(1.0))
-        .child(immersive_button(app, cx))
+        .child(immersive_button(muted, palette.wash, cx))
         .child(crate::icon_button(
             "themes",
             "icons/paint-board.svg",
@@ -3190,6 +3201,14 @@ impl LyricColors {
         }
     }
 
+    fn immersive(colors: &ImmersiveColors) -> Self {
+        Self {
+            fg: colors.text,
+            muted: colors.text_muted,
+            accent: colors.accent,
+        }
+    }
+
     fn line(&self, ix: usize, current: usize) -> Hsla {
         match ix.cmp(&current) {
             std::cmp::Ordering::Equal => self.accent,
@@ -3218,7 +3237,7 @@ fn lyric_row(text: SharedString, color: Hsla, height: f32, large: bool) -> Div {
 
 /// What stands in for the lyrics while they load or when the track has none; `None` once there
 /// are lines to show.
-fn lyric_status(app: &EchoApp) -> Option<AnyElement> {
+fn lyric_status(app: &EchoApp, muted: Hsla) -> Option<AnyElement> {
     let playback = &app.state.playback;
     let key = if playback.is_fetching_lyrics {
         "desktop.loading_lyrics"
@@ -3227,7 +3246,6 @@ fn lyric_status(app: &EchoApp) -> Option<AnyElement> {
     } else {
         return None;
     };
-    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
     Some(
         div()
             .py_8()
@@ -3285,8 +3303,7 @@ fn lyric_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
 /// sit exactly where the middle ones do. When the line advances the column glides up one row
 /// over [`LYRIC_GLIDE`]; the extra row above the window carries the line on its way out. Rows
 /// fade toward the edges (see [`lyric_opacity`]), the outermost still faintly legible.
-fn lyric_window(app: &EchoApp, rows: usize, row_height: f32) -> AnyElement {
-    let colors = LyricColors::resolve(app);
+fn lyric_window(app: &EchoApp, colors: LyricColors, rows: usize, row_height: f32) -> AnyElement {
     let lines = app
         .state
         .playback
@@ -3338,7 +3355,8 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let body = lyric_status(app).unwrap_or_else(|| lyric_list(app, cx));
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let body = lyric_status(app, muted).unwrap_or_else(|| lyric_list(app, cx));
 
     div()
         .id("lyrics-backdrop")
@@ -3380,23 +3398,34 @@ pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
-/// The immersive toggle, accented while the view is up. It is the one control the immersive
-/// view keeps, so it lives here rather than inline in the search bar.
-fn immersive_button(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    let theme = &app.state.ui.active_theme;
-    let color = if app.immersive {
-        theme.primary.gpui(WINDOW_FG())
-    } else {
-        theme.text_muted.gpui(WINDOW_FG())
-    };
-    crate::icon_button(
-        "immersive",
-        "icons/full-screen.svg",
-        color,
-        DesktopPalette::resolve(theme).wash,
-        cx,
-        |this, cx| this.toggle_immersive(cx),
+/// The backdrop's picture over the whole window, under everything else. Painted straight
+/// from the texture as a fill (its guard border just outside the window) rather than through
+/// `img`, which takes the texture's aspect ratio as the box's and would paint a square.
+pub fn backdrop_layer(
+    backdrop: std::sync::Arc<Backdrop>,
+    corners: Option<gpui::Tiling>,
+) -> impl IntoElement {
+    let radii = client_corner_radii(corners, ClientCorners::All);
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let image_bounds = backdrop.image_bounds(bounds);
+            window
+                .paint_image(bounds, image_bounds, radii, backdrop.image.clone(), 0, false)
+                .ok();
+        },
     )
+    .absolute()
+    .inset_0()
+}
+
+/// The immersive toggle. Callers pick its colors: the search bar paints it muted in the theme,
+/// the immersive view accented in the cover's colors. It is the one control the immersive view
+/// keeps, so it lives here rather than inline in the search bar.
+fn immersive_button(color: Hsla, hover: Hsla, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    crate::icon_button("immersive", "icons/full-screen.svg", color, hover, cx, |this, cx| {
+        this.toggle_immersive(cx)
+    })
 }
 
 /// Edge of the immersive cover, in pixels, for a body of `width` x `height`: the largest square
@@ -3442,16 +3471,17 @@ const IMMERSIVE_LYRIC_ROW: f32 = 40.0;
 /// centered in the left half; the synced lyrics in a half-height panel on the right, centered
 /// on the cover (not the block, which would read as off-center against the caption); and the
 /// toggle as the only control. Everything else — sidebar, navigation, search, playback bar —
-/// is gone until it is toggled off.
+/// is gone until it is toggled off. Every color comes from `backdrop`, derived from the cover
+/// (see [`crate::backdrop`]); the backdrop's picture and window fill are the root's, so they
+/// reach under the titlebar too.
 pub fn immersive_view(
     app: &mut EchoApp,
+    backdrop: &Backdrop,
     window: &mut Window,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
-    let theme = &app.state.ui.active_theme;
-    let palette = DesktopPalette::resolve(theme);
-    let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let colors = backdrop.colors;
+    let (fg, muted) = (colors.text, colors.text_muted);
     let playback = &app.state.playback;
     let has_track = playback.playing_track_id.is_some();
     let title: SharedString = if playback.playing_track_title.is_empty() {
@@ -3482,7 +3512,7 @@ pub fn immersive_view(
             .w(px(edge))
             .h(px(edge))
             .rounded_lg()
-            .bg(palette.wash)
+            .bg(colors.wash)
             .flex()
             .items_center()
             .justify_center()
@@ -3495,8 +3525,9 @@ pub fn immersive_view(
             )
             .into_any_element(),
     };
-    let lyrics =
-        lyric_status(app).unwrap_or_else(|| lyric_window(app, rows, IMMERSIVE_LYRIC_ROW));
+    let lyrics = lyric_status(app, muted).unwrap_or_else(|| {
+        lyric_window(app, LyricColors::immersive(&colors), rows, IMMERSIVE_LYRIC_ROW)
+    });
 
     div()
         .id("immersive")
@@ -3565,7 +3596,7 @@ pub fn immersive_view(
                 .absolute()
                 .top_2()
                 .right(px(16.0 + 2.0 * ICON_BUTTON_EDGE))
-                .child(immersive_button(app, cx)),
+                .child(immersive_button(colors.accent, colors.wash, cx)),
         )
 }
 

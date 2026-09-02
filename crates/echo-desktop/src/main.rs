@@ -11,6 +11,7 @@
 #![windows_subsystem = "windows"]
 
 mod assets;
+mod backdrop;
 mod images;
 mod theme;
 mod views;
@@ -203,6 +204,8 @@ pub(crate) struct EchoApp {
     pub(crate) sidebar_collapsed: bool,
     pub(crate) theme_modal_open: bool,
     pub(crate) immersive: bool,
+    pub(crate) backdrop_mode: backdrop::BackdropMode,
+    pub(crate) backdrops: backdrop::BackdropCache,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
     pub(crate) sort_menu_index: usize,
@@ -502,6 +505,8 @@ impl EchoApp {
             sidebar_collapsed,
             theme_modal_open: false,
             immersive: false,
+            backdrop_mode: backdrop::BackdropMode::default(),
+            backdrops: backdrop::BackdropCache::default(),
             theme_modal_index: 0,
             sort_menu_open: false,
             sort_menu_index: 0,
@@ -2928,7 +2933,21 @@ impl Render for EchoApp {
         // requested at open are downgraded to `Server` on an X11 session with no compositor, and
         // there the window manager draws a real titlebar that ours would sit underneath.
         let owns_frame = !cfg!(target_os = "linux") || corners.is_some();
-        let titlebar = owns_frame.then(|| views::titlebar(self, window, cx).into_any_element());
+        // The immersive backdrop while that view is up: its colors replace the theme's for the
+        // window fill and the titlebar, and its picture goes under everything.
+        let backdrop = self.immersive.then(|| {
+            let playback = &self.state.playback;
+            let cover = playback
+                .playing_track_image
+                .as_ref()
+                .or(playback.previous_track_image.as_ref());
+            let fallback = backdrop::theme_palette(&self.state.ui.active_theme);
+            self.backdrops.get(self.backdrop_mode, cover, &fallback)
+        });
+        let titlebar = owns_frame.then(|| {
+            views::titlebar(self, backdrop.as_ref().map(|b| &b.colors), window, cx)
+                .into_any_element()
+        });
 
         let root = div()
             .key_context(LIST_CONTEXT)
@@ -3145,13 +3164,16 @@ impl Render for EchoApp {
             .flex()
             .flex_col()
             .size_full()
-            .bg(bg)
+            .bg(backdrop.as_ref().map_or(bg, |b| b.colors.background))
             // The window's backdrop: the one fill covering every corner, so it rounds all four.
             .map(|el| views::round_client_corners(el, corners, views::ClientCorners::All))
+            .when_some(backdrop.as_ref(), |el, backdrop| {
+                el.child(views::backdrop_layer(backdrop.clone(), corners))
+            })
             .when_some(titlebar, |el, bar| el.child(bar))
             .map(|el| {
-                if self.immersive {
-                    el.child(views::immersive_view(self, window, cx))
+                if let Some(backdrop) = &backdrop {
+                    el.child(views::immersive_view(self, backdrop, window, cx))
                 } else {
                     el.child(
                         div()
