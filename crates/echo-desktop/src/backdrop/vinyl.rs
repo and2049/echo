@@ -11,7 +11,7 @@ use super::Tone;
 const SIZE: (usize, usize) = (256, 160);
 const ASPECT: f32 = 1.6;
 /// The palette goes around the hub this many times, so its lighter tints past the end join in.
-const LAPS: usize = 2;
+const LAPS: usize = 4;
 /// Revolutions per loop; whole numbers keep the loop seamless.
 const TURNS: f32 = 2.0;
 /// Groove rings from the hub to the far corner, and how far each dips toward the base.

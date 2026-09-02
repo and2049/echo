@@ -131,7 +131,7 @@ impl ImmersiveColors {
 const BLEED_GUARD: usize = 2;
 /// Pictures painted around one loop of the motion. Soft modes crossfade cleanly at 64; the
 /// nebula's sharp streaks step between pictures that far apart, so it gets twice as many.
-const KEYFRAMES: usize = 64;
+const KEYFRAMES: usize = 128;
 
 fn keyframes(mode: BackdropMode) -> usize {
     match mode {
