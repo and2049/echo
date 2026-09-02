@@ -163,6 +163,9 @@
       "this_help": "本帮助",
       "quit": "退出"
     },
+    "tray": {
+      "show": "显示 echo"
+    },
     "settings": {
       "title": "设置",
       "subtitle": "这里的所有设置也都是 : 命令",
@@ -190,6 +193,9 @@
       "numbering_desc": "首行为 1 或 0",
       "relative": "相对行号",
       "relative_desc": "Vim 风格，相对所选曲目的偏移",
+      "window": "窗口",
+      "tray": "关闭按钮最小化到托盘",
+      "tray_desc": "echo 继续播放，可从托盘图标重新打开",
       "order": "列表排序",
       "order_desc": "自定义即拖动排列的顺序",
       "order_custom": "自定义",

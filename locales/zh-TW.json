@@ -163,6 +163,9 @@
       "this_help": "本說明",
       "quit": "結束"
     },
+    "tray": {
+      "show": "顯示 echo"
+    },
     "settings": {
       "title": "設定",
       "subtitle": "這裡的所有設定也都是 : 命令",
@@ -190,6 +193,9 @@
       "numbering_desc": "首列為 1 或 0",
       "relative": "相對行號",
       "relative_desc": "Vim 風格，相對所選曲目的偏移",
+      "window": "視窗",
+      "tray": "關閉按鈕最小化到系統匣",
+      "tray_desc": "echo 繼續播放，可從系統匣圖示重新開啟",
       "order": "清單排序",
       "order_desc": "自訂即拖曳排列的順序",
       "order_custom": "自訂",

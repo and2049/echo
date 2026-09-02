@@ -409,6 +409,10 @@ pub struct LibraryConfig {
     pub sidebar_collapsed: Option<bool>,
     #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
+    /// The desktop close button hides the window to the tray and keeps playing. Ignored by
+    /// the TUI.
+    #[serde(default = "default_close_to_tray")]
+    pub close_to_tray: bool,
     /// The `time_range` window used by the Top Tracks / Top Artists browse lists.
     #[serde(default)]
     pub top_items_range: crate::models::TopItemsRange,
@@ -464,6 +468,10 @@ fn default_vis_bins() -> usize {
     9
 }
 
+fn default_close_to_tray() -> bool {
+    true
+}
+
 impl Default for LibraryConfig {
     fn default() -> Self {
         Self {
@@ -490,6 +498,7 @@ impl Default for LibraryConfig {
             sidebar_width: None,
             sidebar_collapsed: None,
             window_bounds: None,
+            close_to_tray: true,
             top_items_range: crate::models::TopItemsRange::default(),
             playlist_playback: Default::default(),
         }
@@ -846,6 +855,16 @@ mod tests {
             .expect("system time should be after unix epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("echo-{}-{}-{}", name, std::process::id(), nanos))
+    }
+
+    #[test]
+    fn close_to_tray_defaults_on_from_toml_and_default() {
+        let parsed: LibraryConfig = toml::from_str("").expect("empty library config parses");
+        assert!(parsed.close_to_tray);
+        assert!(LibraryConfig::default().close_to_tray);
+        let parsed: LibraryConfig =
+            toml::from_str("close_to_tray = false").expect("library config parses");
+        assert!(!parsed.close_to_tray);
     }
 
     #[test]

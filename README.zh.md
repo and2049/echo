@@ -141,6 +141,8 @@ cargo build --release -p echo-desktop -p spotify-tui
 
 **查找内容**：`ctrl-k` 全局搜索，`/` 过滤当前列表，`n` / `shift-N` 下一个 / 上一个匹配项，`:` 命令栏，`t` 主题，`?` 帮助，`ctrl-q` 退出。
 
+关闭窗口时 echo 会继续播放：在 Windows 和 Linux 上隐藏到托盘图标（点击图标恢复窗口，或选择退出），在 macOS 上保留在 Dock 中。可用 `:tray off` 或「设置 → 窗口」关闭此行为；`ctrl-q` 始终退出。再次启动 echo 会把正在运行的实例带到前台，而不是打开第二个。
+
 `:` 命令栏接受与终端客户端相同的命令——参见[命令](#命令)。
 
 ## 终端客户端 (TUI)
@@ -231,6 +233,7 @@ echo 主要由键盘驱动。
 - `:visbins <number>`：设置音频可视化器频率条数量（5-32）。
 - `:pixelate <pixels>`：在专辑封面上启用复古 8 位像素风格。设置为 0 可禁用，或例如 16 以获得像素化效果。
 - `:backdrop <lights|mesh|aurora|vinyl|nebula>`：选择桌面应用沉浸视图背后的动态画面（设置中也可选择）。
+- `:tray [on|off]`：桌面应用的关闭按钮是隐藏到托盘还是直接退出（设置中也可选择）。
 - `:thumbs [on|off]`：切换资料库侧栏中的封面缩略图。封面缓存于 `~/.config/echo/thumbs/`，之后启动时即时加载。
 - `:index <number>`：设置曲目索引基数（从 1 开始或从 0 开始）。
 - `:quit`、`:q`、`:qa`、`:wq`：退出应用。

@@ -163,6 +163,9 @@
       "this_help": "This help",
       "quit": "Quit"
     },
+    "tray": {
+      "show": "Show echo"
+    },
     "settings": {
       "title": "Settings",
       "subtitle": "Everything here is also a : command",
@@ -190,6 +193,9 @@
       "numbering_desc": "First row is 1 or 0",
       "relative": "Relative line numbers",
       "relative_desc": "Vim-style offsets from the selected track",
+      "window": "WINDOW",
+      "tray": "Close button minimizes to tray",
+      "tray_desc": "echo keeps playing; reopen it from the tray icon",
       "order": "Library order",
       "order_desc": "Custom is the order you set by dragging",
       "order_custom": "Custom",

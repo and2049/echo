@@ -65,4 +65,23 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn tray_keys_present_in_all_locales() {
+        init();
+        let map = TRANSLATIONS.get().unwrap();
+        for lang in ["en", "zh-CN", "zh-TW"] {
+            let desktop = &map[lang]["desktop"];
+            for key in ["window", "tray", "tray_desc"] {
+                assert!(
+                    desktop["settings"][key].is_string(),
+                    "{lang} missing desktop.settings.{key}"
+                );
+            }
+            assert!(
+                desktop["tray"]["show"].is_string(),
+                "{lang} missing desktop.tray.show"
+            );
+        }
+    }
 }

@@ -141,6 +141,8 @@ The desktop app works with the mouse — click a playlist, artist, or track to o
 
 **Finding things**: `ctrl-k` global search, `/` filter the current list, `n` / `shift-N` next / previous match, `:` command bar, `t` themes, `?` help, `ctrl-q` quit.
 
+Closing the window keeps echo playing: on Windows and Linux it hides to a tray icon (click it to bring the window back, or pick Quit), on macOS it stays in the Dock. Turn that off with `:tray off` or Settings → Window; `ctrl-q` always quits. Launching echo again brings the running one forward instead of starting a second copy.
+
 The `:` command bar accepts the same commands as the terminal client — see [Commands](#commands).
 
 ## Terminal client (TUI)
@@ -230,6 +232,7 @@ While in Command Mode (`:`), you can use the following:
 - `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
 - `:backdrop <lights|mesh|aurora|vinyl|nebula>`: Pick the moving picture behind the desktop app's immersive view (also in Settings).
+- `:tray [on|off]`: Whether the desktop app's close button hides it to the tray instead of quitting (also in Settings).
 - `:thumbs [on|off]`: Toggle cover-art thumbnails in the library sidebar. Covers are cached in `~/.config/echo/thumbs/` so they load instantly on later launches.
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.

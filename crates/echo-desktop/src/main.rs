@@ -13,7 +13,9 @@
 mod assets;
 mod backdrop;
 mod images;
+mod single_instance;
 mod theme;
+mod tray;
 mod views;
 
 use std::cell::Cell;
@@ -24,9 +26,9 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
 use echo_core::events::AppEvent;
 use gpui::{
-    App, Bounds, Context, Div, FocusHandle, Hsla, KeyBinding, Pixels, ScrollHandle, ScrollStrategy,
-    SharedString, UniformListScrollHandle, Window, WindowBounds, WindowOptions, actions, canvas,
-    div, img, prelude::*, px, size, svg,
+    App, Bounds, Context, Div, Entity, FocusHandle, Hsla, KeyBinding, Pixels, QuitMode,
+    ScrollHandle, ScrollStrategy, SharedString, UniformListScrollHandle, Window, WindowBounds,
+    WindowOptions, actions, canvas, div, img, prelude::*, px, size, svg,
 };
 use gpui_platform::application;
 use theme::{DesktopPalette, ToGpui, WINDOW_BG, WINDOW_FG};
@@ -97,9 +99,20 @@ actions!(
         HideOthers,
         ShowAll,
         MinimizeWindow,
-        ZoomWindow
+        ZoomWindow,
+        CloseWindow
     ]
 );
+
+/// What outlives the window: the one `EchoApp` entity, which every opened window renders, and
+/// the tray icon standing in for it while no window is up.
+struct Shell {
+    app: Entity<EchoApp>,
+    tray_tx: tokio::sync::mpsc::UnboundedSender<tray::TrayEvent>,
+    tray: Option<tray::Tray>,
+}
+
+impl gpui::Global for Shell {}
 
 const LIST_CONTEXT: &str = "list";
 const SEARCH_CONTEXT: &str = "search";
@@ -393,11 +406,7 @@ fn resolve_mono_font(cx: &App) -> SharedString {
 }
 
 impl EchoApp {
-    fn new(
-        boot: echo_core::bootstrap::Bootstrap,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    fn new(boot: echo_core::bootstrap::Bootstrap, cx: &mut Context<Self>) -> Self {
         let echo_core::bootstrap::Bootstrap {
             state,
             config: _,
@@ -464,7 +473,6 @@ impl EchoApp {
         .detach();
 
         let focus_handle = cx.focus_handle();
-        window.focus(&focus_handle, cx);
 
         let sidebar_width = state
             .ui
@@ -472,15 +480,6 @@ impl EchoApp {
             .sidebar_width
             .unwrap_or(views::SIDEBAR_WIDTH);
         let sidebar_collapsed = state.ui.library_config.sidebar_collapsed.unwrap_or(false);
-
-        // Save the window rectangle on close so the next launch reopens the same size and
-        // place. All three `WindowBounds` variants carry the restore bounds, so a window closed
-        // while maximized still remembers a sensible windowed size.
-        let this = cx.entity();
-        window.on_window_should_close(cx, move |window, cx| {
-            this.update(cx, |this: &mut EchoApp, _cx| this.persist_window_bounds(window));
-            true
-        });
 
         Self {
             state,
@@ -540,11 +539,56 @@ impl EchoApp {
         }
     }
 
+    /// Binds the entity to a freshly opened window: keyboard focus, the close hook and the
+    /// titlebar drag latch. Runs at launch and every time the window reopens from the tray.
+    fn attach(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.titlebar_should_move = false;
+        window.focus(&self.focus_handle, cx);
+        let this = cx.entity();
+        window.on_window_should_close(cx, move |window, cx| {
+            this.update(cx, |this: &mut EchoApp, cx| this.on_close_request(window, cx))
+        });
+    }
+
+    /// The one close decision, for the platform's close request and the Linux caption button
+    /// alike. The rectangle is saved first because `remove_window` skips the close hook. On
+    /// macOS the window just closes and the Dock keeps the app; elsewhere the tray icon takes
+    /// over when the setting is on and a tray host exists, and the app quits otherwise. Always
+    /// `true`: the window closes either way, the tray comes up a moment after.
+    fn on_close_request(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.persist_window_bounds(window);
+        if cfg!(target_os = "macos") {
+            return true;
+        }
+        if !self.state.ui.library_config.close_to_tray {
+            cx.quit();
+            return true;
+        }
+        let lang = &self.state.ui.library_config.language;
+        let labels = tray::TrayLabels {
+            show: echo_core::i18n::t("desktop.tray.show", lang),
+            quit: echo_core::i18n::t("desktop.help.quit", lang),
+        };
+        let tx = cx.global::<Shell>().tray_tx.clone();
+        cx.spawn(async move |_, cx| {
+            let tray = tray::Tray::create(tx, labels).await;
+            cx.update(|cx| match tray {
+                Ok(tray) => cx.global_mut::<Shell>().tray = Some(tray),
+                Err(error) => {
+                    eprintln!("tray unavailable, quitting instead: {error:#}");
+                    cx.quit();
+                }
+            });
+        })
+        .detach();
+        true
+    }
+
     /// Remembers the window rectangle so the next launch reopens the same size and place. All
     /// three `WindowBounds` variants carry the restore bounds, so a window closed while
-    /// maximized still remembers a sensible windowed size. Called from every way out: the
-    /// platform's close request, and the `Quit` action the keybinding and the Linux caption
-    /// button both dispatch.
+    /// maximized still remembers a sensible windowed size. Called from every way out:
+    /// `on_close_request` for the platform's close request and the Linux caption button, and
+    /// the `Quit` action the keybinding dispatches.
     fn persist_window_bounds(&mut self, window: &Window) {
         let bounds = match window.window_bounds() {
             WindowBounds::Windowed(bounds)
@@ -3001,12 +3045,17 @@ impl Render for EchoApp {
                 cx.listener(|this, _: &PageDown, _window, cx| this.move_selection(PAGE_ROWS, cx)),
             )
             // Takes precedence over the app-level `Quit` handler registered in `main`, which
-            // cannot see the window. Both the ctrl-q binding and the Linux caption button's
-            // close arrive here, so every exit remembers the window rectangle the way the
-            // platform's own close request already did.
+            // cannot see the window, so the ctrl-q binding remembers the window rectangle the
+            // way the platform's own close request does. The Linux caption button's close
+            // dispatches `CloseWindow` instead: the same tray-or-quit decision as that request.
             .on_action(cx.listener(|this, _: &Quit, window, cx| {
                 this.persist_window_bounds(window);
                 cx.quit();
+            }))
+            .on_action(cx.listener(|this, _: &CloseWindow, window, cx| {
+                if this.on_close_request(window, cx) {
+                    window.remove_window();
+                }
             }))
             // The macOS Window menu's two entries. Handled here rather than app-wide because
             // both need the window; `Hide`/`HideOthers`/`ShowAll` do not, so those stay in
@@ -3237,15 +3286,28 @@ fn main() {
     let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
     let _guard = runtime.enter();
 
+    // A second launch only asks the running echo to show itself, which also brings a window
+    // back from the tray.
+    let instance = match single_instance::claim(&echo_core::config::echo_config_root()) {
+        single_instance::Instance::Secondary => return,
+        single_instance::Instance::Primary(listener) => listener,
+    };
+
     // Windows cannot delete the image of a running process, so a previous upgrade leaves its
     // backups behind. Nothing holds them now.
     echo_core::update::sweep_backups();
 
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();
-    let saved_bounds = boot.config.library.window_bounds;
 
-    application().with_assets(assets::Assets).run(move |cx: &mut App| {
+    // Explicit: closing the last window must not end the process, which is what lets the
+    // window close into the tray (and the app stay in the Dock on macOS). Every exit is a
+    // `cx.quit()`. `on_reopen` is the macOS Dock click with no window up; a no-op elsewhere.
+    let app = application()
+        .with_assets(assets::Assets)
+        .with_quit_mode(QuitMode::Explicit);
+    app.on_reopen(open_main_window);
+    app.run(move |cx: &mut App| {
         // Must match the MSI shortcuts' System.AppUserModel.ID so every launch path
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
         cx.set_app_identity("com.echo.app", "echo");
@@ -3355,28 +3417,61 @@ fn main() {
             KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),
             KeyBinding::new("shift-j", MoveTrackDown, LIST_KEYS),
         ]);
-        cx.on_window_closed(|cx, _window_id| {
-            if cx.windows().is_empty() {
-                cx.quit();
+        let (tray_tx, mut tray_rx) = tokio::sync::mpsc::unbounded_channel();
+        if let Some(listener) = instance {
+            listener.serve(tray_tx.clone());
+        }
+        let app = cx.new(|cx| EchoApp::new(boot, cx));
+        cx.set_global(Shell { app, tray_tx, tray: None });
+        cx.spawn(async move |cx| {
+            while let Some(event) = tray_rx.recv().await {
+                cx.update(|cx| match event {
+                    tray::TrayEvent::Show => open_main_window(cx),
+                    tray::TrayEvent::Quit => cx.quit(),
+                });
             }
         })
         .detach();
+        open_main_window(cx);
+        cx.activate(true);
+    });
+}
 
-        // Restore the saved rectangle, but only if it still lands on a display — a window saved
-        // on a monitor that is no longer attached would otherwise open off-screen with no way
-        // to drag it back.
-        let bounds = saved_bounds
-            .map(|saved| Bounds {
-                origin: gpui::point(px(saved.x), px(saved.y)),
-                size: size(px(saved.width), px(saved.height)),
-            })
-            .filter(|bounds| {
-                cx.displays()
-                    .iter()
-                    .any(|display| display.bounds().intersects(bounds))
-            })
-            .unwrap_or_else(|| Bounds::centered(None, size(px(1100.0), px(720.0)), cx));
-        cx.open_window(
+/// Opens the one main window around the entity `Shell` keeps, at the rectangle saved on the
+/// last close if it still lands on a display (a window saved on a monitor that is no longer
+/// attached would otherwise open off-screen with no way to drag it back). Shared by launch,
+/// the tray icon's Show, a second launch's knock and the macOS Dock reopen; with a window
+/// already up it only brings that one forward. `activate_window` is what foregrounds on
+/// Windows, where `cx.activate` is a no-op; `cx.activate` is what does it on macOS.
+fn open_main_window(cx: &mut App) {
+    if let Some(existing) = cx.windows().into_iter().next() {
+        existing
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
+        cx.activate(true);
+        return;
+    }
+    let app = cx.global::<Shell>().app.clone();
+    cx.global_mut::<Shell>().tray = None;
+    let bounds = app
+        .read(cx)
+        .state
+        .ui
+        .library_config
+        .window_bounds
+        .map(|saved| Bounds {
+            origin: gpui::point(px(saved.x), px(saved.y)),
+            size: size(px(saved.width), px(saved.height)),
+        })
+        .filter(|bounds| {
+            cx.displays()
+                .iter()
+                .any(|display| display.bounds().intersects(bounds))
+        })
+        .unwrap_or_else(|| Bounds::centered(None, size(px(1100.0), px(720.0)), cx));
+    let root = app.clone();
+    let window = cx
+        .open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 // The app draws its own themed titlebar (views::titlebar) on every platform;
@@ -3408,11 +3503,15 @@ fn main() {
                 window_min_size: Some(size(px(480.0), px(360.0))),
                 ..Default::default()
             },
-            |window, cx| cx.new(|cx| EchoApp::new(boot, window, cx)),
+            move |window, cx| {
+                root.update(cx, |this, cx| this.attach(window, cx));
+                root
+            },
         )
         .expect("failed to open window");
-        cx.activate(true);
-    });
+    window
+        .update(cx, |_, window, _| window.activate_window())
+        .ok();
 }
 
 #[cfg(test)]
