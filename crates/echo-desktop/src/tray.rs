@@ -11,9 +11,11 @@ use tokio::sync::mpsc::UnboundedSender;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrayEvent {
     Show,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Quit,
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub struct TrayLabels {
     pub show: String,
     pub quit: String,
@@ -29,8 +31,9 @@ impl Tray {
         tx: UnboundedSender<TrayEvent>,
         labels: TrayLabels,
     ) -> anyhow::Result<Self> {
-        let handle = platform::create(tx, labels).await?;
-        Ok(Self { _handle: handle })
+        Ok(Self {
+            _handle: platform::create(tx, labels).await?,
+        })
     }
 }
 
