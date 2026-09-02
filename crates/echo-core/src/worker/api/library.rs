@@ -362,7 +362,7 @@ impl SpotifyWorker {
     pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
         let page = self
             .client
-            .current_user_followed_artists(None, None)
+            .current_user_followed_artists(None, Some(50))
             .await?;
         Ok(page
             .items
