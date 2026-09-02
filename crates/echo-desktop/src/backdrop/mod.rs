@@ -5,7 +5,8 @@
 //! 1. [`CoverPalette`] — what the cover is made of: its few prominent colors, from pixels
 //!    (`palette.rs`). Pure math, no gpui.
 //! 2. [`ImmersiveColors`] — the roles the view paints with (background, text, accent, wash),
-//!    derived from the palette by fixed formulas so text is always readable on the base.
+//!    derived from the palette by fixed formulas so text is always readable on the base. A
+//!    light cover flips the whole set to a light [`Tone`]: pale base, dark text.
 //! 3. [`BackdropMode`] — the picture behind everything, painted from the palette onto a
 //!    [`raster::Raster`] and uploaded once as a texture. One mode today; a new one is a variant
 //!    here, a `paint` function in its own file, and nothing else — the view, the cache and the
@@ -39,13 +40,30 @@ pub enum BackdropMode {
 impl BackdropMode {
     fn paint(self, palette: &CoverPalette, colors: &ImmersiveColors) -> raster::Raster {
         match self {
-            Self::BlurredShapes => blurred_shapes::paint(palette, colors.base),
+            Self::BlurredShapes => blurred_shapes::paint(palette, colors.base, colors.tone),
         }
     }
 }
 
-/// The immersive view's color roles, all tints of the cover: a near-black base, light text,
-/// the primary lifted until it reads on the base, and a wash for hovers and placeholders.
+/// Whether the view reads as a dark or a light theme, decided by how light the cover is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Dark,
+    Light,
+}
+
+/// Covers whose mean luminance reaches this get the light tone.
+const LIGHT_COVER: f32 = 0.5;
+
+impl Tone {
+    fn of(palette: &CoverPalette) -> Self {
+        if palette.average.luminance() >= LIGHT_COVER { Self::Light } else { Self::Dark }
+    }
+}
+
+/// The immersive view's color roles, all tints of the cover: a deep (or, in the light tone,
+/// pale) base, text at the other end, the primary pulled until it reads on the base, and a
+/// wash for hovers and placeholders.
 #[derive(Clone, Copy, Debug)]
 pub struct ImmersiveColors {
     pub background: Hsla,
@@ -53,20 +71,33 @@ pub struct ImmersiveColors {
     pub text_muted: Hsla,
     pub accent: Hsla,
     pub wash: Hsla,
+    pub tone: Tone,
     base: Rgb,
 }
 
 impl ImmersiveColors {
     pub fn derive(palette: &CoverPalette) -> Self {
         let primary = palette.primary();
-        let base = primary.mix(Rgb::BLACK, 0.88).with_luminance_in(0.02, 0.07);
-        let text = Rgb::WHITE.mix(primary, 0.10).with_luminance_in(0.88, 1.0);
+        let tone = Tone::of(palette);
+        let (base, text, accent) = match tone {
+            Tone::Dark => (
+                primary.mix(Rgb::BLACK, 0.7).with_luminance_in(0.07, 0.11),
+                Rgb::WHITE.mix(primary, 0.10).with_luminance_in(0.88, 1.0),
+                primary.with_luminance_in(0.55, 0.80),
+            ),
+            Tone::Light => (
+                primary.mix(Rgb::WHITE, 0.7).with_luminance_in(0.86, 0.92),
+                Rgb::BLACK.mix(primary, 0.15).with_luminance_in(0.0, 0.12),
+                primary.with_luminance_in(0.25, 0.45),
+            ),
+        };
         Self {
             background: hsla(base),
             text: hsla(text),
             text_muted: hsla(text.mix(base, 0.38)),
-            accent: hsla(primary.with_luminance_in(0.55, 0.80)),
+            accent: hsla(accent),
             wash: hsla(text.mix(base, 0.85)),
+            tone,
             base,
         }
     }
@@ -125,8 +156,8 @@ impl Source {
 
     fn palette(&self) -> CoverPalette {
         match self {
-            Source::Cover(art) => CoverPalette::from_pixels(art.width, art.height, &art.pixels),
-            Source::Theme(palette) => palette.clone(),
+            Source::Cover(art) => CoverPalette::from_pixels(art.width, art.height, &art.pixels).with_variety(),
+            Source::Theme(palette) => palette.clone().with_variety(),
         }
     }
 }
@@ -195,11 +226,20 @@ mod tests {
     fn roles_keep_text_readable_on_the_base() {
         for primary in [Rgb::WHITE, Rgb::BLACK, Rgb::from_u8(30, 60, 230), Rgb::from_u8(250, 240, 200)] {
             let colors = ImmersiveColors::derive(&CoverPalette::from_colors(vec![primary]));
-            assert!(lum(colors.background) <= 0.07, "{primary:?}");
-            assert!(lum(colors.text) >= 0.88, "{primary:?}");
-            assert!(lum(colors.accent) >= 0.55, "{primary:?}");
-            assert!(lum(colors.text_muted) < lum(colors.text) && lum(colors.text_muted) > lum(colors.wash));
+            let (bg, text, accent) = (lum(colors.background), lum(colors.text), lum(colors.accent));
+            match colors.tone {
+                Tone::Dark => assert!(bg <= 0.111 && text >= 0.879 && accent >= 0.549, "{primary:?}"),
+                Tone::Light => assert!(bg >= 0.859 && text <= 0.121 && accent <= 0.451, "{primary:?}"),
+            }
+            let (muted, wash) = ((lum(colors.text_muted) - bg).abs(), (lum(colors.wash) - bg).abs());
+            assert!(muted < (text - bg).abs() && muted > wash, "{primary:?}");
         }
+    }
+
+    #[test]
+    fn light_covers_get_the_light_tone() {
+        assert_eq!(Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(250, 240, 200)])), Tone::Light);
+        assert_eq!(Tone::of(&CoverPalette::from_colors(vec![Rgb::from_u8(30, 60, 230)])), Tone::Dark);
     }
 
     #[test]

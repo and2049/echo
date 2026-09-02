@@ -858,13 +858,15 @@ impl EchoApp {
         cx.notify();
     }
 
-    fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+    /// Opening the queue leaves the immersive view, which has nowhere to show it.
+    pub(crate) fn toggle_queue(&mut self, cx: &mut Context<Self>) {
         if self.state.ui.active_view == ActiveView::Queue {
             // Mirrors the TUI's `q` from the queue view.
             self.state.ui.active_view = ActiveView::Library;
         } else {
             let event = echo_core::intent::open_queue(&mut self.state);
             self.dispatch(event);
+            self.immersive = false;
         }
         cx.notify();
     }
@@ -2272,25 +2274,12 @@ impl EchoApp {
         let artist: SharedString = playback.playing_track_artist.clone().into();
         let has_track = playback.playing_track_id.is_some();
 
-        let progress_ms = playback.display_progress_ms();
-        let fraction = if playback.duration_ms > 0 {
-            (progress_ms as f32 / playback.duration_ms as f32).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let elapsed_label: SharedString = format_time(progress_ms).into();
-        let duration_label: SharedString = format_time(playback.duration_ms).into();
-        let play_icon = if playback.is_playing {
-            "icons/pause.svg"
-        } else {
-            "icons/play.svg"
-        };
-
-        let shuffle_color = if playback.is_shuffled { accent } else { muted };
-        let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
-            "Track" => ("icons/repeat-one.svg", accent),
-            "Context" => ("icons/repeat.svg", accent),
-            _ => ("icons/repeat.svg", muted),
+        let controls = ControlColors {
+            fg,
+            muted,
+            accent,
+            hover: palette.wash,
+            track: palette.border,
         };
         let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
         let volume_label: SharedString = format!("{}%", playback.volume).into();
@@ -2368,7 +2357,6 @@ impl EchoApp {
             None
         };
 
-        let seek_bounds = self.seek_bounds.clone();
         let volume_bounds = self.volume_bounds.clone();
 
         div()
@@ -2555,67 +2543,9 @@ impl EchoApp {
                     .gap_3()
                     .h(px(PLAYBACK_ROW_HEIGHT))
                     .child(
-                        div()
+                        self.transport_controls(controls, cx)
                             .flex_none()
                             .w(px(PLAYBACK_SIDE_WIDTH))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_1()
-                            .child(icon_button(
-                                "previous",
-                                "icons/previous.svg",
-                                fg,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.play_previous(cx),
-                            ))
-                            .child(
-                                div()
-                                    .id("play-pause")
-                                    .flex_none()
-                                    .w(px(36.0))
-                                    .h(px(36.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_full()
-                                    .hover(move |style| style.bg(palette.wash))
-                                    .on_click(cx.listener(|this, _event, _window, cx| {
-                                        this.toggle_playback(cx)
-                                    }))
-                                    .child(
-                                        svg()
-                                            .path(play_icon)
-                                            .w(px(20.0))
-                                            .h(px(20.0))
-                                            .text_color(fg),
-                                    ),
-                            )
-                            .child(icon_button(
-                                "next",
-                                "icons/next.svg",
-                                fg,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.play_next(cx),
-                            ))
-                            .child(icon_button(
-                                "shuffle",
-                                "icons/shuffle.svg",
-                                shuffle_color,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.toggle_shuffle(cx),
-                            ))
-                            .child(icon_button(
-                                "repeat",
-                                repeat_icon,
-                                repeat_color,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.cycle_repeat(cx),
-                            ))
                             .child(icon_button(
                                 "lyrics",
                                 "icons/mic.svg",
@@ -2626,65 +2556,7 @@ impl EchoApp {
                             )),
                     )
                     .child(
-                        div()
-                            .flex_grow(1.0)
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(muted)
-                                    .text_xs()
-                                    .child(elapsed_label),
-                            )
-                            .child(
-                                // Progress track: the canvas overlay records the track's bounds
-                                // each paint, and a click anywhere in the (taller) hit area seeks
-                                // to that fraction.
-                                div()
-                                    .id("seek-bar")
-                                    .flex_grow(1.0)
-                                    .py_2()
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
-                                            this.begin_scrub(Scrub::Seek, event.position.x, cx);
-                                        }),
-                                    )
-                                    .child(
-                                        div()
-                                            .relative()
-                                            .w_full()
-                                            .h(px(6.0))
-                                            .rounded_full()
-                                            .bg(palette.border)
-                                            .child(
-                                                canvas(
-                                                    move |bounds, _window, _cx| seek_bounds.set(bounds),
-                                                    |_, _, _, _| {},
-                                                )
-                                                .absolute()
-                                                .size_full(),
-                                            )
-                                            .child(
-                                                div()
-                                                    .h_full()
-                                                    .rounded_full()
-                                                    .bg(accent)
-                                                    .w(gpui::relative(fraction)),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(muted)
-                                    .text_xs()
-                                    .child(duration_label),
-                            ),
+                        self.seek_bar(controls, cx),
                     )
                     .child(
                         div()
@@ -2833,6 +2705,119 @@ pub(crate) fn icon_button(
         .hover(move |style| style.bg(hover_bg))
         .on_click(cx.listener(move |this, _event, _window, cx| on_click(this, cx)))
         .child(svg().path(icon).w(px(16.0)).h(px(16.0)).text_color(color))
+}
+
+/// The colors the transport and seek bar draw in: the theme's in the playback bar, the
+/// cover's in the immersive view.
+#[derive(Clone, Copy)]
+pub(crate) struct ControlColors {
+    pub fg: Hsla,
+    pub muted: Hsla,
+    pub accent: Hsla,
+    pub hover: Hsla,
+    pub track: Hsla,
+}
+
+impl EchoApp {
+    /// Shuffle, previous, play/pause, next and repeat in a row, two each side of play so it
+    /// centers; the caller sizes the row.
+    pub(crate) fn transport_controls(&self, colors: ControlColors, cx: &mut Context<Self>) -> Div {
+        let playback = &self.state.playback;
+        let play_icon = if playback.is_playing { "icons/pause.svg" } else { "icons/play.svg" };
+        let shuffle_color = if playback.is_shuffled { colors.accent } else { colors.muted };
+        let (repeat_icon, repeat_color) = match playback.repeat_mode.as_str() {
+            "Track" => ("icons/repeat-one.svg", colors.accent),
+            "Context" => ("icons/repeat.svg", colors.accent),
+            _ => ("icons/repeat.svg", colors.muted),
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .child(icon_button("shuffle", "icons/shuffle.svg", shuffle_color, colors.hover, cx, |this, cx| {
+                this.toggle_shuffle(cx)
+            }))
+            .child(icon_button("previous", "icons/previous.svg", colors.fg, colors.hover, cx, |this, cx| {
+                this.play_previous(cx)
+            }))
+            .child(
+                div()
+                    .id("play-pause")
+                    .flex_none()
+                    .w(px(36.0))
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .hover(move |style| style.bg(colors.hover))
+                    .on_click(cx.listener(|this, _event, _window, cx| this.toggle_playback(cx)))
+                    .child(svg().path(play_icon).w(px(20.0)).h(px(20.0)).text_color(colors.fg)),
+            )
+            .child(icon_button("next", "icons/next.svg", colors.fg, colors.hover, cx, |this, cx| {
+                this.play_next(cx)
+            }))
+            .child(icon_button("repeat", repeat_icon, repeat_color, colors.hover, cx, |this, cx| {
+                this.cycle_repeat(cx)
+            }))
+    }
+
+    /// Elapsed time, the seek bar and the duration on one line, growing to the caller's width.
+    /// The canvas overlay records the track's bounds each paint, and a click anywhere in the
+    /// (taller) hit area seeks to that fraction.
+    pub(crate) fn seek_bar(&self, colors: ControlColors, cx: &mut Context<Self>) -> Div {
+        let playback = &self.state.playback;
+        let progress_ms = playback.display_progress_ms();
+        let fraction = if playback.duration_ms > 0 {
+            (progress_ms as f32 / playback.duration_ms as f32).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let seek_bounds = self.seek_bounds.clone();
+        let label = |ms: u32| {
+            div()
+                .flex_none()
+                .text_color(colors.muted)
+                .text_xs()
+                .child(SharedString::from(format_time(ms)))
+        };
+        div()
+            .flex_grow(1.0)
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .child(label(progress_ms))
+            .child(
+                div()
+                    .id("seek-bar")
+                    .flex_grow(1.0)
+                    .py_2()
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                            this.begin_scrub(Scrub::Seek, event.position.x, cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(px(6.0))
+                            .rounded_full()
+                            .bg(colors.track)
+                            .child(
+                                canvas(move |bounds, _window, _cx| seek_bounds.set(bounds), |_, _, _, _| {})
+                                    .absolute()
+                                    .size_full(),
+                            )
+                            .child(div().h_full().rounded_full().bg(colors.accent).w(gpui::relative(fraction))),
+                    ),
+            )
+            .child(label(playback.duration_ms))
+    }
 }
 
 impl Render for EchoApp {
