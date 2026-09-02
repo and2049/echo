@@ -9,7 +9,7 @@ use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
 use super::Tone;
 
-const SIZE: (usize, usize) = (64, 40);
+const SIZE: (usize, usize) = (128, 80);
 /// Per node, prominent color first: the middle of its path, its sweep either way, the turns it
 /// makes per loop on each axis (a negative count runs the other way, a 1:2 ratio a figure
 /// eight) and where along each it starts, in turns. All as fractions of the canvas.

@@ -1,7 +1,6 @@
 //! The vinyl backdrop: the palette laid around the middle of the canvas as a conic gradient
 //! that turns once per loop, like a record on its platter, over faint grooves that crawl
-//! outward and a plain label at the hub. Sectors blend on a smooth ramp and a light blur takes
-//! the last of the edge off.
+//! outward and a plain label at the hub. Sectors blend on a smooth ramp.
 
 use std::f32::consts::TAU;
 
@@ -9,7 +8,7 @@ use super::palette::{CoverPalette, Rgb};
 use super::raster::Raster;
 use super::Tone;
 
-const SIZE: (usize, usize) = (128, 80);
+const SIZE: (usize, usize) = (256, 160);
 const ASPECT: f32 = 1.6;
 /// The palette goes around the hub this many times, so its lighter tints past the end join in.
 const LAPS: usize = 2;
@@ -19,7 +18,6 @@ const GROOVE_DEPTH: f32 = 0.3;
 /// The label at the hub, as a fraction of the height, and the width of its soft rim.
 const HUB: f32 = 0.10;
 const HUB_RIM: f32 = 0.06;
-const BLUR_RADIUS: usize = 3;
 const FADE: (f32, f32) = (0.6, 0.95);
 const FADE_DEPTH: f32 = 0.6;
 
@@ -39,7 +37,6 @@ pub fn paint(palette: &CoverPalette, base: Rgb, tone: Tone, phase: f32) -> Raste
         let hub = 1.0 - ((r - HUB) / HUB_RIM).clamp(0.0, 1.0);
         color.mix(base, GROOVE_DEPTH * groove).mix(base, hub)
     });
-    raster.blur(BLUR_RADIUS);
     raster.settle(base, FADE.0, FADE.1, FADE_DEPTH);
     raster
 }
