@@ -503,7 +503,6 @@ impl LocalLibrary {
                     results.artists.push(Artist {
                         id: stable_local_group_id("local-artist", &key),
                         name: key,
-                        followers: 0,
                         image_url: track.artwork_url(),
                     });
                 }
@@ -969,6 +968,5 @@ pub struct ArtistPageData {
 pub struct Artist {
     pub id: String,
     pub name: String,
-    pub followers: u32,
     pub image_url: Option<String>,
 }

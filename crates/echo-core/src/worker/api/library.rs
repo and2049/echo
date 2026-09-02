@@ -259,8 +259,6 @@ impl SpotifyWorker {
             .map(|artist| crate::models::Artist {
                 id: artist.id.id().to_string(),
                 name: artist.name,
-                // Spotify removed the followers field from the dev-mode API.
-                followers: 0,
                 image_url: artist.images.first().map(|img| img.url.clone()),
             })
             .collect())
@@ -362,29 +360,18 @@ impl SpotifyWorker {
     }
 
     pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
-        let first_page = self
+        let page = self
             .client
             .current_user_followed_artists(None, None)
             .await?;
-        let mut artists = first_page.items;
-        let mut maybe_next = first_page.next;
-
-        while let Some(url) = maybe_next {
-            // need to make a raw request or use rspotify's internal cursor handling if available.
-            // return the first page (50) for now
-            // use reqwest directly if they have more than 50.
-            break;
-        }
-
-        let mut out = Vec::new();
-        for a in artists {
-            out.push(crate::models::Artist {
-                id: a.id.id().to_string(),
-                name: a.name,
-                followers: a.followers.total,
-                image_url: a.images.first().map(|img| img.url.clone()),
-            });
-        }
-        Ok(out)
+        Ok(page
+            .items
+            .into_iter()
+            .map(|artist| crate::models::Artist {
+                id: artist.id.id().to_string(),
+                name: artist.name,
+                image_url: artist.images.first().map(|img| img.url.clone()),
+            })
+            .collect())
     }
 }

@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use crate::{
     config::{AppConfig, CacheData},
     events::WorkerEvent,
-    models::{TrackListContext, TrackListContextKind},
+    models::TrackListContext,
 };
 
 use super::api::SpotifyWorker;
@@ -45,10 +45,6 @@ async fn load_context_tracks_with_policy(
     } else {
         load_playlist_tracks(sp, context, tx, policy).await;
     }
-}
-
-pub(crate) fn route_for_context(context: &TrackListContext) -> TrackListContextKind {
-    context.kind
 }
 
 async fn load_album_tracks(
@@ -151,35 +147,4 @@ fn update_context_cache(context: TrackListContext, tracks: Vec<crate::models::Tr
     let mut cache = AppConfig::load_cache();
     cache.set_context_tracks(context, tracks);
     let _ = AppConfig::save_cache(&cache);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::models::TrackListContextKind;
-
-    #[test]
-    fn context_routes_stay_typed() {
-        let playlist = TrackListContext::playlist(
-            "playlist".to_string(),
-            "Playlist".to_string(),
-            "Owner".to_string(),
-            "owner".to_string(),
-            None,
-        );
-        let album = TrackListContext::album(
-            "album".to_string(),
-            "Album".to_string(),
-            "Artist".to_string(),
-            None,
-        );
-        let generated = TrackListContext::generated("TOP_TRACKS", "Top Tracks");
-
-        assert_eq!(route_for_context(&playlist), TrackListContextKind::Playlist);
-        assert_eq!(route_for_context(&album), TrackListContextKind::Album);
-        assert_eq!(
-            route_for_context(&generated),
-            TrackListContextKind::Generated
-        );
-    }
 }

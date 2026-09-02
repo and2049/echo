@@ -317,7 +317,6 @@ mod tests {
             vec![crate::models::Artist {
                 id: "a".to_string(),
                 name: "A".to_string(),
-                followers: 0,
                 image_url: None,
             }],
         );

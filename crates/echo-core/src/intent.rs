@@ -1769,7 +1769,6 @@ mod tests {
         state.data.top_artists.push(crate::models::Artist {
             id: "a".to_string(),
             name: "A".to_string(),
-            followers: 0,
             image_url: None,
         });
         assert!(open_top_artists(&mut state).is_none());
@@ -1781,13 +1780,11 @@ mod tests {
         state.data.followed_artists.push(crate::models::Artist {
             id: "followed".to_string(),
             name: "Followed".to_string(),
-            followers: 0,
             image_url: None,
         });
         state.data.top_artists.push(crate::models::Artist {
             id: "top".to_string(),
             name: "Top".to_string(),
-            followers: 0,
             image_url: None,
         });
 
@@ -2076,7 +2073,6 @@ mod tests {
         state.data.followed_artists.push(Artist {
             id: "artist".to_string(),
             name: "Artist".to_string(),
-            followers: 0,
             image_url: Some("image".to_string()),
         });
 
@@ -2099,7 +2095,6 @@ mod tests {
         state.data.search_results.artists.push(Artist {
             id: "artist".to_string(),
             name: "Search Artist".to_string(),
-            followers: 0,
             image_url: Some("search-image".to_string()),
         });
 
@@ -2175,7 +2170,6 @@ mod tests {
         state.data.followed_artists.push(Artist {
             id: "artist".to_string(),
             name: "Artist".to_string(),
-            followers: 0,
             image_url: None,
         });
         assert!(open_artist_list(&mut state).is_none());

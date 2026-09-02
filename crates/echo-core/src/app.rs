@@ -1061,7 +1061,7 @@ mod tests {
     fn progress_estimation_when_playing() {
         let state = AppState::new();
         let pb = &state.playback;
-        let effective = effective_progress_ms(pb);
+        let effective = pb.display_progress_ms();
         assert_eq!(effective, 0);
     }
 
@@ -1073,7 +1073,7 @@ mod tests {
         state.playback.is_playing = true;
         state.playback.playback_last_updated_at =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(10));
-        let effective = effective_progress_ms(&state.playback);
+        let effective = state.playback.display_progress_ms();
         assert_eq!(effective, 5000);
     }
 
@@ -1085,7 +1085,7 @@ mod tests {
         state.playback.is_playing = false;
         state.playback.playback_last_updated_at =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(5));
-        let effective = effective_progress_ms(&state.playback);
+        let effective = state.playback.display_progress_ms();
         assert_eq!(effective, 3000);
     }
 
@@ -1096,7 +1096,7 @@ mod tests {
         state.playback.progress_ms = 5000;
         state.playback.is_playing = true;
         state.playback.playback_last_updated_at = None;
-        let effective = effective_progress_ms(&state.playback);
+        let effective = state.playback.display_progress_ms();
         assert_eq!(effective, 5000);
     }
 
@@ -1108,7 +1108,7 @@ mod tests {
         state.playback.is_playing = true;
         state.playback.playback_last_updated_at =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
-        let effective = effective_progress_ms(&state.playback);
+        let effective = state.playback.display_progress_ms();
         // 10000 + ~3000ms = ~13000, allow 120ms tolerance
         assert!(
             effective >= 12940 && effective <= 13060,
@@ -1247,8 +1247,4 @@ mod tests {
         assert!(state.ui.forward_history.is_empty());
         assert!(!state.forward_view_history());
     }
-}
-
-fn effective_progress_ms(pb: &PlaybackState) -> u32 {
-    pb.display_progress_ms()
 }
