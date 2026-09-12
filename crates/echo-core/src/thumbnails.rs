@@ -104,13 +104,16 @@ pub fn thumbs_dir() -> PathBuf {
 /// unique hex id which doubles as the filename; anything else falls back to
 /// an FNV-1a hash of the full URL (DefaultHasher is not stable across runs).
 pub fn disk_path(url: &str) -> PathBuf {
-    let segment = url
-        .trim_end_matches('/')
-        .rsplit('/')
+    let mut segments = url.trim_end_matches('/').rsplit('/');
+    let segment = segments.next().unwrap_or_default();
+    let size = segments
         .next()
-        .unwrap_or_default();
+        .filter(|parent| !parent.is_empty() && parent.chars().all(|c| c.is_ascii_digit()));
     let name = if segment.len() >= 8 && segment.chars().all(|c| c.is_ascii_alphanumeric()) {
-        segment.to_string()
+        match size {
+            Some(size) => format!("{size}-{segment}"),
+            None => segment.to_string(),
+        }
     } else {
         format!("{:016x}", fnv1a(url.as_bytes()))
     };
@@ -274,6 +277,19 @@ mod tests {
         assert_eq!(
             path.file_name().unwrap().to_str().unwrap(),
             "ab67616d00004851b0fe40a6e1692822115acfce"
+        );
+    }
+
+    #[test]
+    fn disk_path_keeps_mosaic_sizes_apart() {
+        let ids =
+            "ab67616d00001e02072f74ed41dfd5773f45e837ab67616d00001e0234b50b5c0f1b5f22729a0b04";
+        let small = disk_path(&format!("https://mosaic.scdn.co/60/{ids}"));
+        let large = disk_path(&format!("https://mosaic.scdn.co/640/{ids}"));
+        assert_ne!(small, large);
+        assert_eq!(
+            large.file_name().unwrap().to_str().unwrap(),
+            format!("640-{ids}")
         );
     }
 
