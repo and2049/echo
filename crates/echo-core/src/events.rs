@@ -109,6 +109,10 @@ pub enum WorkerEvent {
     },
     LocalPlaylistsLoaded(crate::models::LocalPlaylists),
     TracksLoaded(Vec<Track>, TrackListContext),
+    ContextDetailsLoaded {
+        context_id: String,
+        details: crate::context_details::ContextDetails,
+    },
     TracksLoadFailed {
         context_id: String,
         message: String,

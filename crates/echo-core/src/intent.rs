@@ -277,6 +277,44 @@ pub fn toggle_playback(state: &mut AppState) -> AppEvent {
     AppEvent::TogglePlayback(state.playback.is_playing)
 }
 
+pub fn active_context_is_playing(state: &AppState) -> bool {
+    state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .zip(state.playback.playing_context.as_ref())
+        .is_some_and(|(active, playing)| {
+            active.id == playing.context_id && active.is_album() == playing.is_album
+        })
+}
+
+pub fn play_context_from_header(state: &mut AppState) -> Option<AppEvent> {
+    if active_context_is_playing(state) {
+        Some(toggle_playback(state))
+    } else {
+        play_track_at(state, 0)
+    }
+}
+
+pub fn toggle_context_shuffle(state: &mut AppState) -> Vec<AppEvent> {
+    if active_context_is_playing(state) {
+        return vec![toggle_shuffle(state)];
+    }
+    let Some(play) = play_track_at(state, 0) else {
+        return Vec::new();
+    };
+    state.playback.is_shuffled = true;
+    persist_playlist_playback_pref(state);
+    vec![play, AppEvent::ToggleShuffle(true)]
+}
+
+pub fn sort_by_column(state: &mut AppState, sort: crate::app::TrackSort) {
+    state.ui.track_sort_ascending = sort == crate::app::TrackSort::Original
+        || state.ui.track_sort != sort
+        || !state.ui.track_sort_ascending;
+    state.sort_tracks(sort);
+}
+
 /// Pops the queue head optimistically so the queue view moves at once; the playback sync that
 /// follows a skip refetches the real queue while that view is open.
 pub fn next_track(state: &mut AppState) -> AppEvent {
@@ -544,6 +582,8 @@ fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppE
             .iter()
             .filter(|result| result.source == TrackSource::Local)
             .map(|t| Track {
+                explicit: t.explicit,
+                added_by: None,
                 id: t.id.clone(),
                 source: t.source,
                 local_path: t.local_path.clone(),
@@ -1295,7 +1335,7 @@ pub fn move_track_in_playlist(state: &mut AppState, from: usize, to: usize) -> O
     if !context.can_modify_playlist(state.data.user_id.as_ref()) {
         return None;
     }
-    if state.ui.track_sort != crate::app::TrackSort::Original {
+    if state.ui.track_sort != crate::app::TrackSort::Original || !state.ui.track_sort_ascending {
         state.ui.status_message = Some(crate::i18n::t(
             "messages.reorder_requires_original",
             &state.ui.library_config.language,
@@ -1581,6 +1621,90 @@ pub fn next_search_match(state: &mut AppState, forward: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn column_sort_toggles_direction_and_preserves_selection() {
+        use crate::app::TrackSort;
+        let mut state = AppState::new();
+        let mut a = track("a");
+        a.name = "Alpha".into();
+        a.artist = "Alpha".into();
+        a.album = "Alpha".into();
+        a.duration_ms = 1;
+        a.added_at = Some("2026-01-01T00:00:00Z".into());
+        a.added_by = Some("alice".into());
+        let mut b = a.clone();
+        b.id = "b".into();
+        b.name = "Beta".into();
+        b.artist = "Beta".into();
+        b.album = "Beta".into();
+        b.duration_ms = 2;
+        b.added_at = Some("2026-01-02T00:00:00Z".into());
+        b.added_by = Some("Bob".into());
+        state.data.tracks = vec![b, a];
+        state.data.original_tracks = state.data.tracks.clone();
+        for sort in [
+            TrackSort::Title,
+            TrackSort::Artist,
+            TrackSort::Album,
+            TrackSort::Duration,
+            TrackSort::Added,
+            TrackSort::AddedBy,
+        ] {
+            sort_by_column(&mut state, sort);
+            assert_eq!(state.data.tracks[0].id, "a");
+            assert_eq!(state.ui.selected_track_index, 1);
+            sort_by_column(&mut state, sort);
+            assert_eq!(state.data.tracks[0].id, "b");
+            assert_eq!(state.ui.selected_track_index, 0);
+            state.sort_tracks(sort);
+            assert_eq!(state.data.tracks[0].id, "b");
+        }
+        sort_by_column(&mut state, TrackSort::Original);
+        assert!(state.ui.track_sort_ascending);
+        assert_eq!(state.data.tracks, state.data.original_tracks);
+        sort_by_column(&mut state, TrackSort::Original);
+        assert_eq!(state.data.tracks, state.data.original_tracks);
+    }
+
+    #[test]
+    fn header_playback_and_shuffle_use_the_active_context() {
+        let mut state = AppState::new();
+        assert!(play_context_from_header(&mut state).is_none());
+        assert!(toggle_context_shuffle(&mut state).is_empty());
+        state.data.active_tracklist_context = Some(TrackListContext::album(
+            "album".into(),
+            "Album".into(),
+            "Artist".into(),
+            None,
+        ));
+        state.data.tracks = vec![track("a")];
+        assert!(!active_context_is_playing(&state));
+        assert!(matches!(
+            play_context_from_header(&mut state),
+            Some(AppEvent::PlayTrack { .. })
+        ));
+        assert!(active_context_is_playing(&state));
+        state.playback.is_playing = true;
+        assert!(matches!(
+            play_context_from_header(&mut state),
+            Some(AppEvent::TogglePlayback(false))
+        ));
+        assert!(matches!(
+            play_context_from_header(&mut state),
+            Some(AppEvent::TogglePlayback(true))
+        ));
+        state.playback.is_shuffled = false;
+        assert!(matches!(
+            toggle_context_shuffle(&mut state).as_slice(),
+            [AppEvent::ToggleShuffle(true)]
+        ));
+        state.playback.playing_context = None;
+        assert!(matches!(
+            toggle_context_shuffle(&mut state).as_slice(),
+            [AppEvent::PlayTrack { .. }, AppEvent::ToggleShuffle(true)]
+        ));
+    }
+
     use super::*;
     use crate::models::TrackListContextKind;
     use std::path::PathBuf;
@@ -1599,6 +1723,11 @@ mod tests {
 
     fn library_playlist(id: &str) -> crate::models::Playlist {
         crate::models::Playlist {
+            description: None,
+            public: None,
+            collaborative: false,
+            track_count: None,
+            snapshot_id: None,
             id: id.to_string(),
             name: id.to_string(),
             owner: String::new(),
@@ -1648,6 +1777,8 @@ mod tests {
 
     fn track(id: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Spotify,
             local_path: None,
@@ -1731,6 +1862,11 @@ mod tests {
             .search_results
             .playlists
             .push(crate::models::Playlist {
+                description: None,
+                public: None,
+                collaborative: false,
+                track_count: None,
+                snapshot_id: None,
                 id: "pl".to_string(),
                 name: "Mix".to_string(),
                 owner: "Owner".to_string(),
@@ -2112,6 +2248,7 @@ mod tests {
         let mut state = AppState::new();
         state.ui.active_search_tab = SearchTab::Tracks;
         let search_track = |id: &str, name: &str, source, path: Option<&str>| SearchTrack {
+            explicit: false,
             id: id.to_string(),
             source,
             local_path: path.map(PathBuf::from),
@@ -2617,6 +2754,8 @@ mod tests {
 
     fn local_track(id: &str, path: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Local,
             local_path: Some(PathBuf::from(path)),
@@ -2634,6 +2773,8 @@ mod tests {
 
     fn spotify_track(id: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Spotify,
             local_path: None,

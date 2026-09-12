@@ -220,6 +220,7 @@ pub(crate) struct EchoApp {
     pub(crate) backdrops: backdrop::BackdropCache,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
+    pub(crate) sort_menu_top: f32,
     pub(crate) sort_menu_index: usize,
     pub(crate) settings_open: bool,
     pub(crate) settings_path_input: String,
@@ -512,6 +513,7 @@ impl EchoApp {
             backdrops: backdrop::BackdropCache::default(),
             theme_modal_index: 0,
             sort_menu_open: false,
+            sort_menu_top: 96.0,
             sort_menu_index: 0,
             settings_open: false,
             settings_path_input: String::new(),
@@ -2739,6 +2741,7 @@ pub(crate) fn sort_arg(sort: echo_core::app::TrackSort) -> &'static str {
         TrackSort::Album => "album",
         TrackSort::Duration => "duration",
         TrackSort::Added => "added",
+        TrackSort::AddedBy => "addedby",
     }
 }
 

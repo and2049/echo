@@ -10,18 +10,22 @@ use super::api::SpotifyWorker;
 
 pub async fn load_context_tracks(
     spotify: Option<&SpotifyWorker>,
+    api: Option<&super::api::client::EchoSpotifyClient>,
     context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
 ) {
-    load_context_tracks_with_policy(spotify, context, tx, ContextTrackCachePolicy::UseCache).await;
+    load_context_tracks_with_policy(spotify, api, context, tx, ContextTrackCachePolicy::UseCache)
+        .await;
 }
 
 pub async fn refresh_context_tracks(
     spotify: Option<&SpotifyWorker>,
+    api: Option<&super::api::client::EchoSpotifyClient>,
     context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
 ) {
-    load_context_tracks_with_policy(spotify, context, tx, ContextTrackCachePolicy::Refresh).await;
+    load_context_tracks_with_policy(spotify, api, context, tx, ContextTrackCachePolicy::Refresh)
+        .await;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +36,7 @@ pub enum ContextTrackCachePolicy {
 
 async fn load_context_tracks_with_policy(
     spotify: Option<&SpotifyWorker>,
+    api: Option<&super::api::client::EchoSpotifyClient>,
     context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
     policy: ContextTrackCachePolicy,
@@ -41,14 +46,15 @@ async fn load_context_tracks_with_policy(
     };
 
     if context.is_album() {
-        load_album_tracks(sp, context, tx, policy).await;
+        load_album_tracks(sp, api, context, tx, policy).await;
     } else {
-        load_playlist_tracks(sp, context, tx, policy).await;
+        load_playlist_tracks(sp, api, context, tx, policy).await;
     }
 }
 
 async fn load_album_tracks(
     sp: &SpotifyWorker,
+    api: Option<&super::api::client::EchoSpotifyClient>,
     mut context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
     policy: ContextTrackCachePolicy,
@@ -58,12 +64,7 @@ async fn load_album_tracks(
     {
         let needs_refresh = CacheData::context_tracks_need_refresh(&entry);
         let cached = entry.value;
-        let _ = tx
-            .send(WorkerEvent::TracksLoaded(
-                cached.tracks.clone(),
-                cached.context.clone(),
-            ))
-            .await;
+        send_loaded(api, cached.tracks.clone(), cached.context.clone(), tx).await;
         if !needs_refresh {
             return;
         }
@@ -82,7 +83,7 @@ async fn load_album_tracks(
                 }
             }
             update_context_cache(context.clone(), tracks.clone());
-            let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
+            send_loaded(api, tracks, context, tx).await;
         }
         Err(e) => {
             let _ = std::fs::write(
@@ -101,21 +102,18 @@ async fn load_album_tracks(
 
 async fn load_playlist_tracks(
     sp: &SpotifyWorker,
+    api: Option<&super::api::client::EchoSpotifyClient>,
     mut context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
     policy: ContextTrackCachePolicy,
 ) {
     if policy == ContextTrackCachePolicy::UseCache
+        && context.id == "LIKED_SONGS"
         && let Some(entry) = AppConfig::load_cache().get_context_tracks_entry(&context)
     {
         let needs_refresh = CacheData::context_tracks_need_refresh(&entry);
         let cached = entry.value;
-        let _ = tx
-            .send(WorkerEvent::TracksLoaded(
-                cached.tracks.clone(),
-                cached.context.clone(),
-            ))
-            .await;
+        send_loaded(api, cached.tracks.clone(), cached.context.clone(), tx).await;
         if !needs_refresh {
             return;
         }
@@ -126,7 +124,7 @@ async fn load_playlist_tracks(
     match sp.fetch_tracks(&id).await {
         Ok(tracks) => {
             update_context_cache(context.clone(), tracks.clone());
-            let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
+            send_loaded(api, tracks, context, tx).await;
         }
         Err(e) => {
             let _ = std::fs::write(
@@ -147,4 +145,38 @@ fn update_context_cache(context: TrackListContext, tracks: Vec<crate::models::Tr
     let mut cache = AppConfig::load_cache();
     cache.set_context_tracks(context, tracks);
     let _ = AppConfig::save_cache(&cache);
+}
+
+async fn send_loaded(
+    api: Option<&super::api::client::EchoSpotifyClient>,
+    mut tracks: Vec<crate::models::Track>,
+    context: TrackListContext,
+    tx: &mpsc::Sender<WorkerEvent>,
+) {
+    let details = if let Some(api) = api {
+        match api.context_details(&context, &mut tracks).await {
+            Ok(details) => Some(details),
+            Err(error) => {
+                let _ = tx
+                    .send(WorkerEvent::ApiRequestFailed {
+                        label: context.title.clone(),
+                        message: error.to_string(),
+                    })
+                    .await;
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let context_id = context.id.clone();
+    let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
+    if let Some(details) = details {
+        let _ = tx
+            .send(WorkerEvent::ContextDetailsLoaded {
+                context_id,
+                details,
+            })
+            .await;
+    }
 }

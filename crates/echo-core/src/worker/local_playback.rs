@@ -559,6 +559,8 @@ mod tests {
 
     fn track(id: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Local,
             local_path: Some(PathBuf::from(format!("/music/{id}.wav"))),

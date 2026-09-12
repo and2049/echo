@@ -67,6 +67,19 @@
     "title": " 操作: {} "
   },
   "desktop": {
+    "context": {
+      "playlist": "歌单", "public": "公开歌单", "private": "私人歌单", "collaborative": "协作歌单",
+      "album": "专辑", "single": "单曲", "compilation": "合辑",
+      "with": "与 {names} 共建", "and": " 和 ", "songs": "{n} 首歌曲，{total}",
+      "hours_minutes": "{a} 小时 {b} 分钟", "minutes_seconds": "{a} 分 {b} 秒",
+      "unknown_date": "—", "date_format": "%Y年%-m月%-d日",
+      "seconds_ago": "{n} 秒前", "seconds_one_ago": "{n} 秒前",
+      "minutes_ago": "{n} 分钟前", "minutes_one_ago": "{n} 分钟前",
+      "hours_ago": "{n} 小时前", "hours_one_ago": "{n} 小时前",
+      "days_ago": "{n} 天前", "days_one_ago": "{n} 天前",
+      "weeks_ago": "{n} 周前", "weeks_one_ago": "{n} 周前",
+      "title": "标题", "album_column": "专辑", "added_by": "添加者", "date_added": "添加日期", "explicit": "E"
+    },
     "top_tracks": "热门曲目",
     "recently_played": "最近播放",
     "local_badge": "本地",

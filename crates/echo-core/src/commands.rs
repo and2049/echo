@@ -472,7 +472,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                             state.ui.library_config.sort_mode = crate::config::SortMode::Creator
                         }
                         "original" | "title" | "artist" | "album" | "duration" | "added"
-                        | "reverse" => {
+                        | "addedby" | "reverse" => {
                             if state.ui.active_view != crate::app::ActiveView::TrackList {
                                 set_status(state, "Track sorting is available from a track list");
                             } else {
@@ -482,12 +482,14 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                                     "album" => crate::app::TrackSort::Album,
                                     "duration" => crate::app::TrackSort::Duration,
                                     "added" => crate::app::TrackSort::Added,
+                                    "addedby" => crate::app::TrackSort::AddedBy,
                                     _ => crate::app::TrackSort::Original,
                                 };
                                 if mode == "reverse" {
                                     state.reverse_tracks();
                                     set_status(state, "Track order reversed");
                                 } else {
+                                    state.ui.track_sort_ascending = true;
                                     state.sort_tracks(sort);
                                     set_status(state, format!("Tracks sorted by {mode}"));
                                 }
@@ -496,7 +498,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                         }
                         _ => set_status(
                             state,
-                            "Usage: sort <default|alpha|creator|original|title|artist|album|duration|added|reverse>",
+                            "Usage: sort <default|alpha|creator|original|title|artist|album|duration|added|addedby|reverse>",
                         ),
                     }
                     state.save_library_config();

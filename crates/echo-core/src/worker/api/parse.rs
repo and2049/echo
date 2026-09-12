@@ -1,5 +1,49 @@
 use crate::models::{Album, Artist, Track, TrackArtist, TrackSource};
 
+pub(crate) fn playlist(value: &serde_json::Value) -> Option<crate::models::Playlist> {
+    let owner_id = value.pointer("/owner/id")?.as_str()?.to_string();
+    let images = value.get("images").and_then(|v| v.as_array());
+    Some(crate::models::Playlist {
+        id: value.get("id")?.as_str()?.to_string(),
+        name: value.get("name")?.as_str()?.to_string(),
+        owner: value
+            .pointer("/owner/display_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&owner_id)
+            .to_string(),
+        owner_id,
+        image_url: images
+            .and_then(|images| images.first())
+            .and_then(|v| v.get("url"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        thumb_url: images
+            .and_then(|images| images.last())
+            .and_then(|v| v.get("url"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        description: value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        public: value.get("public").and_then(|v| v.as_bool()),
+        collaborative: value
+            .get("collaborative")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        track_count: value
+            .pointer("/items/total")
+            .or_else(|| value.pointer("/tracks/total"))
+            .and_then(|v| v.as_u64())
+            .and_then(|n| u32::try_from(n).ok()),
+        snapshot_id: value
+            .get("snapshot_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+    })
+}
+
 /// Structured artist credits from a raw API `artists` array.
 pub(crate) fn track_artists_json(artists: Option<&Vec<serde_json::Value>>) -> Vec<TrackArtist> {
     artists
@@ -53,6 +97,11 @@ pub(crate) fn track(track: &serde_json::Value) -> Option<Track> {
     let album = track.get("album");
     let artists = track_artists_json(track.get("artists").and_then(|v| v.as_array()));
     Some(Track {
+        explicit: track
+            .get("explicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        added_by: None,
         id,
         source: TrackSource::Spotify,
         local_path: None,
@@ -94,6 +143,8 @@ pub(crate) fn track_from_full(track: rspotify::model::FullTrack) -> Option<Track
     let id = track.id.as_ref()?.id().to_string();
     let artists = track_artists(&track.artists);
     Some(Track {
+        explicit: track.explicit,
+        added_by: None,
         id,
         source: TrackSource::Spotify,
         local_path: None,
@@ -167,6 +218,35 @@ pub(crate) fn artist(artist: &serde_json::Value) -> Option<Artist> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn playlist_metadata_handles_both_total_fields_and_nulls() {
+        let mut value = serde_json::json!({"id":"p", "name":"P", "owner":{"id":"owner", "display_name":"Owner"}, "description":"Description", "public":true, "collaborative":true, "items":{"total":125}, "snapshot_id":"snapshot"});
+        let parsed = playlist(&value).unwrap();
+        assert_eq!(parsed.description.as_deref(), Some("Description"));
+        assert_eq!(parsed.public, Some(true));
+        assert!(parsed.collaborative);
+        assert_eq!(parsed.owner, "Owner");
+        assert_eq!(parsed.track_count, Some(125));
+        assert_eq!(parsed.snapshot_id.as_deref(), Some("snapshot"));
+        value.as_object_mut().unwrap().remove("items");
+        value["tracks"] = serde_json::json!({"total":5});
+        value["owner"]["display_name"] = serde_json::Value::Null;
+        value["public"] = serde_json::Value::Null;
+        let parsed = playlist(&value).unwrap();
+        assert_eq!(parsed.track_count, Some(5));
+        assert_eq!(parsed.owner, "owner");
+        assert_eq!(parsed.public, None);
+        assert!(playlist(&serde_json::Value::Null).is_none());
+    }
+
+    #[test]
+    fn track_explicit_defaults_and_parses() {
+        let mut value = serde_json::json!({"id":"t", "name":"T"});
+        assert!(!track(&value).unwrap().explicit);
+        value["explicit"] = serde_json::Value::Bool(true);
+        assert!(track(&value).unwrap().explicit);
+    }
+
     use super::*;
 
     #[test]

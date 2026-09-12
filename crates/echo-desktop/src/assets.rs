@@ -23,6 +23,7 @@ macro_rules! icons {
 
 icons!(
     "arrow-down",
+    "arrow-up",
     "arrow-left",
     "arrow-right",
     "clock",

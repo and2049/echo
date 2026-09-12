@@ -185,6 +185,8 @@ mod tests {
         state.ui.active_view = ActiveView::TrackList;
         state.data.tracks = (0..30)
             .map(|index| echo_core::models::Track {
+                explicit: false,
+                added_by: None,
                 id: index.to_string(),
                 source: echo_core::models::TrackSource::Spotify,
                 local_path: None,
@@ -222,6 +224,8 @@ mod tests {
         let mut state = AppState::new();
         state.ui.active_view = ActiveView::Queue;
         state.data.queue = vec![echo_core::models::Track {
+            explicit: false,
+            added_by: None,
             id: "one".to_string(),
             source: echo_core::models::TrackSource::Spotify,
             local_path: None,
@@ -246,6 +250,8 @@ mod tests {
         state.data.tracks = ["one", "two"]
             .into_iter()
             .map(|id| echo_core::models::Track {
+                explicit: false,
+                added_by: None,
                 id: id.to_string(),
                 source: echo_core::models::TrackSource::Spotify,
                 local_path: None,

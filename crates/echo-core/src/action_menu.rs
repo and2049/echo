@@ -45,12 +45,10 @@ pub fn run(
                     }
                 }
             } else if let Some(album_id) = ctx.album_id {
-                return Some(AppEvent::LoadContextTracks(TrackListContext::album(
-                    album_id,
-                    String::new(),
-                    String::new(),
-                    None,
-                )));
+                let context =
+                    TrackListContext::album(album_id, ctx.album_name, ctx.artist_name, None);
+                state.begin_tracklist_load(context.clone());
+                return Some(AppEvent::LoadContextTracks(context));
             }
         }
         ActionMenuAction::GoToArtist => {
@@ -288,11 +286,36 @@ fn find_track_by_id(state: &AppState, id: &str) -> Option<Track> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opening_an_album_clears_the_previous_header_details() {
+        let mut state = AppState::new();
+        state.data.active_context_details = Some(crate::context_details::ContextDetails::default());
+        let mut track = spotify_track("track");
+        track.album_id = Some("album".into());
+        track.album = "Album".into();
+        assert!(matches!(
+            run(
+                &mut state,
+                ActionMenuContext::from(&track),
+                ActionMenuAction::GoToAlbum
+            ),
+            Some(AppEvent::LoadContextTracks(_))
+        ));
+        assert!(state.data.active_context_details.is_none());
+        assert_eq!(
+            state.data.active_tracklist_context.as_ref().unwrap().id,
+            "album"
+        );
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+    }
+
     use super::*;
     use crate::models::TrackSource;
 
     fn spotify_track(id: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Spotify,
             local_path: None,
@@ -310,6 +333,11 @@ mod tests {
 
     fn owned_playlist(id: &str, owner_id: &str) -> Playlist {
         Playlist {
+            description: None,
+            public: None,
+            collaborative: false,
+            track_count: None,
+            snapshot_id: None,
             id: id.to_string(),
             name: format!("playlist {id}"),
             owner: "owner".to_string(),

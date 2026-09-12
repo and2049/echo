@@ -48,6 +48,9 @@ impl<T: Clone> Timed<T> {
 
 #[derive(Default)]
 pub struct SpotifyApiCache {
+    pub(crate) user_names: HashMap<String, String>,
+    pub(crate) current_user_loaded: bool,
+    user_lookups: HashMap<String, HashSet<String>>,
     top_tracks: HashMap<TopItemsRange, Timed<Vec<Track>>>,
     top_artists: HashMap<TopItemsRange, Timed<Vec<Artist>>>,
     recently_played: Option<Timed<Vec<Track>>>,
@@ -59,6 +62,14 @@ pub struct SpotifyApiCache {
 }
 
 impl SpotifyApiCache {
+    pub(crate) fn reserve_user_lookup(&mut self, context_id: &str, user_id: &str) -> bool {
+        if self.user_names.contains_key(user_id) {
+            return false;
+        }
+        let lookups = self.user_lookups.entry(context_id.to_string()).or_default();
+        lookups.len() < 5 && lookups.insert(user_id.to_string())
+    }
+
     pub fn top_tracks(&self, range: TopItemsRange) -> Option<Vec<Track>> {
         self.top_tracks.get(&range).and_then(Timed::get)
     }
@@ -167,6 +178,21 @@ impl SpotifyApiCache {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn contributor_lookups_are_cached_and_capped_per_playlist() {
+        let mut cache = SpotifyApiCache::default();
+        cache.user_names.insert("owner".into(), "Owner".into());
+        assert!(!cache.reserve_user_lookup("p", "owner"));
+        for index in 0..5 {
+            assert!(cache.reserve_user_lookup("p", &index.to_string()));
+            assert!(!cache.reserve_user_lookup("p", &index.to_string()));
+        }
+        assert!(!cache.reserve_user_lookup("p", "sixth"));
+        assert!(cache.reserve_user_lookup("other", "sixth"));
+        cache.user_names.insert("sixth".into(), "Sixth".into());
+        assert!(!cache.reserve_user_lookup("third", "sixth"));
+    }
+
     use super::*;
 
     #[test]

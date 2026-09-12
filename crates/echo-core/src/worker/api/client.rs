@@ -42,6 +42,146 @@ pub struct ArtistAlbumsResponse {
 }
 
 impl EchoSpotifyClient {
+    pub async fn context_details(
+        &self,
+        context: &crate::models::TrackListContext,
+        tracks: &mut [Track],
+    ) -> Result<crate::context_details::ContextDetails> {
+        use crate::context_details::{ContextDetails, total_duration};
+        use rspotify::model::Id;
+        let mut details = ContextDetails {
+            owner: context.subtitle.clone(),
+            duration_ms: total_duration(tracks),
+            ..Default::default()
+        };
+        if context.id == "LIKED_SONGS" {
+            let page = self
+                .third_party
+                .current_user_saved_tracks_manual(None, Some(1), Some(0))
+                .await?;
+            details.track_count = Some(page.total);
+            return Ok(details);
+        }
+        let resource = if context.is_album() {
+            "albums"
+        } else {
+            "playlists"
+        };
+        let json = self
+            .third_party_json(&format!(
+                "https://api.spotify.com/v1/{resource}/{}",
+                context.id
+            ))
+            .await?;
+        details.description = json
+            .get("description")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        details.track_count = json
+            .pointer("/items/total")
+            .or_else(|| json.pointer("/tracks/total"))
+            .or_else(|| json.get("total_tracks"))
+            .and_then(|v| v.as_u64())
+            .and_then(|n| u32::try_from(n).ok());
+        if context.is_album() {
+            details.album_type = json
+                .get("album_type")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            details.release_year = json
+                .get("release_date")
+                .and_then(|v| v.as_str())
+                .map(|s| s.chars().take(4).collect());
+            details.owner = parse::joined_artist_names(&parse::track_artists_json(
+                json.get("artists").and_then(|v| v.as_array()),
+            ));
+            return Ok(details);
+        }
+        details.public = json.get("public").and_then(|v| v.as_bool());
+        details.collaborative = json
+            .get("collaborative")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let owner_id = json
+            .pointer("/owner/id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        details.owner = json
+            .pointer("/owner/display_name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(owner_id)
+            .to_string();
+        {
+            let mut cache = self.cache.lock().await;
+            cache
+                .user_names
+                .insert(owner_id.to_string(), details.owner.clone());
+            for playlist in AppConfig::load_cache().get_playlists().unwrap_or_default() {
+                cache.user_names.insert(playlist.owner_id, playlist.owner);
+            }
+        }
+        if !self.cache.lock().await.current_user_loaded {
+            let user = self.third_party.current_user().await?;
+            let id = user.id.id().to_string();
+            let mut cache = self.cache.lock().await;
+            cache
+                .user_names
+                .insert(id.clone(), user.display_name.unwrap_or(id));
+            cache.current_user_loaded = true;
+        }
+        let mut contributors = Vec::new();
+        for track in tracks.iter() {
+            if let Some(id) = &track.added_by
+                && id != owner_id
+                && !contributors.contains(id)
+            {
+                contributors.push(id.clone());
+            }
+        }
+        for id in &contributors {
+            if !self.cache.lock().await.reserve_user_lookup(&context.id, id) {
+                continue;
+            }
+            let user_id = rspotify::model::UserId::from_id(id)?;
+            let user = match self
+                .third_party_json(&format!(
+                    "https://api.spotify.com/v1/users/{}",
+                    user_id.id()
+                ))
+                .await
+            {
+                Ok(user) => user,
+                Err(error) if is_probable_rate_limit(&error) => return Err(error),
+                Err(_) => serde_json::Value::Null,
+            };
+            self.cache.lock().await.user_names.insert(
+                id.clone(),
+                user.get("display_name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(id)
+                    .to_string(),
+            );
+        }
+        let cache = self.cache.lock().await;
+        for id in contributors {
+            let name = cache.user_names.get(&id).cloned().unwrap_or(id);
+            if !details.collaborators.contains(&name) {
+                details.collaborators.push(name);
+            }
+        }
+        for track in tracks {
+            if let Some(id) = &track.added_by
+                && let Some(name) = cache.user_names.get(id)
+            {
+                track.added_by = Some(name.clone());
+            }
+        }
+        Ok(details)
+    }
+
     pub fn new(third_party: AuthCodeSpotify, first_party: Option<SpotifyWebApi>) -> Self {
         Self {
             third_party,
@@ -552,7 +692,7 @@ impl EchoSpotifyClient {
         });
     }
 
-    async fn third_party_json(&self, url: &str) -> Result<serde_json::Value> {
+    pub(super) async fn third_party_json(&self, url: &str) -> Result<serde_json::Value> {
         self.third_party.auto_reauth().await?;
         let token_mutex = self.third_party.get_token();
         let token_guard = token_mutex.lock().await.unwrap();

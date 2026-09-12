@@ -51,6 +51,16 @@ pub struct PlayingContext {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Playlist {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub public: Option<bool>,
+    #[serde(default)]
+    pub collaborative: bool,
+    #[serde(default)]
+    pub track_count: Option<u32>,
+    #[serde(default)]
+    pub snapshot_id: Option<String>,
     pub id: String,
     pub name: String,
     pub owner: String,
@@ -113,6 +123,10 @@ pub struct TrackArtist {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Track {
+    #[serde(default)]
+    pub explicit: bool,
+    #[serde(default)]
+    pub added_by: Option<String>,
     pub id: String,
     #[serde(default)]
     pub source: TrackSource,
@@ -375,6 +389,8 @@ impl From<&SearchTrack> for ActionMenuContext {
 impl From<&SearchTrack> for Track {
     fn from(track: &SearchTrack) -> Self {
         Self {
+            explicit: track.explicit,
+            added_by: None,
             id: track.id.clone(),
             source: track.source,
             local_path: track.local_path.clone(),
@@ -393,6 +409,8 @@ impl From<&SearchTrack> for Track {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchTrack {
+    #[serde(default)]
+    pub explicit: bool,
     pub id: String,
     #[serde(default)]
     pub source: TrackSource,
@@ -468,6 +486,7 @@ impl LocalLibrary {
 
             if matches_all_terms {
                 results.tracks.push(SearchTrack {
+                    explicit: false,
                     id: track.id.clone(),
                     source: TrackSource::Local,
                     local_path: Some(track.path.clone()),
@@ -529,6 +548,8 @@ pub struct LocalTrack {
 impl LocalTrack {
     pub fn to_track(&self) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: self.id.clone(),
             source: TrackSource::Local,
             local_path: Some(self.path.clone()),
@@ -578,6 +599,11 @@ impl LocalPlaylists {
                     LocalPlaylistEntry::SpotifyTrack { image_url, .. } => image_url.clone(),
                 });
                 Playlist {
+                    description: None,
+                    public: None,
+                    collaborative: false,
+                    track_count: None,
+                    snapshot_id: None,
                     id: playlist.id.clone(),
                     name: playlist.name.clone(),
                     owner: "Local".to_string(),
@@ -611,6 +637,8 @@ impl LocalPlaylists {
                     artist_id,
                     ..
                 } => Some(Track {
+                    explicit: false,
+                    added_by: None,
                     id: track_id.clone(),
                     source: TrackSource::Spotify,
                     local_path: None,
@@ -773,6 +801,8 @@ mod tests {
     fn local_track_playback_target_keeps_file_path_separate_from_id() {
         let path = PathBuf::from("/music/track.mp3");
         let track = Track {
+            explicit: false,
+            added_by: None,
             id: stable_local_track_id(&path),
             source: TrackSource::Local,
             local_path: Some(path.clone()),

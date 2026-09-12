@@ -1029,6 +1029,11 @@ mod tests {
     #[test]
     fn library_list_soft_stale_entry_requires_refresh() {
         let mut entry = CachedEntry::new(vec![Playlist {
+            description: None,
+            public: None,
+            collaborative: false,
+            track_count: None,
+            snapshot_id: None,
             id: "playlist".to_string(),
             name: "Playlist".to_string(),
             owner: "Owner".to_string(),

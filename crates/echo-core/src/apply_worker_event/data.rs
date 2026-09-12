@@ -9,12 +9,35 @@ use crate::{
 
 use super::misc::set_timed_status;
 
+pub fn handle_context_details_loaded(
+    state: &mut AppState,
+    context_id: &str,
+    details: crate::context_details::ContextDetails,
+) {
+    if state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .is_some_and(|context| context.id == context_id)
+    {
+        state.data.active_context_details = Some(details);
+    }
+}
+
 pub fn handle_tracks_loaded(
     state: &mut AppState,
     worker_tx: &mpsc::Sender<WorkerEvent>,
     tracks: Vec<Track>,
     context: TrackListContext,
 ) {
+    if state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .is_some_and(|active| active.id != context.id || active.kind != context.kind)
+    {
+        return;
+    }
     let preserve_track_selection = state
         .data
         .active_tracklist_context
@@ -22,15 +45,26 @@ pub fn handle_tracks_loaded(
         .is_some_and(|active| active.id == context.id && active.kind == context.kind);
     let selected_track_index = if preserve_track_selection && !tracks.is_empty() {
         state
-            .ui
-            .selected_track_index
-            .min(tracks.len().saturating_sub(1))
+            .data
+            .tracks
+            .get(state.ui.selected_track_index)
+            .and_then(|selected| tracks.iter().position(|track| track.id == selected.id))
+            .unwrap_or_else(|| {
+                state
+                    .ui
+                    .selected_track_index
+                    .min(tracks.len().saturating_sub(1))
+            })
     } else {
         0
     };
     state.data.original_tracks = tracks.clone();
     state.data.tracks = tracks;
-    state.ui.track_sort = crate::app::TrackSort::Original;
+    if !preserve_track_selection {
+        state.data.active_context_details = None;
+        state.ui.track_sort = crate::app::TrackSort::Original;
+        state.ui.track_sort_ascending = true;
+    }
     state.data.tracklist_image_url = context.image_url.clone();
     if let Some(url) = context.image_url.as_ref() {
         image_tasks::spawn_header_for_url(
@@ -40,8 +74,11 @@ pub fn handle_tracks_loaded(
         );
     }
     state.data.active_tracklist_context = Some(context);
-    state.ui.active_view = app::ActiveView::TrackList;
+    if !preserve_track_selection {
+        state.ui.active_view = app::ActiveView::TrackList;
+    }
     state.ui.selected_track_index = selected_track_index;
+    state.sort_tracks(state.ui.track_sort);
 }
 
 pub fn handle_tracks_load_failed(state: &mut AppState, message: String) {
@@ -181,20 +218,75 @@ fn refresh_open_generated_list(state: &mut AppState, context_id: &str, tracks: &
     }
     state.data.original_tracks = tracks.to_vec();
     state.data.tracks = tracks.to_vec();
-    state.ui.track_sort = crate::app::TrackSort::Original;
     state.ui.selected_track_index = state
         .ui
         .selected_track_index
         .min(tracks.len().saturating_sub(1));
+    state.sort_tracks(state.ui.track_sort);
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn details_ignore_stale_context_and_survive_history() {
+        use crate::context_details::ContextDetails;
+        let mut state = AppState::new();
+        let context = TrackListContext::album("a".into(), "A".into(), "Artist".into(), None);
+        state.begin_tracklist_load(context);
+        let details = ContextDetails {
+            track_count: Some(12),
+            ..Default::default()
+        };
+        handle_context_details_loaded(&mut state, "old", details.clone());
+        assert!(state.data.active_context_details.is_none());
+        handle_context_details_loaded(&mut state, "a", details.clone());
+        assert_eq!(state.data.active_context_details, Some(details.clone()));
+        state.begin_tracklist_load(TrackListContext::album(
+            "b".into(),
+            "B".into(),
+            "Artist".into(),
+            None,
+        ));
+        assert!(state.data.active_context_details.is_none());
+        state.pop_view_history();
+        assert_eq!(state.data.active_context_details, Some(details));
+    }
+
+    #[test]
+    fn track_refresh_preserves_sort_and_ignores_an_old_page() {
+        use crate::app::TrackSort;
+        let mut state = AppState::new();
+        let context = TrackListContext::album("a".into(), "A".into(), "Artist".into(), None);
+        state.begin_tracklist_load(context.clone());
+        state.data.tracks = vec![sample_track("a"), sample_track("b")];
+        state.data.original_tracks = state.data.tracks.clone();
+        crate::intent::sort_by_column(&mut state, TrackSort::Title);
+        crate::intent::sort_by_column(&mut state, TrackSort::Title);
+        let (tx, _) = mpsc::channel(1);
+        handle_tracks_loaded(
+            &mut state,
+            &tx,
+            vec![sample_track("a"), sample_track("b")],
+            context,
+        );
+        assert_eq!(state.data.tracks[0].id, "b");
+        assert_eq!(state.data.tracks[state.ui.selected_track_index].id, "a");
+        handle_tracks_loaded(
+            &mut state,
+            &tx,
+            vec![],
+            TrackListContext::album("old".into(), "Old".into(), "Artist".into(), None),
+        );
+        assert_eq!(state.data.tracks.len(), 2);
+    }
+
     use super::*;
     use crate::models::{BrowseNode, TrackSource};
 
     fn sample_track(id: &str) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: TrackSource::Spotify,
             local_path: None,

@@ -79,6 +79,8 @@ mod tests {
         state.ui.active_view = ActiveView::Library;
         state.ui.selected_playlist_index = 0; // The "Browse" node
         state.data.top_tracks = vec![echo_core::models::Track {
+            explicit: false,
+            added_by: None,
             id: "track1".to_string(),
             source: echo_core::models::TrackSource::Spotify,
             local_path: None,
@@ -109,6 +111,8 @@ mod tests {
         let mut state = AppState::new();
         state.ui.active_browse_node = BrowseNode::TopTracks;
         state.data.top_tracks = vec![echo_core::models::Track {
+            explicit: false,
+            added_by: None,
             id: "track".to_string(),
             source: echo_core::models::TrackSource::Spotify,
             local_path: None,

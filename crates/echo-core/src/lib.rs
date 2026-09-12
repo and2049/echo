@@ -12,6 +12,7 @@ pub mod artwork;
 pub mod bootstrap;
 pub mod commands;
 pub mod config;
+pub mod context_details;
 pub mod events;
 pub mod i18n;
 pub mod image_tasks;

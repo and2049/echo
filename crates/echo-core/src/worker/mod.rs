@@ -894,20 +894,22 @@ impl Worker {
                                 }
                             }
                             AppEvent::LoadContextTracks(context) => {
+                                let api = api_client.clone();
                                 if let Some(sp) = spotify_opt.as_ref() {
                                     let sp = sp.clone();
                                     let tx = self.tx.clone();
                                     tokio::spawn(async move {
-                                        tracks::load_context_tracks(Some(&sp), context, &tx).await;
+                                        tracks::load_context_tracks(Some(&sp), api.as_ref(), context, &tx).await;
                                     });
                                 }
                             }
                             AppEvent::RefreshContextTracks(context) => {
+                                let api = api_client.clone();
                                 if let Some(sp) = spotify_opt.as_ref() {
                                     let sp = sp.clone();
                                     let tx = self.tx.clone();
                                     tokio::spawn(async move {
-                                        tracks::refresh_context_tracks(Some(&sp), context, &tx).await;
+                                        tracks::refresh_context_tracks(Some(&sp), api.as_ref(), context, &tx).await;
                                     });
                                 }
                             }
@@ -960,6 +962,8 @@ impl Worker {
                             AppEvent::PlayTrack { target, track_id, title, artist, duration_ms, image_url, album_id } => {
                                 if let PlaybackTarget::LocalTrack { track_id: _, path } = target.clone() {
                                     let track = crate::models::Track {
+                                        explicit: false,
+                                        added_by: None,
                                         id: track_id.clone(),
                                         source: TrackSource::Local,
                                         local_path: Some(path),
@@ -1619,6 +1623,11 @@ impl Worker {
                                                     let owner = p.owner.display_name.clone().unwrap_or_else(|| p.owner.id.id().to_string());
                                                     let owner_id = p.owner.id.id().to_string();
                                                     out.push(crate::models::Playlist {
+                                                        description: None,
+                                                        public: p.public,
+                                                        collaborative: p.collaborative,
+                                                        track_count: Some(p.items.total),
+                                                        snapshot_id: Some(p.snapshot_id),
                                                         id: p.id.id().to_string(),
                                                         name: p.name,
                                                         owner,
@@ -1967,6 +1976,7 @@ mod tests {
     fn merged_search_results_keep_spotify_and_local_tracks() {
         let spotify = crate::models::SearchResults {
             tracks: vec![crate::models::SearchTrack {
+                explicit: false,
                 id: "spotify".to_string(),
                 source: TrackSource::Spotify,
                 local_path: None,
@@ -1984,6 +1994,7 @@ mod tests {
         };
         let local = crate::models::SearchResults {
             tracks: vec![crate::models::SearchTrack {
+                explicit: false,
                 id: "local:a".to_string(),
                 source: TrackSource::Local,
                 local_path: Some(PathBuf::from("/music/a.wav")),

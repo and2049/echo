@@ -611,6 +611,8 @@ impl SpotifyWorker {
                     }
                     let artists = super::parse::track_artists(&track.artists);
                     out.push(Track {
+                        explicit: track.explicit,
+                        added_by: None,
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         source: TrackSource::Spotify,
                         local_path: None,
@@ -674,6 +676,11 @@ impl SpotifyWorker {
                         .to_string();
 
                     out.push(Track {
+                        explicit: val
+                            .get("explicit")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        added_by: None,
                         id,
                         source: TrackSource::Spotify,
                         local_path: None,

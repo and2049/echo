@@ -102,6 +102,10 @@ pub fn apply_worker_event(
         WorkerEvent::TracksLoaded(tracks, context) => {
             data::handle_tracks_loaded(state, worker_tx, tracks, context)
         }
+        WorkerEvent::ContextDetailsLoaded {
+            context_id,
+            details,
+        } => data::handle_context_details_loaded(state, &context_id, details),
         WorkerEvent::TracksLoadFailed {
             context_id: _,
             message,

@@ -76,6 +76,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     state.data.search_results.tracks[start..=end]
                                         .iter()
                                         .map(|t| echo_core::models::Track {
+                                            explicit: t.explicit,
+                                            added_by: None,
                                             id: t.id.clone(),
                                             source: t.source,
                                             local_path: t.local_path.clone(),

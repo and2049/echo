@@ -52,6 +52,7 @@ impl SpotifyWorker {
                     let image_url = t.album.images.first().map(|i| i.url.clone());
                     let album_id = t.album.id.map(|id| id.id().to_string());
                     Some(crate::models::SearchTrack {
+                        explicit: t.explicit,
                         id,
                         source: crate::models::TrackSource::Spotify,
                         local_path: None,
@@ -111,29 +112,24 @@ impl SpotifyWorker {
                 .collect();
         }
 
-        // Playlist payloads are the flakiest search bucket (null items are a known
-        // Spotify quirk); the `if let Ok` keeps a failure here from touching the
-        // other tabs.
-        if let Ok(rspotify::model::SearchResult::Playlists(page)) = self
-            .client
-            .search(query, SearchType::Playlist, None, None, Some(10), None)
-            .await
-        {
-            results.playlists = page
-                .items
-                .into_iter()
-                .map(|p| {
-                    let owner_id = p.owner.id.id().to_string();
-                    crate::models::Playlist {
-                        id: p.id.id().to_string(),
-                        name: p.name,
-                        owner: p.owner.display_name.unwrap_or_else(|| owner_id.clone()),
-                        owner_id,
-                        image_url: p.images.first().map(|i| i.url.clone()),
-                        thumb_url: p.images.last().map(|i| i.url.clone()),
-                    }
-                })
-                .collect();
+        let api = super::client::EchoSpotifyClient::new(self.client.clone(), None);
+        let mut url = reqwest::Url::parse("https://api.spotify.com/v1/search")?;
+        url.query_pairs_mut()
+            .append_pair("q", query)
+            .append_pair("type", "playlist")
+            .append_pair("limit", "10");
+        match api.third_party_json(url.as_str()).await {
+            Ok(page) => {
+                results.playlists = page
+                    .pointer("/playlists/items")
+                    .and_then(|v| v.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(super::parse::playlist)
+                    .collect()
+            }
+            Err(error) if super::rate_limit::is_probable_rate_limit(&error) => return Err(error),
+            Err(_) => {}
         }
 
         Ok(results)
@@ -174,6 +170,8 @@ mod tests {
 
     fn track_credited_to(ids: &[Option<&str>]) -> Track {
         Track {
+            explicit: false,
+            added_by: None,
             id: "track".to_string(),
             source: crate::models::TrackSource::Spotify,
             local_path: None,

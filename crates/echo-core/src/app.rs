@@ -81,6 +81,7 @@ pub struct UIState {
     // Operation register (cut/paste)
     pub operation_register: Vec<String>,
     pub track_sort: TrackSort,
+    pub track_sort_ascending: bool,
     pub pending_key_sequence: Option<(String, std::time::Instant)>,
 }
 
@@ -150,6 +151,7 @@ impl UIState {
             thumbnails: crate::thumbnails::ThumbnailCache::default(),
             operation_register: vec![],
             track_sort: TrackSort::Original,
+            track_sort_ascending: true,
             pending_key_sequence: None,
         }
     }
@@ -274,6 +276,7 @@ pub struct DataState {
     pub tracks: Vec<Track>,
     pub original_tracks: Vec<Track>,
     pub active_tracklist_context: Option<TrackListContext>,
+    pub active_context_details: Option<crate::context_details::ContextDetails>,
     pub tracklist_image_url: Option<String>,
     // Queue
     pub queue: Vec<Track>,
@@ -308,6 +311,7 @@ impl DataState {
             tracks: Vec::new(),
             original_tracks: Vec::new(),
             active_tracklist_context: None,
+            active_context_details: None,
             tracklist_image_url: None,
             queue: Vec::new(),
             manual_queue: Vec::new(),
@@ -414,6 +418,9 @@ pub struct NavigationSnapshot {
     tracks: Vec<Track>,
     original_tracks: Vec<Track>,
     track_context: Option<TrackListContext>,
+    context_details: Option<crate::context_details::ContextDetails>,
+    track_sort: TrackSort,
+    track_sort_ascending: bool,
     tracklist_image_url: Option<String>,
     search_results: SearchResults,
     artist_page_data: Option<ArtistPageData>,
@@ -455,6 +462,7 @@ pub enum TrackSort {
     Album,
     Duration,
     Added,
+    AddedBy,
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +552,9 @@ impl AppState {
     }
 
     pub fn sort_tracks(&mut self, sort: TrackSort) {
+        if sort != self.ui.track_sort {
+            self.ui.track_sort_ascending = true;
+        }
         let selected_id = self
             .data
             .tracks
@@ -552,6 +563,9 @@ impl AppState {
 
         if sort == TrackSort::Original {
             self.data.tracks.clone_from(&self.data.original_tracks);
+            if !self.ui.track_sort_ascending {
+                self.data.tracks.reverse();
+            }
         } else {
             self.data.tracks.sort_by(|left, right| {
                 let order = match sort {
@@ -562,9 +576,20 @@ impl AppState {
                     TrackSort::Album => left.album.to_lowercase().cmp(&right.album.to_lowercase()),
                     TrackSort::Duration => left.duration_ms.cmp(&right.duration_ms),
                     TrackSort::Added => left.added_at.cmp(&right.added_at),
+                    TrackSort::AddedBy => left
+                        .added_by
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_lowercase()
+                        .cmp(&right.added_by.as_deref().unwrap_or_default().to_lowercase()),
                     TrackSort::Original => std::cmp::Ordering::Equal,
                 };
-                order.then_with(|| left.id.cmp(&right.id))
+                let order = order.then_with(|| left.id.cmp(&right.id));
+                if self.ui.track_sort_ascending {
+                    order
+                } else {
+                    order.reverse()
+                }
             });
         }
         self.ui.track_sort = sort;
@@ -589,6 +614,9 @@ impl AppState {
             tracks: self.data.tracks.clone(),
             original_tracks: self.data.original_tracks.clone(),
             track_context: self.data.active_tracklist_context.clone(),
+            context_details: self.data.active_context_details.clone(),
+            track_sort: self.ui.track_sort,
+            track_sort_ascending: self.ui.track_sort_ascending,
             tracklist_image_url: self.data.tracklist_image_url.clone(),
             search_results: self.data.search_results.clone(),
             artist_page_data: self.data.artist_page_data.clone(),
@@ -610,6 +638,9 @@ impl AppState {
         self.data.tracks = snapshot.tracks;
         self.data.original_tracks = snapshot.original_tracks;
         self.data.active_tracklist_context = snapshot.track_context;
+        self.data.active_context_details = snapshot.context_details;
+        self.ui.track_sort = snapshot.track_sort;
+        self.ui.track_sort_ascending = snapshot.track_sort_ascending;
         self.data.tracklist_image_url = snapshot.tracklist_image_url;
         self.data.search_results = snapshot.search_results;
         self.data.artist_page_data = snapshot.artist_page_data;
@@ -649,6 +680,7 @@ impl AppState {
     }
 
     pub fn reverse_tracks(&mut self) {
+        self.ui.track_sort_ascending = !self.ui.track_sort_ascending;
         let selected_id = self
             .data
             .tracks
@@ -670,6 +702,11 @@ impl AppState {
         // 0. Liked Songs (Always at the top)
         view.push(LibraryNode::Playlist {
             playlist: crate::models::Playlist {
+                description: None,
+                public: None,
+                collaborative: false,
+                track_count: None,
+                snapshot_id: None,
                 id: "LIKED_SONGS".to_string(),
                 name: "♥️ Liked Songs".to_string(),
                 owner: String::new(),
@@ -685,6 +722,11 @@ impl AppState {
         {
             view.push(LibraryNode::Playlist {
                 playlist: crate::models::Playlist {
+                    description: None,
+                    public: None,
+                    collaborative: false,
+                    track_count: None,
+                    snapshot_id: None,
                     id: "local-library".to_string(),
                     name: "📁 Local Music".to_string(),
                     owner: "Local".to_string(),
@@ -817,6 +859,10 @@ impl AppState {
         self.data.tracks.clear();
         self.ui.selected_track_index = 0;
         self.data.active_tracklist_context = Some(context.clone());
+        self.data.active_context_details = None;
+        self.data.original_tracks.clear();
+        self.ui.track_sort = TrackSort::Original;
+        self.ui.track_sort_ascending = true;
         self.data.tracklist_image_url = context.image_url.clone();
         self.clear_header_image();
         self.clear_pending_artist_page();
@@ -836,6 +882,10 @@ impl AppState {
         self.data.tracks = tracks;
         self.ui.selected_track_index = 0;
         self.data.active_tracklist_context = Some(context);
+        self.data.active_context_details = None;
+        self.data.original_tracks = self.data.tracks.clone();
+        self.ui.track_sort = TrackSort::Original;
+        self.ui.track_sort_ascending = true;
         self.data.tracklist_image_url = None;
         self.clear_header_image();
         self.clear_pending_artist_page();
@@ -857,7 +907,11 @@ impl AppState {
         self.data.tracks = self.data.local_library.to_tracks();
         self.ui.selected_track_index = 0;
         self.data.active_tracklist_context = Some(context);
+        self.data.active_context_details = None;
         self.data.tracklist_image_url = None;
+        self.data.original_tracks = self.data.tracks.clone();
+        self.ui.track_sort = TrackSort::Original;
+        self.ui.track_sort_ascending = true;
         self.clear_header_image();
         self.clear_pending_artist_page();
     }
@@ -881,7 +935,11 @@ impl AppState {
             .tracks_for_playlist(playlist_id, &self.data.local_library);
         self.ui.selected_track_index = 0;
         self.data.active_tracklist_context = Some(context);
+        self.data.active_context_details = None;
         self.data.tracklist_image_url = None;
+        self.data.original_tracks = self.data.tracks.clone();
+        self.ui.track_sort = TrackSort::Original;
+        self.ui.track_sort_ascending = true;
         self.clear_header_image();
         self.clear_pending_artist_page();
     }
@@ -1125,6 +1183,8 @@ mod tests {
     fn track_sort_preserves_selection_and_original_order() {
         let mut state = AppState::new();
         let track = |id: &str, name: &str, duration_ms| crate::models::Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: crate::models::TrackSource::Spotify,
             local_path: None,
@@ -1181,6 +1241,8 @@ mod tests {
         let mut state = AppState::new();
         state.show_generated_tracks(
             vec![crate::models::Track {
+                explicit: false,
+                added_by: None,
                 id: "track".to_string(),
                 source: crate::models::TrackSource::Spotify,
                 local_path: None,
@@ -1211,6 +1273,8 @@ mod tests {
         let mut state = AppState::new();
         state.show_generated_tracks(
             vec![crate::models::Track {
+                explicit: false,
+                added_by: None,
                 id: "track".to_string(),
                 source: crate::models::TrackSource::Spotify,
                 local_path: None,

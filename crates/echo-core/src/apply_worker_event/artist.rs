@@ -201,6 +201,8 @@ mod tests {
 
     fn sample_track(id: &str) -> crate::models::Track {
         crate::models::Track {
+            explicit: false,
+            added_by: None,
             id: id.to_string(),
             source: crate::models::TrackSource::Spotify,
             local_path: None,

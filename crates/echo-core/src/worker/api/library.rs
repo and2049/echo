@@ -15,34 +15,17 @@ fn time_range(range: crate::models::TopItemsRange) -> rspotify::model::TimeRange
 
 impl SpotifyWorker {
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
-        let page = match self.client.current_user_playlists_manual(None, None).await {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = std::fs::write(
-                    crate::config::debug_log_path("echo-debug-user-playlists.log"),
-                    format!("User playlists fetch error: {:?}", e),
-                );
-                return Err(e.into());
-            }
-        };
-        let mut out = Vec::new();
-        for p in page.items {
-            let owner = p
-                .owner
-                .display_name
-                .clone()
-                .unwrap_or_else(|| p.owner.id.id().to_string());
-            let owner_id = p.owner.id.id().to_string();
-            out.push(Playlist {
-                id: p.id.id().to_string(),
-                name: p.name,
-                owner,
-                owner_id,
-                image_url: p.images.first().map(|i| i.url.clone()),
-                thumb_url: p.images.last().map(|i| i.url.clone()),
-            });
-        }
-        Ok(out)
+        let api = super::client::EchoSpotifyClient::new(self.client.clone(), None);
+        let page = api
+            .third_party_json("https://api.spotify.com/v1/me/playlists")
+            .await?;
+        Ok(page
+            .get("items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(super::parse::playlist)
+            .collect())
     }
 
     pub async fn fetch_albums(&self) -> Result<Vec<crate::models::Album>> {
@@ -100,6 +83,8 @@ impl SpotifyWorker {
                     }
                     let artists = super::parse::track_artists(&track.artists);
                     out.push(Track {
+                        explicit: track.explicit,
+                        added_by: None,
                         id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                         source: TrackSource::Spotify,
                         local_path: None,
@@ -124,59 +109,40 @@ impl SpotifyWorker {
 
         let id = rspotify::model::PlaylistId::from_id(playlist_id)?;
 
-        // Debug raw request
-        if let Ok(token_mutex) = self.client.get_token().lock().await
-            && let Some(token) = token_mutex.as_ref()
-        {
-            let raw_url = format!("https://api.spotify.com/v1/playlists/{}/items", id.id());
-            let client = reqwest::Client::new();
-            if let Ok(res) = client
-                .get(&raw_url)
-                .bearer_auth(&token.access_token)
-                .send()
-                .await
-            {
-                let status = res.status();
-                if let Ok(body) = res.text().await {
-                    let _ = std::fs::write(
-                        crate::config::debug_log_path("echo-debug-playlist.log"),
-                        format!("RAW REQUEST RESPONSE ({}): {}", status, body),
-                    );
+        let mut out = Vec::new();
+        let mut offset = 0;
+        loop {
+            let page = self
+                .client
+                .playlist_items_manual(id.clone(), None, None, Some(50), Some(offset))
+                .await?;
+            let has_next = page.next.is_some();
+            for item in page.items {
+                let added_at = item.added_at.map(|value| value.to_rfc3339());
+                if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
+                    let artists = super::parse::track_artists(&track.artists);
+                    out.push(Track {
+                        explicit: track.explicit,
+                        added_by: item.added_by.map(|user| user.id.id().to_string()),
+                        id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
+                        source: TrackSource::Spotify,
+                        local_path: None,
+                        name: track.name,
+                        artist: super::parse::joined_artist_names(&artists),
+                        album: track.album.name,
+                        added_at,
+                        duration_ms: track.duration.num_milliseconds() as u32,
+                        image_url: track.album.images.first().map(|img| img.url.clone()),
+                        album_id: track.album.id.map(|id| id.id().to_string()),
+                        artist_id: artists.first().and_then(|a| a.id.clone()),
+                        artists,
+                    });
                 }
             }
-        }
-
-        let page = match self
-            .client
-            .playlist_items_manual(id, None, None, None, None)
-            .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                // The raw request above already wrote the body, so we can just return
-                return Err(e.into());
+            if !has_next {
+                break;
             }
-        };
-        let mut out = Vec::new();
-        for item in page.items {
-            let added_at = item.added_at.map(|value| value.to_rfc3339());
-            if let Some(rspotify::model::PlayableItem::Track(track)) = item.item {
-                let artists = super::parse::track_artists(&track.artists);
-                out.push(Track {
-                    id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
-                    source: TrackSource::Spotify,
-                    local_path: None,
-                    name: track.name,
-                    artist: super::parse::joined_artist_names(&artists),
-                    album: track.album.name,
-                    added_at,
-                    duration_ms: track.duration.num_milliseconds() as u32,
-                    image_url: track.album.images.first().map(|img| img.url.clone()),
-                    album_id: track.album.id.map(|id| id.id().to_string()),
-                    artist_id: artists.first().and_then(|a| a.id.clone()),
-                    artists,
-                });
-            }
+            offset += 50;
         }
         Ok(out)
     }
@@ -208,6 +174,8 @@ impl SpotifyWorker {
             }
             let artists = super::parse::track_artists(&track.artists);
             out.push(Track {
+                explicit: track.explicit,
+                added_by: None,
                 id: track.id.map(|i| i.id().to_string()).unwrap_or_default(),
                 source: TrackSource::Spotify,
                 local_path: None,
@@ -336,6 +304,11 @@ impl SpotifyWorker {
                             .map(|s| s.to_string());
 
                         tracks.push(Track {
+                            explicit: track
+                                .get("explicit")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false),
+                            added_by: None,
                             id,
                             source: TrackSource::Spotify,
                             local_path: None,

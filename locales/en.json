@@ -67,6 +67,19 @@
     "title": " Actions: {} "
   },
   "desktop": {
+    "context": {
+      "playlist": "Playlist", "public": "Public playlist", "private": "Private playlist", "collaborative": "Collaborative playlist",
+      "album": "Album", "single": "Single", "compilation": "Compilation",
+      "with": "with {names}", "and": " and ", "songs": "{n} songs, {total}",
+      "hours_minutes": "{a} hr {b} min", "minutes_seconds": "{a} min {b} sec",
+      "unknown_date": "—", "date_format": "%b %-d, %Y",
+      "seconds_ago": "{n} seconds ago", "seconds_one_ago": "{n} second ago",
+      "minutes_ago": "{n} minutes ago", "minutes_one_ago": "{n} minute ago",
+      "hours_ago": "{n} hours ago", "hours_one_ago": "{n} hour ago",
+      "days_ago": "{n} days ago", "days_one_ago": "{n} day ago",
+      "weeks_ago": "{n} weeks ago", "weeks_one_ago": "{n} week ago",
+      "title": "TITLE", "album_column": "ALBUM", "added_by": "ADDED BY", "date_added": "DATE ADDED", "explicit": "E"
+    },
     "top_tracks": "Top Tracks",
     "recently_played": "Recently Played",
     "local_badge": "local",
