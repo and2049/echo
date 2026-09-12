@@ -18,6 +18,59 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 
+pub const AUTO_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+pub const AUTO_CHECK_STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
+
+pub fn auto_check_due(
+    last_check: Option<std::time::Instant>,
+    now: std::time::Instant,
+    interval: std::time::Duration,
+) -> bool {
+    last_check.is_none_or(|last| now.saturating_duration_since(last) >= interval)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoStep {
+    Skip,
+    Check,
+    Install,
+    Notify,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct AutoUpdateInputs {
+    pub dev_build: bool,
+    pub enabled: bool,
+    pub startup_elapsed: bool,
+    pub due: bool,
+    pub busy: bool,
+    pub available: bool,
+    pub pending: bool,
+    pub installed: bool,
+    pub ready: bool,
+}
+
+pub fn auto_step(input: AutoUpdateInputs) -> AutoStep {
+    if input.ready {
+        return AutoStep::Notify;
+    }
+    if input.dev_build || !input.enabled || !input.startup_elapsed || input.busy || input.installed
+    {
+        return AutoStep::Skip;
+    }
+    if input.available && input.pending {
+        return AutoStep::Install;
+    }
+    if input.available {
+        return AutoStep::Skip;
+    }
+    if input.due {
+        AutoStep::Check
+    } else {
+        AutoStep::Skip
+    }
+}
+
 /// Owner/name of the repository releases are pulled from. Matches the install scripts.
 pub const REPO: &str = "and2049/echo";
 
@@ -651,6 +704,107 @@ fn resign_if_bundled(_dir: &Path, _moves: &[(PathBuf, PathBuf)]) {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn automatic_check_schedule() {
+        let now = std::time::Instant::now();
+        assert!(auto_check_due(None, now, AUTO_CHECK_INTERVAL));
+        assert!(!auto_check_due(
+            Some(now),
+            now + AUTO_CHECK_INTERVAL - std::time::Duration::from_secs(1),
+            AUTO_CHECK_INTERVAL
+        ));
+        assert!(auto_check_due(
+            Some(now),
+            now + AUTO_CHECK_INTERVAL,
+            AUTO_CHECK_INTERVAL
+        ));
+        assert!(auto_check_due(
+            Some(now),
+            now + AUTO_CHECK_INTERVAL + std::time::Duration::from_secs(1),
+            AUTO_CHECK_INTERVAL
+        ));
+    }
+
+    #[test]
+    fn automatic_update_decisions() {
+        let idle = AutoUpdateInputs {
+            dev_build: false,
+            enabled: true,
+            startup_elapsed: true,
+            due: true,
+            busy: false,
+            available: false,
+            pending: false,
+            installed: false,
+            ready: false,
+        };
+        for (input, expected) in [
+            (idle, AutoStep::Check),
+            (
+                AutoUpdateInputs {
+                    available: true,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (
+                AutoUpdateInputs {
+                    dev_build: true,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (
+                AutoUpdateInputs {
+                    enabled: false,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (
+                AutoUpdateInputs {
+                    startup_elapsed: false,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (AutoUpdateInputs { due: false, ..idle }, AutoStep::Skip),
+            (AutoUpdateInputs { busy: true, ..idle }, AutoStep::Skip),
+            (
+                AutoUpdateInputs {
+                    installed: true,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (
+                AutoUpdateInputs {
+                    available: true,
+                    pending: true,
+                    due: false,
+                    ..idle
+                },
+                AutoStep::Install,
+            ),
+            (
+                AutoUpdateInputs {
+                    available: true,
+                    due: false,
+                    ..idle
+                },
+                AutoStep::Skip,
+            ),
+            (
+                AutoUpdateInputs {
+                    ready: true,
+                    ..idle
+                },
+                AutoStep::Notify,
+            ),
+        ] {
+            assert_eq!(auto_step(input), expected);
+        }
+    }
     use super::*;
 
     #[test]

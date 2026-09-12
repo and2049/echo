@@ -5014,6 +5014,18 @@ pub fn settings_modal(
     let translate = |key: &str, value: &str| -> SharedString {
         SharedString::from(echo_core::i18n::t(key, &config.language).replace("{}", value))
     };
+    let auto_update_row = row(
+        s("desktop.settings.updates.auto"),
+        Some(s("desktop.settings.updates.auto_desc")),
+        choices(
+            "autoupdate",
+            vec![
+                (s("ui.on"), "autoupdate on".into(), config.auto_update),
+                (s("ui.off"), "autoupdate off".into(), !config.auto_update),
+            ],
+            cx,
+        ),
+    );
     let (update_label, update_hint, update_active) = match &app.update_state {
         UpdateState::Idle => (s("desktop.settings.updates.check"), None, true),
         UpdateState::Checking => (s("desktop.settings.updates.checking"), None, false),
@@ -5202,6 +5214,7 @@ pub fn settings_modal(
                         )
                         .child(heading(s("desktop.settings.updates.section")))
                         .child(version_row)
+                        .child(auto_update_row)
                         .child(update_row),
                 ),
         )

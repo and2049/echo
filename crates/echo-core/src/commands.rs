@@ -43,6 +43,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("backdrop <name>", "Immersive view backdrop (desktop)"),
     ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
     (
+        "autoupdate [on|off]",
+        "Install new releases automatically (desktop)",
+    ),
+    (
         "tray [on|off]",
         "Close button hides echo to the tray (desktop)",
     ),
@@ -631,6 +635,33 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 };
                 state.set_library_thumbnails(enabled);
             }
+            "autoupdate" => {
+                state.ui.library_config.auto_update = match args.next() {
+                    Some("on") => true,
+                    Some("off") => false,
+                    None => !state.ui.library_config.auto_update,
+                    Some(_) => {
+                        set_status(
+                            state,
+                            crate::i18n::t(
+                                "desktop.settings.updates.auto_usage",
+                                &state.ui.library_config.language,
+                            ),
+                        );
+                        return None;
+                    }
+                };
+                state.save_library_config();
+                let key = if state.ui.library_config.auto_update {
+                    "desktop.settings.updates.auto_on"
+                } else {
+                    "desktop.settings.updates.auto_off"
+                };
+                set_status(
+                    state,
+                    crate::i18n::t(key, &state.ui.library_config.language),
+                );
+            }
             "tray" => {
                 state.ui.library_config.close_to_tray = match args.next() {
                     Some("on") => true,
@@ -849,6 +880,21 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn autoupdate_command_toggles_and_takes_on_off() {
+        let mut state = AppState::new();
+        for (command, enabled, message) in [
+            ("autoupdate", false, "Automatic updates off"),
+            ("autoupdate on", true, "Automatic updates on"),
+            ("autoupdate off", false, "Automatic updates off"),
+            ("autoupdate invalid", false, "Usage: autoupdate [on|off]"),
+        ] {
+            assert!(submit_command(&mut state, command).is_none());
+            assert_eq!(state.ui.library_config.auto_update, enabled);
+            assert_eq!(state.ui.status_message.as_deref(), Some(message));
+            assert!(state.ui.status_message_expiry.is_some());
+        }
+    }
     use super::*;
 
     #[test]

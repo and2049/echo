@@ -262,6 +262,14 @@
       "folder_desc": "Folder to scan — must be an absolute path. Enter to apply.",
       "rescan": "Rescan now",
       "updates": {
+        "auto": "Automatic updates",
+        "auto_desc": "Downloads new releases in the background; restart to finish",
+        "auto_on": "Automatic updates on",
+        "auto_off": "Automatic updates off",
+        "auto_usage": "Usage: autoupdate [on|off]",
+        "restart_now": "Restart now",
+        "later": "Later",
+        "restart_failed": "Could not restart echo. Please close and reopen it.",
         "section": "UPDATES",
         "version": "Version",
         "dev": "(development build)",
@@ -273,7 +281,7 @@
         "install": "Update to {}",
         "downloading": "Downloading {}%",
         "restart": "Restart to finish",
-        "installed": "Version {} installed — restart echo to use it",
+        "installed": "Version {} installed. Restart echo to use it.",
         "retry": "Try again",
         "open_releases": "Open releases page",
         "failed": "The update check did not finish"

@@ -31,8 +31,8 @@ pub fn claim(config_dir: &Path) -> Instance {
 
 impl Listener {
     /// Turns every later launch into a `Show`, for the process lifetime.
-    pub fn serve(self, tx: UnboundedSender<TrayEvent>) {
-        tokio::spawn(platform::serve(self.0, tx));
+    pub fn serve(self, tx: UnboundedSender<TrayEvent>) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(platform::serve(self.0, tx))
     }
 }
 
@@ -149,9 +149,12 @@ mod tests {
             panic!("the first claim should hold the endpoint");
         };
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        listener.serve(tx);
+        let task = listener.serve(tx);
         assert!(matches!(claim(&dir), Instance::Secondary));
         assert_eq!(rx.recv().await, Some(TrayEvent::Show));
+        task.abort();
+        let _ = task.await;
+        assert!(matches!(claim(&dir), Instance::Primary(Some(_))));
         std::fs::remove_dir_all(dir).ok();
     }
 

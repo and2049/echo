@@ -374,6 +374,8 @@ fn default_language() -> String {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LibraryConfig {
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
     #[serde(default)]
     pub recent_searches: Vec<String>,
     #[serde(default)]
@@ -491,9 +493,14 @@ fn default_close_to_tray() -> bool {
     true
 }
 
+fn default_auto_update() -> bool {
+    true
+}
+
 impl Default for LibraryConfig {
     fn default() -> Self {
         Self {
+            auto_update: default_auto_update(),
             recent_searches: Vec::new(),
             pinned: vec![],
             folders: vec![],
@@ -871,6 +878,18 @@ fn load_themes_from_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn auto_update_defaults_on_and_round_trips() {
+        assert!(LibraryConfig::default().auto_update);
+        let mut config: LibraryConfig = toml::from_str("").unwrap();
+        assert!(config.auto_update);
+        for enabled in [false, true] {
+            config.auto_update = enabled;
+            let decoded: LibraryConfig =
+                toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(decoded.auto_update, enabled);
+        }
+    }
     #[test]
     fn recent_searches_default_empty_and_round_trip() {
         let mut config: LibraryConfig = toml::from_str("").unwrap();

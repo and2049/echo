@@ -89,6 +89,8 @@ OpenGL, so `libvulkan1` plus your GPU's driver is worth having but is not requir
 
 #### Updating
 
+Desktop releases install automatically in the background; turn this off in Settings or with `:autoupdate off`.
+
 After the first install, echo updates itself — no reinstall, no administrator rights:
 
 ```bash
