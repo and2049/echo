@@ -132,7 +132,7 @@ fn selected_list_len(state: &AppState) -> usize {
         },
         ActiveView::TrackList => state.data.tracks.len(),
         ActiveView::SearchResults => match state.ui.active_search_tab {
-            SearchTab::Tracks => state.data.search_results.tracks.len(),
+            SearchTab::All | SearchTab::Tracks => state.data.search_results.tracks.len(),
             SearchTab::Albums => state.data.search_results.albums.len(),
             SearchTab::Artists => state.data.search_results.artists.len(),
             SearchTab::Playlists => state.data.search_results.playlists.len(),

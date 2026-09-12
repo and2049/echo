@@ -375,6 +375,8 @@ fn default_language() -> String {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LibraryConfig {
     #[serde(default)]
+    pub recent_searches: Vec<String>,
+    #[serde(default)]
     pub pinned: Vec<String>,
     #[serde(default)]
     pub folders: Vec<Folder>,
@@ -492,6 +494,7 @@ fn default_close_to_tray() -> bool {
 impl Default for LibraryConfig {
     fn default() -> Self {
         Self {
+            recent_searches: Vec::new(),
             pinned: vec![],
             folders: vec![],
             sort_mode: SortMode::default(),
@@ -868,6 +871,15 @@ fn load_themes_from_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recent_searches_default_empty_and_round_trip() {
+        let mut config: LibraryConfig = toml::from_str("").unwrap();
+        assert!(config.recent_searches.is_empty());
+        config.recent_searches = vec!["Echo".into(), "音乐".into()];
+        let encoded = toml::to_string(&config).unwrap();
+        let decoded: LibraryConfig = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded.recent_searches, config.recent_searches);
+    }
     #[test]
     fn recent_playlist_cache_round_trips_and_expires_after_twenty_four_hours() {
         let playlist: Playlist = serde_json::from_value(

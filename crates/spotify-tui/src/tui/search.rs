@@ -82,7 +82,7 @@ pub fn render_search_results(frame: &mut Frame, state: &AppState, area: Rect) {
     let header_style = border_style.add_modifier(Modifier::BOLD);
 
     match state.ui.active_search_tab {
-        SearchTab::Tracks => {
+        SearchTab::All | SearchTab::Tracks => {
             let header = Row::new(vec![
                 "".to_string(), // liked col
                 echo_core::i18n::t("ui.tracks", &state.ui.library_config.language),

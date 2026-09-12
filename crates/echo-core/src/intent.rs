@@ -484,6 +484,8 @@ pub fn global_search(state: &mut AppState, query: &str) -> Option<AppEvent> {
         return None;
     }
     state.ui.search_context_query = query.clone();
+    crate::search::remember_search(&mut state.ui.library_config.recent_searches, &query);
+    state.save_library_config();
     state.ui.status_message = Some(format!("Searching for '{query}'..."));
     state.ui.status_message_expiry =
         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
@@ -495,7 +497,38 @@ pub fn global_search(state: &mut AppState, query: &str) -> Option<AppEvent> {
 /// the API.
 pub fn activate_search_result(state: &mut AppState, index: usize) -> Option<AppEvent> {
     state.ui.selected_search_index = index;
-    match state.ui.active_search_tab {
+    let row = if state.ui.active_search_tab == SearchTab::All {
+        *crate::search::all_tab_rows(&state.data.search_results, &state.ui.search_context_query)
+            .get(index)?
+    } else {
+        crate::search::SearchRow {
+            tab: state.ui.active_search_tab,
+            index,
+            top: false,
+        }
+    };
+    activate_search_row(state, row)
+}
+
+pub fn remove_recent_search(state: &mut AppState, index: usize) {
+    if index < state.ui.library_config.recent_searches.len() {
+        state.ui.library_config.recent_searches.remove(index);
+        state.save_library_config();
+    }
+}
+
+pub fn clear_recent_searches(state: &mut AppState) {
+    state.ui.library_config.recent_searches.clear();
+    state.save_library_config();
+}
+
+pub fn activate_search_row(
+    state: &mut AppState,
+    row: crate::search::SearchRow,
+) -> Option<AppEvent> {
+    let index = row.index;
+    match row.tab {
+        SearchTab::All => None,
         SearchTab::Tracks => {
             let track = state.data.search_results.tracks.get(index)?.clone();
             search_track_play_event(state, &track)
@@ -572,6 +605,36 @@ pub fn activate_search_result(state: &mut AppState, index: usize) -> Option<AppE
             Some(AppEvent::LoadContextTracks(context))
         }
     }
+}
+
+pub fn play_search_row(state: &mut AppState, row: crate::search::SearchRow) -> Option<AppEvent> {
+    if row.tab == SearchTab::Tracks {
+        let track = state.data.search_results.tracks.get(row.index)?.clone();
+        return search_track_play_event(state, &track);
+    }
+    let item = crate::search::search_row_item(&state.data.search_results, row)?;
+    if !item.playable() {
+        return None;
+    }
+    let kind = match row.tab {
+        SearchTab::Artists => crate::home::HomeItemKind::Artist,
+        SearchTab::Albums => crate::home::HomeItemKind::Album,
+        SearchTab::Playlists => crate::home::HomeItemKind::Playlist,
+        _ => return None,
+    };
+    play_home_item(
+        state,
+        crate::home::HomeItem {
+            id: item.id,
+            kind,
+            title: item.title,
+            subtitle: item.credit,
+            image_url: item.image_url,
+            owner_id: None,
+            track: None,
+            release_year: None,
+        },
+    )
 }
 
 fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppEvent> {
@@ -1758,6 +1821,42 @@ pub fn next_search_match(state: &mut AppState, forward: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn all_search_activation_uses_the_same_track_route_and_keeps_all_selected() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::SearchResults;
+        state.ui.active_search_tab = SearchTab::All;
+        state.ui.search_context_query = "Song".into();
+        state.data.search_results.tracks = vec![serde_json::from_value(serde_json::json!({"id":"track","name":"Song","artist":"Artist","album":"Album","duration_ms":1000,"image_url":null,"album_id":null})).unwrap()];
+        assert!(
+            matches!(activate_search_result(&mut state, 0), Some(AppEvent::PlayTrack { track_id, .. }) if track_id == "track")
+        );
+        assert!(
+            matches!(activate_search_result(&mut state, 1), Some(AppEvent::PlayTrack { track_id, .. }) if track_id == "track")
+        );
+        assert_eq!(state.ui.active_search_tab, SearchTab::All);
+        assert_eq!(state.ui.selected_search_index, 1);
+        assert!(activate_search_result(&mut state, 2).is_none());
+    }
+
+    #[test]
+    fn recent_search_intents_remove_clear_and_leave_tui_default_alone() {
+        let mut state = AppState::new();
+        assert!(global_search(&mut state, " ").is_none());
+        assert!(
+            matches!(global_search(&mut state, " Echo "), Some(AppEvent::GlobalSearch(query)) if query == "Echo")
+        );
+        global_search(&mut state, "Other");
+        global_search(&mut state, "eCHO");
+        assert_eq!(state.ui.library_config.recent_searches, ["eCHO", "Other"]);
+        assert_eq!(state.ui.active_search_tab, SearchTab::Tracks);
+        remove_recent_search(&mut state, 10);
+        assert_eq!(state.ui.library_config.recent_searches.len(), 2);
+        remove_recent_search(&mut state, 0);
+        assert_eq!(state.ui.library_config.recent_searches, ["Other"]);
+        clear_recent_searches(&mut state);
+        assert!(state.ui.library_config.recent_searches.is_empty());
+    }
     #[test]
     fn home_navigation_fetches_once_then_refreshes_and_restores_selection() {
         let mut state = AppState::new();

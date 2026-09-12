@@ -544,7 +544,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             } else if state.ui.active_view == ActiveView::SearchResults {
                 state.ui.active_search_tab = match state.ui.active_search_tab {
-                    echo_core::app::SearchTab::Tracks => echo_core::app::SearchTab::Albums,
+                    echo_core::app::SearchTab::All | echo_core::app::SearchTab::Tracks => {
+                        echo_core::app::SearchTab::Albums
+                    }
                     echo_core::app::SearchTab::Albums => echo_core::app::SearchTab::Artists,
                     echo_core::app::SearchTab::Artists => echo_core::app::SearchTab::Playlists,
                     echo_core::app::SearchTab::Playlists => echo_core::app::SearchTab::Tracks,
@@ -579,7 +581,9 @@ fn seek_to(state: &mut AppState, progress_ms: u32) -> Option<AppEvent> {
 
 fn search_results_len(state: &AppState) -> usize {
     match state.ui.active_search_tab {
-        echo_core::app::SearchTab::Tracks => state.data.search_results.tracks.len(),
+        echo_core::app::SearchTab::All | echo_core::app::SearchTab::Tracks => {
+            state.data.search_results.tracks.len()
+        }
         echo_core::app::SearchTab::Albums => state.data.search_results.albums.len(),
         echo_core::app::SearchTab::Artists => state.data.search_results.artists.len(),
         echo_core::app::SearchTab::Playlists => state.data.search_results.playlists.len(),

@@ -14,6 +14,7 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::ThumbState;
 mod playlist_edit;
+mod search;
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent,
     SharedString, Stateful, Window, canvas, div, ease_out_quint, img, prelude::*, px, relative,
@@ -1127,12 +1128,17 @@ pub fn main_area(
     let search = search_bar(app, window, cx).into_any_element();
     let body = if app.state.ui.mode == AppMode::Setup {
         setup_view(app, window, cx).into_any_element()
+    } else if app.search_focus.is_focused(window)
+        && app.search_input.is_empty()
+        && !app.state.ui.library_config.recent_searches.is_empty()
+    {
+        search::recent_searches(app, cx)
     } else {
         match app.state.ui.active_view {
             ActiveView::Home => home_view(app, window, cx).into_any_element(),
             ActiveView::TrackList => track_list(app, window, cx).into_any_element(),
             ActiveView::Queue => queue_list(app, cx).into_any_element(),
-            ActiveView::SearchResults => search_results(app, cx).into_any_element(),
+            ActiveView::SearchResults => search_results(app, window, cx).into_any_element(),
             ActiveView::ArtistList => artist_list(app, cx).into_any_element(),
             ActiveView::ArtistPage => artist_page(app, cx).into_any_element(),
             ActiveView::WhatsNew => whats_new(app, cx).into_any_element(),
@@ -1422,14 +1428,18 @@ fn search_bar(
                         .h(px(14.0))
                         .text_color(muted),
                 )
-                .child(if query.is_empty() && !focused {
+                .child(if query.is_empty() {
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_sm()
                         .text_color(muted)
                         .child(tr(&app.state, "desktop.search_placeholder"))
                         .into_any_element()
                 } else {
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .text_sm()
                         .text_color(fg)
                         .whitespace_nowrap()
@@ -1437,9 +1447,32 @@ fn search_bar(
                         .child(SharedString::from(if focused {
                             crate::text_with_cursor(&query, app.search_cursor)
                         } else {
-                            query
+                            query.clone()
                         }))
                         .into_any_element()
+                })
+                .when(!query.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .id("clear-search")
+                            .flex_none()
+                            .p_1()
+                            .rounded_full()
+                            .hover(move |s| s.bg(palette.wash))
+                            .on_click(cx.listener(|this: &mut EchoApp, _, window, cx| {
+                                this.search_input.clear();
+                                this.search_cursor = 0;
+                                window.focus(&this.search_focus, cx);
+                                cx.stop_propagation();
+                                cx.notify();
+                            }))
+                            .child(
+                                svg()
+                                    .path("icons/win-close.svg")
+                                    .size(px(14.0))
+                                    .text_color(muted),
+                            ),
+                    )
                 }),
         )
         .child(div().flex_grow(1.0))
@@ -2641,7 +2674,11 @@ fn thumb_element(
     }
 }
 
-fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+fn search_results(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let outer_palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
@@ -2658,6 +2695,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
         results.playlists.len(),
     );
     let count = match tab {
+        SearchTab::All => echo_core::search::all_tab_rows(results, &query).len(),
         SearchTab::Tracks => n_tracks,
         SearchTab::Albums => n_albums,
         SearchTab::Artists => n_artists,
@@ -2669,7 +2707,8 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
             .id(id)
             .px_2()
             .py_1()
-            .rounded_md()
+            .rounded_full()
+            .bg(outer_palette.wash)
             .text_sm()
             .text_color(if active { accent } else { muted })
             .hover(move |style| style.bg(outer_palette.row_hover))
@@ -2709,41 +2748,43 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                         .flex()
                         .flex_row()
                         .gap_1()
+                        .flex_wrap()
+                        .child(tab_button(
+                            "search-all",
+                            tr(&app.state, "desktop.search_all").to_string(),
+                            SearchTab::All,
+                            tab == SearchTab::All,
+                        ))
                         .child(tab_button(
                             "search-tracks",
-                            format!("{} ({n_tracks})", tr(&app.state, "ui.tracks")),
+                            tr(&app.state, "desktop.search_songs").to_string(),
                             SearchTab::Tracks,
                             tab == SearchTab::Tracks,
                         ))
                         .child(tab_button(
                             "search-albums",
-                            format!("{} ({n_albums})", tr(&app.state, "ui.albums")),
+                            tr(&app.state, "ui.albums").to_string(),
                             SearchTab::Albums,
                             tab == SearchTab::Albums,
                         ))
                         .child(tab_button(
                             "search-artists",
-                            format!("{} ({n_artists})", tr(&app.state, "ui.artists")),
+                            tr(&app.state, "ui.artists").to_string(),
                             SearchTab::Artists,
                             tab == SearchTab::Artists,
                         ))
                         .child(tab_button(
                             "search-playlists",
-                            format!("{} ({n_playlists})", tr(&app.state, "ui.playlists")),
+                            tr(&app.state, "ui.playlists").to_string(),
                             SearchTab::Playlists,
                             tab == SearchTab::Playlists,
                         )),
                 ),
         )
         .child(if count == 0 {
-            div()
-                .flex_grow(1.0)
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(muted)
-                .child(tr(&app.state, "desktop.no_results_tab"))
-                .into_any_element()
+            search::empty_results(app)
+        } else if tab == SearchTab::All {
+            search::all_results(app, window, cx)
         } else {
             uniform_list(
                 "search-rows",
@@ -2783,6 +2824,7 @@ fn search_results(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
                                         ));
 
                                         match tab {
+                                            SearchTab::All => row,
                                             SearchTab::Tracks => {
                                                 let track = this.state.data.search_results.tracks
                                                     [ix]
@@ -5504,6 +5546,7 @@ fn home_item_title(
 
 fn home_play_button(
     item: echo_core::home::HomeItem,
+    search_row: Option<echo_core::search::SearchRow>,
     accent: Hsla,
     fg: Hsla,
     cx: &mut Context<EchoApp>,
@@ -5525,7 +5568,12 @@ fn home_play_button(
         .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
             cx.stop_propagation();
             window.focus(&this.focus_handle, cx);
-            if let Some(event) = echo_core::intent::play_home_item(&mut this.state, item.clone()) {
+            let event = if let Some(row) = search_row {
+                echo_core::intent::play_search_row(&mut this.state, row)
+            } else {
+                echo_core::intent::play_home_item(&mut this.state, item.clone())
+            };
+            if let Some(event) = event {
                 this.dispatch(event);
             }
             cx.notify();
@@ -5538,6 +5586,7 @@ fn home_card(
     item: echo_core::home::HomeItem,
     index: usize,
     quick: bool,
+    search_row: Option<echo_core::search::SearchRow>,
     cx: &mut Context<EchoApp>,
 ) -> AnyElement {
     use echo_core::home::HomeItemKind;
@@ -5555,8 +5604,11 @@ fn home_card(
     } else {
         item.subtitle.clone().into()
     };
-    let selected =
-        app.state.ui.active_view == ActiveView::Home && app.state.ui.selected_home_index == index;
+    let selected = if search_row.is_some() {
+        app.state.ui.selected_search_index == index
+    } else {
+        app.state.ui.active_view == ActiveView::Home && app.state.ui.selected_home_index == index
+    };
     let edge = if quick { 56.0 } else { 160.0 };
     let cover = if item.id == "LIKED_SONGS" {
         div()
@@ -5583,7 +5635,11 @@ fn home_card(
             muted,
         )
     };
-    let play = home_play_button(item.clone(), accent, background, cx).into_any_element();
+    let play = if search_row.is_none() || !item.id.starts_with("local-") {
+        home_play_button(item.clone(), search_row, accent, background, cx).into_any_element()
+    } else {
+        div().absolute().into_any_element()
+    };
     let base = div()
         .id(("home-item", index))
         .group("home-item")
@@ -5596,8 +5652,13 @@ fn home_card(
         .hover(move |style| style.bg(palette.row_hover))
         .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
             window.focus(&this.focus_handle, cx);
-            this.state.ui.selected_home_index = index;
-            if let Some(event) = echo_core::intent::open_home_item(&mut this.state, item.clone()) {
+            let event = if search_row.is_some() {
+                echo_core::intent::activate_search_result(&mut this.state, index)
+            } else {
+                this.state.ui.selected_home_index = index;
+                echo_core::intent::open_home_item(&mut this.state, item.clone())
+            };
+            if let Some(event) = event {
                 this.dispatch(event);
             }
             cx.notify();
@@ -5820,7 +5881,7 @@ fn home_view(
             for chunk in shelf.items.chunks(columns) {
                 let mut row = div().flex().gap_2().w_full();
                 for item in chunk {
-                    row = row.child(home_card(app, item.clone(), index, true, cx));
+                    row = row.child(home_card(app, item.clone(), index, true, None, cx));
                     index += 1;
                 }
                 for _ in chunk.len()..columns {
@@ -5860,7 +5921,7 @@ fn home_view(
                 },
             ));
         for item in shelf.items {
-            row = row.child(home_card(app, item, index, false, cx));
+            row = row.child(home_card(app, item, index, false, None, cx));
             index += 1;
         }
         content = content.child(

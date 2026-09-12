@@ -20,6 +20,7 @@ pub mod image_tasks;
 pub mod intent;
 pub mod models;
 pub mod platform;
+pub mod search;
 pub mod theme;
 pub mod thumbnails;
 pub mod update;

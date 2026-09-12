@@ -208,6 +208,9 @@ pub(crate) struct EchoApp {
     pub(crate) tracks_scroll: UniformListScrollHandle,
     pub(crate) queue_scroll: UniformListScrollHandle,
     pub(crate) search_scroll: UniformListScrollHandle,
+    pub(crate) search_all_scroll: ScrollHandle,
+    pub(crate) search_section_scrolls: std::collections::HashMap<SearchTab, ScrollHandle>,
+    pub(crate) search_all_positions: Vec<(usize, Option<(SearchTab, usize)>)>,
     pub(crate) artist_albums_scroll: UniformListScrollHandle,
     pub(crate) artist_top_tracks_scroll: UniformListScrollHandle,
     pub(crate) artist_list_scroll: UniformListScrollHandle,
@@ -519,6 +522,9 @@ impl EchoApp {
             tracks_scroll: UniformListScrollHandle::new(),
             queue_scroll: UniformListScrollHandle::new(),
             search_scroll: UniformListScrollHandle::new(),
+            search_all_scroll: ScrollHandle::new(),
+            search_section_scrolls: std::collections::HashMap::new(),
+            search_all_positions: Vec::new(),
             artist_albums_scroll: UniformListScrollHandle::new(),
             artist_top_tracks_scroll: UniformListScrollHandle::new(),
             artist_list_scroll: UniformListScrollHandle::new(),
@@ -670,6 +676,11 @@ impl EchoApp {
             ActiveView::TrackList => self.state.data.tracks.len(),
             ActiveView::Queue => self.state.data.queue.len(),
             ActiveView::SearchResults => match self.state.ui.active_search_tab {
+                SearchTab::All => echo_core::search::all_tab_rows(
+                    &self.state.data.search_results,
+                    &self.state.ui.search_context_query,
+                )
+                .len(),
                 echo_core::app::SearchTab::Tracks => self.state.data.search_results.tracks.len(),
                 echo_core::app::SearchTab::Albums => self.state.data.search_results.albums.len(),
                 echo_core::app::SearchTab::Artists => self.state.data.search_results.artists.len(),
@@ -770,8 +781,19 @@ impl EchoApp {
                 }
                 ActiveView::SearchResults => {
                     self.state.ui.selected_search_index = index;
-                    self.search_scroll
-                        .scroll_to_item(index, ScrollStrategy::Nearest);
+                    if self.state.ui.active_search_tab == SearchTab::All {
+                        if let Some((section, horizontal)) = self.search_all_positions.get(index) {
+                            self.search_all_scroll.scroll_to_item(*section);
+                            if let Some((tab, row)) = horizontal
+                                && let Some(scroll) = self.search_section_scrolls.get(tab)
+                            {
+                                scroll.scroll_to_item(*row);
+                            }
+                        }
+                    } else {
+                        self.search_scroll
+                            .scroll_to_item(index, ScrollStrategy::Nearest);
+                    }
                 }
                 ActiveView::ArtistList => {
                     self.state.ui.selected_artist_index = index;
@@ -2004,10 +2026,11 @@ impl EchoApp {
         match self.state.ui.active_view {
             ActiveView::SearchResults => {
                 self.state.ui.active_search_tab = match self.state.ui.active_search_tab {
+                    SearchTab::All => SearchTab::Tracks,
                     SearchTab::Tracks => SearchTab::Albums,
                     SearchTab::Albums => SearchTab::Artists,
                     SearchTab::Artists => SearchTab::Playlists,
-                    SearchTab::Playlists => SearchTab::Tracks,
+                    SearchTab::Playlists => SearchTab::All,
                 };
                 self.state.ui.selected_search_index = 0;
             }
@@ -2181,9 +2204,12 @@ impl EchoApp {
                 window.focus(&self.focus_handle, cx);
             }
             "escape" => {
-                self.search_input.clear();
-                self.search_cursor = 0;
-                window.focus(&self.focus_handle, cx);
+                if self.search_input.is_empty() {
+                    window.focus(&self.focus_handle, cx);
+                } else {
+                    self.search_input.clear();
+                    self.search_cursor = 0;
+                }
             }
             // Spaces are kept — unlike the credential fields, a query is words — but newlines
             // are dropped so a copied line does not smuggle one into the search term.
@@ -2439,6 +2465,14 @@ impl EchoApp {
     /// loop has: a LoadContextTracks with cover art also kicks off the header image fetch, and
     /// ReloadHeaderImage is handled entirely here (the worker has no handler for it).
     pub(crate) fn dispatch(&mut self, event: AppEvent) {
+        if let AppEvent::GlobalSearch(query) = &event {
+            self.state.ui.active_search_tab = SearchTab::All;
+            self.state.ui.selected_search_index = 0;
+            self.search_input = query.clone();
+            self.search_cursor = query.len();
+            self.search_all_scroll
+                .set_offset(gpui::point(px(0.0), px(0.0)));
+        }
         if let AppEvent::LoadContextTracks(ref context) = event
             && let Some(url) = context.image_url.as_ref()
         {

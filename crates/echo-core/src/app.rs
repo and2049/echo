@@ -440,8 +440,9 @@ pub struct NavigationSnapshot {
     artist_page_data: Option<ArtistPageData>,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum SearchTab {
+    All,
     Tracks,
     Albums,
     Artists,
