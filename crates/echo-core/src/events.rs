@@ -66,6 +66,18 @@ pub enum AppEvent {
         to: usize,
     },
     CreatePlaylist(String),
+    CreatePlaylistWithTracks {
+        name: String,
+        tracks: Vec<Track>,
+    },
+    UpdatePlaylistDetails {
+        id: String,
+        name: String,
+        description: String,
+        public: bool,
+    },
+    FollowPlaylist(String),
+    UnfollowPlaylist(String),
     CreateLocalPlaylist(String),
     RenamePlaylist(String, String),
     DeletePlaylists(Vec<String>),
@@ -107,6 +119,16 @@ pub enum WorkerEvent {
     },
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
+    PlaylistDetailsUpdated {
+        id: String,
+        name: String,
+        description: String,
+        public: bool,
+    },
+    PlaylistOperationCompleted {
+        key: &'static str,
+        name: String,
+    },
     AlbumsLoaded(Vec<crate::models::Album>),
     LocalLibraryLoaded {
         library: crate::models::LocalLibrary,

@@ -7,10 +7,12 @@
 
 use crate::app::{ActiveView, AppMode, AppState, SearchTab};
 use crate::events::AppEvent;
+mod playlist;
 use crate::models::{
     Artist, LibraryNode, PlaybackTarget, PlayingContext, SearchTrack, Track, TrackListContext,
     TrackSource,
 };
+pub use playlist::*;
 
 /// Activates row `index` of the playlists sidebar (the `library_view` tree): opens playlists,
 /// shows local collections, toggles folders.
@@ -1382,6 +1384,7 @@ pub fn queue_visual_selection(state: &mut AppState) -> Option<AppEvent> {
 /// `a` in visual mode — stage the range in the operation register and open the playlist picker.
 /// `action_menu::commit_playlist_add` reads the register, so the range survives the picker.
 pub fn add_visual_selection_to_playlist(state: &mut AppState) {
+    state.ui.playlist_add_filter.clear();
     let ids: Vec<String> = visual_tracks(state)
         .into_iter()
         .map(|track| track.id)
@@ -1637,7 +1640,8 @@ pub fn mark_selected_for_delete(state: &mut AppState) {
 
 /// Whether any delete/remove confirmation is pending.
 pub fn prompt_active(state: &AppState) -> bool {
-    state.ui.folder_delete_prompt.is_some()
+    state.ui.duplicate_prompt.is_some()
+        || state.ui.folder_delete_prompt.is_some()
         || state.ui.playlist_delete_prompt.is_some()
         || state.ui.album_mass_delete_prompt.is_some()
         || state.ui.track_delete_prompt.is_some()
@@ -1646,6 +1650,12 @@ pub fn prompt_active(state: &AppState) -> bool {
 
 /// Confirms the pending prompt, performing the action or returning the worker event for it.
 pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
+    if let Some(prompt) = state.ui.duplicate_prompt.take() {
+        return Some(AppEvent::AddTracksToPlaylist(
+            prompt.playlist_id,
+            prompt.tracks,
+        ));
+    }
     if let Some(folder_name) = state.ui.folder_delete_prompt.take() {
         state.ui.playlist_delete_prompt = None;
         state
@@ -1681,6 +1691,7 @@ pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
 
 /// Dismisses whatever prompt is pending without acting on it.
 pub fn cancel_prompt(state: &mut AppState) {
+    state.ui.duplicate_prompt = None;
     state.ui.folder_delete_prompt = None;
     state.ui.playlist_delete_prompt = None;
     state.ui.album_mass_delete_prompt = None;

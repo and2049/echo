@@ -32,6 +32,7 @@ icons!(
     // Filled, unlike the rest of the set — it marks liked state, not an action.
     "heart",
     "home",
+    "more",
     "mic",
     "music-note",
     "next",

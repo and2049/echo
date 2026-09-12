@@ -6,6 +6,7 @@ pub mod errors;
 pub mod local_files;
 pub mod local_playback;
 pub mod media;
+mod playlist_edit;
 pub mod tracks;
 pub mod visualization;
 pub mod volume;
@@ -1675,6 +1676,11 @@ impl Worker {
                                             }
                                         }
                                     });
+                                }
+                            }
+                            event @ (AppEvent::UpdatePlaylistDetails { .. } | AppEvent::FollowPlaylist(_) | AppEvent::UnfollowPlaylist(_) | AppEvent::CreatePlaylistWithTracks { .. }) => {
+                                if let Some(sp) = spotify_opt.as_ref() {
+                                    playlist_edit::spawn(sp.clone(), self.tx.clone(), event);
                                 }
                             }
                             AppEvent::CreateLocalPlaylist(name) => {

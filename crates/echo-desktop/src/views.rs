@@ -13,11 +13,13 @@
 use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::ThumbState;
+mod playlist_edit;
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent,
     SharedString, Stateful, Window, canvas, div, ease_out_quint, img, prelude::*, px, relative,
     svg, uniform_list,
 };
+pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
 
 use crate::backdrop::{Backdrop, ImmersiveColors};
 use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
@@ -965,6 +967,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
                                             this.state.ui.selected_playlist_index = ix;
                                             this.track_menu = None;
+                                            this.state.ui.playlist_add_filter.clear();
                                             this.context_menu = Some(crate::ContextMenuState {
                                                 index: ix,
                                                 position: event.position,
@@ -1726,6 +1729,7 @@ fn context_hero(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElemen
                         cx.notify();
                     },
                 ))
+                .child(playlist_edit::page_buttons(app, cx))
                 .child(div().flex_1())
                 .child(sort_button(app, cx)),
         )
@@ -1998,6 +2002,7 @@ fn track_list(
                         )),
                 )
                 .when(is_top_tracks, |el| el.child(range_switcher(app, cx)))
+                .child(playlist_edit::page_buttons(app, cx))
                 .child(sort_button(app, cx))
                 .into_any_element()
         })
@@ -5289,14 +5294,17 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
 
     // Materialized before the element closures capture anything from `app`.
     let choices: Vec<(SharedString, bool)> =
-        echo_core::action_menu::playlist_add_choices(&app.state)
+        echo_core::action_menu::filtered_playlist_add_choices(&app.state)
             .into_iter()
-            .map(|playlist| {
+            .map(|(_, playlist)| {
                 let local = playlist.owner_id == "local";
                 (SharedString::from(playlist.name), local)
             })
             .collect();
 
+    let choices: Vec<_> = std::iter::once((tr(&app.state, "desktop.new_playlist"), false))
+        .chain(choices)
+        .collect();
     div()
         .id("playlist-add-backdrop")
         .absolute()
@@ -5335,6 +5343,31 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                         .text_color(muted)
                         .child(tr(&app.state, "desktop.playlist_add_title")),
                 )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .items_center()
+                        .px_2()
+                        .py_2()
+                        .rounded_md()
+                        .bg(palette.wash)
+                        .text_sm()
+                        .text_color(muted)
+                        .child(
+                            svg()
+                                .path("icons/search.svg")
+                                .size(px(14.0))
+                                .text_color(muted),
+                        )
+                        .child(div().truncate().child(
+                            if app.state.ui.playlist_add_filter.is_empty() {
+                                tr(&app.state, "desktop.filter_playlists")
+                            } else {
+                                app.state.ui.playlist_add_filter.clone().into()
+                            },
+                        )),
+                )
                 .child(if choices.is_empty() {
                     div()
                         .py_4()
@@ -5370,7 +5403,7 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
                                 .on_click(cx.listener(
                                     move |this: &mut EchoApp, _event, _window, cx| {
                                         if let Some(event) =
-                                            echo_core::action_menu::commit_playlist_add(
+                                            echo_core::action_menu::commit_filtered_playlist_add(
                                                 &mut this.state,
                                                 ix,
                                             )
@@ -5921,10 +5954,16 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         false,
                     ));
                 }
-                if !special {
+                if local {
                     items.push((
                         tr(&app.state, "desktop.menu.rename"),
                         MenuAction::Rename,
+                        false,
+                    ));
+                } else if echo_core::intent::owns_playlist(&app.state, &playlist.id) {
+                    items.push((
+                        tr(&app.state, "desktop.edit_details"),
+                        MenuAction::EditDetails,
                         false,
                     ));
                 }
@@ -6076,12 +6115,14 @@ pub fn track_context_menu(
         .inset_0()
         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
             this.track_menu = None;
+            this.state.ui.playlist_add_filter.clear();
             cx.notify();
         }))
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(|this: &mut EchoApp, _event: &MouseDownEvent, _window, cx| {
                 this.track_menu = None;
+                this.state.ui.playlist_add_filter.clear();
                 cx.notify();
             }),
         )
@@ -6201,15 +6242,19 @@ fn playlist_submenu(
     let local_label = tr(&app.state, "ui.local");
     let empty_label = tr(&app.state, "desktop.playlist_add_none");
     let choices: Vec<(SharedString, bool)> =
-        echo_core::action_menu::playlist_add_choices(&app.state)
+        echo_core::action_menu::filtered_playlist_add_choices(&app.state)
             .into_iter()
-            .map(|playlist| {
+            .map(|(_, playlist)| {
                 (
                     SharedString::from(playlist.name),
                     playlist.owner_id == "local",
                 )
             })
             .collect();
+
+    let choices: Vec<_> = std::iter::once((tr(&app.state, "desktop.new_playlist"), false))
+        .chain(choices)
+        .collect();
 
     // A right-click near the window's right edge would otherwise hang the flyout off-screen,
     // so it flips to the menu's other side; the same for a menu low enough that the list would
@@ -6243,6 +6288,17 @@ fn playlist_submenu(
         // Swallows clicks and wheel events so neither reaches the backdrop or the list behind.
         .occlude()
         .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+        .when(!app.state.ui.playlist_add_filter.is_empty(), |el| {
+            el.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_sm()
+                    .text_color(muted)
+                    .truncate()
+                    .child(app.state.ui.playlist_add_filter.clone()),
+            )
+        })
         .child(
             canvas(
                 move |painted, _window, _cx| bounds.set(painted),
@@ -6328,7 +6384,24 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
     let delete_label = tr(&app.state, "desktop.prompt.delete");
     let remove_label = tr(&app.state, "desktop.prompt.remove");
     let (message, confirm_label): (String, SharedString) =
-        if let Some(name) = &ui.folder_delete_prompt {
+        if let Some(prompt) = &ui.duplicate_prompt {
+            let message = if prompt.duplicates.len() == 1 {
+                let song = prompt
+                    .tracks
+                    .iter()
+                    .find(|t| prompt.duplicates.contains(&t.id))
+                    .map(|t| t.name.as_str())
+                    .unwrap_or_default();
+                tr(&app.state, "desktop.duplicate_one").replace("{song}", song)
+            } else {
+                tr(&app.state, "desktop.duplicate_many")
+                    .replace("{n}", &prompt.duplicates.len().to_string())
+            };
+            (
+                message.replace("{playlist}", &prompt.playlist_name),
+                tr(&app.state, "desktop.add_anyway"),
+            )
+        } else if let Some(name) = &ui.folder_delete_prompt {
             (
                 tr(&app.state, "desktop.prompt.delete_folder").replace("{}", name),
                 delete_label,
@@ -6451,6 +6524,34 @@ pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                                     cx.notify();
                                 },
                             )),
+                        )
+                        .when(
+                            ui.duplicate_prompt.as_ref().is_some_and(|p| {
+                                p.tracks.iter().any(|t| !p.duplicates.contains(&t.id))
+                            }),
+                            |el| {
+                                el.child(
+                                    button(
+                                        "duplicate-skip",
+                                        tr(&app.state, "desktop.skip_duplicates"),
+                                        fg,
+                                        palette.menu_border,
+                                        palette.menu_hover,
+                                    )
+                                    .on_click(cx.listener(
+                                        |this: &mut EchoApp, _, _, cx| {
+                                            if let Some(event) =
+                                                echo_core::intent::confirm_duplicate_skip(
+                                                    &mut this.state,
+                                                )
+                                            {
+                                                this.dispatch(event);
+                                            }
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                            },
                         )
                         .child(
                             button(

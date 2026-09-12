@@ -13,6 +13,7 @@
 mod assets;
 mod backdrop;
 mod images;
+mod playlist_ui;
 mod single_instance;
 mod theme;
 mod tray;
@@ -155,6 +156,7 @@ pub(crate) enum TrackMenuItem {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum MenuAction {
+    EditDetails,
     Open,
     TogglePin,
     Rename,
@@ -226,6 +228,7 @@ pub(crate) struct EchoApp {
     pub(crate) backdrops: backdrop::BackdropCache,
     pub(crate) theme_modal_index: usize,
     pub(crate) sort_menu_open: bool,
+    pub(crate) page_menu: Option<(gpui::Point<Pixels>, usize)>,
     pub(crate) sort_menu_top: f32,
     pub(crate) sort_menu_index: usize,
     pub(crate) settings_open: bool,
@@ -534,6 +537,7 @@ impl EchoApp {
             backdrops: backdrop::BackdropCache::default(),
             theme_modal_index: 0,
             sort_menu_open: false,
+            page_menu: None,
             sort_menu_top: 96.0,
             sort_menu_index: 0,
             settings_open: false,
@@ -632,8 +636,14 @@ impl EchoApp {
     /// Rows in whatever currently has keyboard focus: the device modal when open, else the
     /// `active_view` list — the same routing the TUI's navigation handler does.
     fn list_len(&self) -> usize {
+        if self.state.ui.playlist_edit.is_some() {
+            return 0;
+        }
+        if self.page_menu.is_some() {
+            return echo_core::intent::playlist_page_actions(&self.state).len();
+        }
         if self.state.ui.playlist_add_modal_open {
-            return echo_core::action_menu::playlist_add_choices(&self.state).len();
+            return echo_core::action_menu::filtered_playlist_add_choices(&self.state).len() + 1;
         }
         if self.state.ui.device_modal_open {
             return self.state.data.devices.len();
@@ -644,7 +654,8 @@ impl EchoApp {
         if let Some(menu) = self.track_menu.as_ref() {
             // The flyout takes over navigation while it is open, exactly like a nested list.
             if menu.submenu.is_some() {
-                return echo_core::action_menu::playlist_add_choices(&self.state).len();
+                return echo_core::action_menu::filtered_playlist_add_choices(&self.state).len()
+                    + 1;
             }
             return views::track_menu_items(self).len();
         }
@@ -693,6 +704,14 @@ impl EchoApp {
     }
 
     fn set_selection(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.state.ui.playlist_edit.is_some() {
+            return;
+        }
+        if let Some((_, selected)) = self.page_menu.as_mut() {
+            *selected = index;
+            cx.notify();
+            return;
+        }
         // A confirm prompt is modal: moving the list behind it would leave the prompt
         // describing a row that is no longer selected.
         if echo_core::intent::prompt_active(&self.state) {
@@ -791,7 +810,9 @@ impl EchoApp {
         if len == 0 {
             return;
         }
-        let current = if self.state.ui.playlist_add_modal_open {
+        let current = if let Some((_, selected)) = self.page_menu {
+            selected
+        } else if self.state.ui.playlist_add_modal_open {
             self.state.ui.selected_playlist_modal_index
         } else if self.state.ui.device_modal_open {
             self.state.ui.selected_device_index
@@ -872,6 +893,18 @@ impl EchoApp {
 
     /// Enter on the focused list — the same intents the row click handlers use.
     fn activate_selection(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.playlist_edit.is_some() {
+            self.save_playlist_edit(cx);
+            return;
+        }
+        if let Some((_, selected)) = self.page_menu {
+            if let Some(action) =
+                echo_core::intent::playlist_page_actions(&self.state).get(selected)
+            {
+                self.run_page_action(*action, cx);
+            }
+            return;
+        }
         // A confirm prompt sits above everything else, exactly as it does in `dismiss`.
         if echo_core::intent::prompt_active(&self.state) {
             self.confirm_prompt(cx);
@@ -880,7 +913,7 @@ impl EchoApp {
         self.pending_count = None;
         let event = if self.state.ui.playlist_add_modal_open {
             let index = self.state.ui.selected_playlist_modal_index;
-            echo_core::action_menu::commit_playlist_add(&mut self.state, index)
+            echo_core::action_menu::commit_filtered_playlist_add(&mut self.state, index)
         } else if self.state.ui.device_modal_open {
             let index = self.state.ui.selected_device_index;
             echo_core::intent::transfer_to_device(&mut self.state, index)
@@ -1012,6 +1045,15 @@ impl EchoApp {
     /// Escape / `h` / backspace: close whatever is topmost, else go back — the same ordering
     /// as the TUI's back handling, with the desktop-only modals checked first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.playlist_edit.is_some() {
+            echo_core::intent::cancel_playlist_edit(&mut self.state);
+            cx.notify();
+            return;
+        }
+        if self.page_menu.take().is_some() {
+            cx.notify();
+            return;
+        }
         self.pending_count = None;
         self.state.ui.pending_d_press = false;
         if echo_core::intent::prompt_active(&self.state) {
@@ -1030,6 +1072,7 @@ impl EchoApp {
             self.close_playlist_submenu(cx);
         } else if self.track_menu.is_some() {
             self.track_menu = None;
+            self.state.ui.playlist_add_filter.clear();
         } else if self.state.ui.playlist_add_modal_open {
             echo_core::action_menu::cancel_playlist_add(&mut self.state);
         } else if self.state.ui.device_modal_open {
@@ -1118,6 +1161,12 @@ impl EchoApp {
             return;
         };
         match action {
+            MenuAction::EditDetails => {
+                if let echo_core::models::LibraryNode::Playlist { playlist, .. } = &node {
+                    echo_core::intent::open_playlist_edit(&mut self.state, &playlist.id);
+                    window.focus(&self.focus_handle, cx);
+                }
+            }
             MenuAction::Open => {
                 self.state.ui.selected_playlist_index = index;
                 if let Some(event) = echo_core::intent::open_library_entry(&mut self.state, index) {
@@ -1161,6 +1210,7 @@ impl EchoApp {
     /// Runs a track-menu item against the menu's staged context, then closes the menu. Remove
     /// only stages `track_delete_prompt` — the confirm modal fires the actual event.
     pub(crate) fn run_track_menu_action(&mut self, item: TrackMenuItem, cx: &mut Context<Self>) {
+        self.state.ui.playlist_add_filter.clear();
         let Some(menu) = self.track_menu.take() else {
             cx.notify();
             return;
@@ -1215,6 +1265,7 @@ impl EchoApp {
                 menu.selected = row;
             }
             if menu.submenu.is_none() {
+                self.state.ui.playlist_add_filter.clear();
                 menu.submenu = Some(0);
                 self.submenu_scroll.scroll_to_item(0);
             }
@@ -1225,6 +1276,7 @@ impl EchoApp {
     /// Close the flyout but keep the menu itself: what escape, the left arrow and a hover that
     /// leaves the row all mean.
     pub(crate) fn close_playlist_submenu(&mut self, cx: &mut Context<Self>) {
+        self.state.ui.playlist_add_filter.clear();
         if let Some(menu) = self.track_menu.as_mut() {
             menu.submenu = None;
         }
@@ -1237,14 +1289,16 @@ impl EchoApp {
     pub(crate) fn commit_playlist_submenu(&mut self, index: usize, cx: &mut Context<Self>) {
         // Out of range only happens with no playlists at all, where Enter should do nothing
         // rather than close the menu; it would also leave the register staged.
-        if index >= echo_core::action_menu::playlist_add_choices(&self.state).len() {
+        if index > echo_core::action_menu::filtered_playlist_add_choices(&self.state).len() {
             return;
         }
         let Some(menu) = self.track_menu.take() else {
             return;
         };
         self.state.ui.operation_register = vec![menu.ctx.track_id];
-        if let Some(event) = echo_core::action_menu::commit_playlist_add(&mut self.state, index) {
+        if let Some(event) =
+            echo_core::action_menu::commit_filtered_playlist_add(&mut self.state, index)
+        {
             self.dispatch(event);
         }
         cx.notify();
@@ -1501,6 +1555,7 @@ impl EchoApp {
             self.dispatch(AppEvent::SaveAlbums(vec![id]));
         } else {
             self.state.ui.playlist_add_modal_open = true;
+            self.state.ui.playlist_add_filter.clear();
             self.state.ui.selected_playlist_modal_index = 0;
         }
         cx.notify();
@@ -1699,6 +1754,9 @@ impl EchoApp {
     }
 
     fn overlay_open(&self) -> bool {
+        if self.state.ui.playlist_edit.is_some() || self.page_menu.is_some() {
+            return true;
+        }
         echo_core::intent::prompt_active(&self.state)
             || self.context_menu.is_some()
             || self.track_menu.is_some()
@@ -2205,6 +2263,13 @@ impl EchoApp {
     }
 
     fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.duplicate_prompt.is_some() {
+            if let Some(event) = echo_core::intent::confirm_duplicate_skip(&mut self.state) {
+                self.dispatch(event);
+            }
+            cx.notify();
+            return;
+        }
         let event = echo_core::intent::toggle_shuffle(&mut self.state);
         self.dispatch(event);
         cx.notify();
@@ -3152,7 +3217,11 @@ impl Render for EchoApp {
         });
 
         let root = div()
-            .key_context(LIST_CONTEXT)
+            .key_context(if self.playlist_input_open() {
+                "list search"
+            } else {
+                LIST_CONTEXT
+            })
             .track_focus(&self.focus_handle)
             // Scrubs track the pointer at the window level so dragging keeps working when the
             // pointer leaves the bar; release (or a move without the button) ends them.
@@ -3342,6 +3411,9 @@ impl Render for EchoApp {
             // accumulate a vim-style count for j/k. Only while the list itself has focus —
             // digits typed into the search/command inputs must not count.
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                if this.handle_playlist_input(event, window, cx) {
+                    return;
+                }
                 if !this.focus_handle.is_focused(window) {
                     return;
                 }
@@ -3410,7 +3482,13 @@ impl Render for EchoApp {
             .when_some(help_modal, |el, modal| el.child(modal))
             .when_some(context_menu, |el, menu| el.child(menu))
             .when_some(track_menu, |el, menu| el.child(menu))
-            .when_some(prompt_modal, |el, modal| el.child(modal));
+            .when_some(prompt_modal, |el, modal| el.child(modal))
+            .when(self.page_menu.is_some(), |el| {
+                el.child(views::playlist_page_menu(self, cx))
+            })
+            .when(self.state.ui.playlist_edit.is_some(), |el| {
+                el.child(views::playlist_edit_modal(self, cx))
+            });
 
         // Adds the border and resize edges when the compositor refuses to draw them; a
         // pass-through when it does.

@@ -37,6 +37,19 @@ pub fn apply_worker_event(
         data::handle_home_feed_finished(state, feed, range, true);
     }
     match worker_event {
+        WorkerEvent::PlaylistDetailsUpdated {
+            id,
+            name,
+            description,
+            public,
+        } => {
+            crate::intent::apply_playlist_details(state, &id, &name, &description, public);
+        }
+        WorkerEvent::PlaylistOperationCompleted { key, name } => {
+            let message =
+                crate::i18n::t(key, &state.ui.library_config.language).replace("{}", &name);
+            misc::set_timed_status(state, message, 3);
+        }
         WorkerEvent::RecentContextsLoaded(contexts) => state.data.recent_contexts = contexts,
         WorkerEvent::HomeFeedFinished {
             feed,

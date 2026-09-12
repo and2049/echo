@@ -52,7 +52,15 @@ pub fn handle_local_playlists_loaded(
     if let Some(context) = state.data.active_tracklist_context.clone()
         && context.kind == crate::models::TrackListContextKind::LocalPlaylist
     {
-        state.show_local_playlist(&context.id, context.title);
+        let title = state
+            .data
+            .local_playlists
+            .playlists
+            .iter()
+            .find(|p| p.id == context.id)
+            .map(|p| p.name.clone())
+            .unwrap_or(context.title);
+        state.show_local_playlist(&context.id, title);
     }
 }
 

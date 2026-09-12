@@ -80,6 +80,7 @@ pub fn run(
             state.ui.action_menu_context = None;
             state.ui.operation_register = vec![ctx.track_id];
             state.ui.playlist_add_modal_open = true;
+            state.ui.playlist_add_filter.clear();
             state.ui.selected_playlist_modal_index = 0;
         }
         ActionMenuAction::AddToQueue => {
@@ -206,18 +207,103 @@ pub fn commit_playlist_add(state: &mut AppState, choice_index: usize) -> Option<
     } else {
         selected_tracks_for_playlist(state)
     };
-    let playlist_id = playlist.id.clone();
+    let playlist = playlist.clone();
     state.ui.playlist_add_modal_open = false;
     state.ui.selected_playlist_modal_index = 0;
+    state.ui.playlist_add_filter.clear();
     if tracks.is_empty() {
         return None;
     }
-    Some(AppEvent::AddTracksToPlaylist(playlist_id, tracks))
+    stage_playlist_add(state, &playlist, tracks)
+}
+
+pub fn find_duplicates(candidates: &[Track], existing: &[Track]) -> Vec<String> {
+    let existing: std::collections::HashSet<_> = existing.iter().map(|t| t.id.as_str()).collect();
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .iter()
+        .filter(|t| existing.contains(t.id.as_str()) && seen.insert(t.id.as_str()))
+        .map(|t| t.id.clone())
+        .collect()
+}
+
+pub fn stage_playlist_add(
+    state: &mut AppState,
+    playlist: &Playlist,
+    tracks: Vec<Track>,
+) -> Option<AppEvent> {
+    if tracks.is_empty() {
+        return None;
+    }
+    let cache = crate::config::AppConfig::load_cache();
+    let existing = if state
+        .data
+        .active_tracklist_context
+        .as_ref()
+        .is_some_and(|c| c.id == playlist.id)
+    {
+        state.data.tracks.clone()
+    } else if playlist.id.starts_with("local-playlist:") {
+        state
+            .data
+            .local_playlists
+            .tracks_for_playlist(&playlist.id, &state.data.local_library)
+    } else {
+        cache
+            .context_tracks
+            .values()
+            .find(|entry| entry.value.context.id == playlist.id)
+            .map(|entry| entry.value.tracks.clone())
+            .unwrap_or_default()
+    };
+    let duplicates = find_duplicates(&tracks, &existing);
+    if !duplicates.is_empty() {
+        state.ui.duplicate_prompt = Some(crate::intent::DuplicatePrompt {
+            playlist_id: playlist.id.clone(),
+            playlist_name: playlist.name.clone(),
+            tracks,
+            duplicates,
+        });
+        return None;
+    }
+    Some(AppEvent::AddTracksToPlaylist(playlist.id.clone(), tracks))
+}
+
+pub fn filtered_playlist_add_choices(state: &AppState) -> Vec<(usize, Playlist)> {
+    let query = state.ui.playlist_add_filter.to_lowercase();
+    playlist_add_choices(state)
+        .into_iter()
+        .enumerate()
+        .filter(|(_, p)| p.name.to_lowercase().contains(&query))
+        .collect()
+}
+
+pub fn commit_filtered_playlist_add(state: &mut AppState, index: usize) -> Option<AppEvent> {
+    if index == 0 {
+        let tracks = if state.ui.operation_register.is_empty() {
+            selected_tracks_for_playlist(state)
+        } else {
+            resolve_tracks_by_ids(state, &state.ui.operation_register)
+        };
+        if tracks.is_empty() {
+            return None;
+        }
+        let name = if tracks.len() == 1 {
+            tracks[0].name.clone()
+        } else {
+            crate::i18n::t("desktop.new_playlist", &state.ui.library_config.language)
+        };
+        cancel_playlist_add(state);
+        return Some(AppEvent::CreatePlaylistWithTracks { name, tracks });
+    }
+    let (original, _) = filtered_playlist_add_choices(state).get(index - 1)?.clone();
+    commit_playlist_add(state, original)
 }
 
 /// Close the add-to-playlist picker without adding. Clears the operation register so a later
 /// open can't silently add the previously staged track.
 pub fn cancel_playlist_add(state: &mut AppState) {
+    state.ui.playlist_add_filter.clear();
     state.ui.playlist_add_modal_open = false;
     state.ui.selected_playlist_modal_index = 0;
     state.ui.operation_register.clear();
@@ -263,6 +349,15 @@ fn find_track_by_id(state: &AppState, id: &str) -> Option<Track> {
         .tracks
         .iter()
         .chain(state.data.queue.iter())
+        .chain(state.data.top_tracks.iter())
+        .chain(state.data.recently_played.iter())
+        .chain(
+            state
+                .data
+                .artist_page_data
+                .iter()
+                .flat_map(|page| page.top_tracks.iter()),
+        )
         .find(|track| track.id == id)
         .cloned()
         .or_else(|| {
@@ -286,6 +381,97 @@ fn find_track_by_id(state: &AppState, id: &str) -> Option<Track> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn duplicates_use_ids_preserve_candidate_order_and_are_unique() {
+        let mut a = spotify_track("a");
+        let mut b = spotify_track("b");
+        a.name = "Same".into();
+        b.name = "Same".into();
+        assert_eq!(
+            find_duplicates(&[b.clone(), a.clone(), b.clone()], &[a.clone(), b]),
+            ["b", "a"]
+        );
+        assert!(find_duplicates(&[a], &[]).is_empty());
+        assert!(find_duplicates(&[spotify_track("a")], &[spotify_track("b")]).is_empty());
+    }
+
+    #[test]
+    fn filtered_picker_maps_choices_and_keeps_new_playlist_first() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.user_id = Some("me".into());
+        state.data.playlists = vec![
+            owned_playlist("first", "me"),
+            owned_playlist("other", "them"),
+            owned_playlist("SECOND", "me"),
+        ];
+        state.ui.playlist_add_filter = "second".into();
+        let choices = filtered_playlist_add_choices(&state);
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].0, 1);
+        state.data.tracks = vec![spotify_track("track")];
+        assert!(
+            matches!(commit_filtered_playlist_add(&mut state, 1), Some(AppEvent::AddTracksToPlaylist(id, _)) if id == "SECOND")
+        );
+        assert!(state.ui.playlist_add_filter.is_empty());
+        state.ui.playlist_add_filter = "no matches".into();
+        assert!(
+            matches!(commit_filtered_playlist_add(&mut state, 0), Some(AppEvent::CreatePlaylistWithTracks { name, tracks }) if name == "track track" && tracks.len() == 1)
+        );
+    }
+
+    #[test]
+    fn duplicate_confirmation_preserves_all_or_skips_existing_tracks() {
+        let mut state = AppState::new();
+        let playlist = owned_playlist("p", "me");
+        state.data.active_tracklist_context = Some(TrackListContext::playlist(
+            "p".into(),
+            "P".into(),
+            "Me".into(),
+            "me".into(),
+            None,
+        ));
+        state.data.tracks = vec![spotify_track("existing")];
+        let tracks = vec![spotify_track("existing"), spotify_track("new")];
+        assert!(stage_playlist_add(&mut state, &playlist, tracks.clone()).is_none());
+        assert!(crate::intent::prompt_active(&state));
+        assert!(
+            matches!(crate::intent::confirm_duplicate_skip(&mut state), Some(AppEvent::AddTracksToPlaylist(_, tracks)) if tracks.len() == 1 && tracks[0].id == "new")
+        );
+        stage_playlist_add(&mut state, &playlist, tracks.clone());
+        assert!(
+            matches!(crate::intent::confirm_prompt(&mut state), Some(AppEvent::AddTracksToPlaylist(_, tracks)) if tracks.len() == 2)
+        );
+        stage_playlist_add(&mut state, &playlist, vec![spotify_track("existing")]);
+        assert!(crate::intent::confirm_duplicate_skip(&mut state).is_none());
+        stage_playlist_add(&mut state, &playlist, tracks);
+        crate::intent::cancel_prompt(&mut state);
+        assert!(!crate::intent::prompt_active(&state));
+    }
+
+    #[test]
+    fn visual_selection_flows_through_duplicate_detection() {
+        let mut state = AppState::new();
+        state.data.user_id = Some("me".into());
+        state.data.playlists = vec![owned_playlist("p", "me")];
+        state.data.active_tracklist_context = Some(TrackListContext::playlist(
+            "p".into(),
+            "P".into(),
+            "Me".into(),
+            "me".into(),
+            None,
+        ));
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.tracks = vec![spotify_track("a"), spotify_track("b")];
+        crate::intent::enter_visual(&mut state);
+        state.ui.selected_track_index = 1;
+        crate::intent::add_visual_selection_to_playlist(&mut state);
+        assert!(commit_playlist_add(&mut state, 0).is_none());
+        let prompt = state.ui.duplicate_prompt.as_ref().unwrap();
+        assert_eq!(prompt.tracks.len(), 2);
+        assert_eq!(prompt.duplicates, ["a", "b"]);
+    }
+
     #[test]
     fn opening_an_album_clears_the_previous_header_details() {
         let mut state = AppState::new();
