@@ -192,6 +192,7 @@ pub enum WorkerEvent {
     HeaderImageProcessed(crate::artwork::SharedArtwork),
     ThumbnailProcessed {
         url: String,
+        tier: crate::thumbnails::ThumbTier,
         artwork: Option<crate::artwork::SharedArtwork>,
     },
     LikedStatusUpdate(std::collections::HashMap<String, bool>),

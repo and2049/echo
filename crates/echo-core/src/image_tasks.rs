@@ -6,8 +6,9 @@
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use crate::artwork::{Artwork, MAX_COVER_EDGE, THUMB_EDGE};
+use crate::artwork::{Artwork, MAX_COVER_EDGE};
 use crate::events::WorkerEvent;
+use crate::thumbnails::ThumbTier;
 
 async fn load_image_bytes(source: &str) -> Option<Vec<u8>> {
     if source.starts_with("http://") || source.starts_with("https://") {
@@ -64,7 +65,7 @@ pub fn spawn_header_image_processing(url: String, tx: mpsc::Sender<WorkerEvent>,
     });
 }
 
-pub fn spawn_thumbnail_processing(url: String, tx: mpsc::Sender<WorkerEvent>) {
+pub fn spawn_thumbnail_processing(url: String, tier: ThumbTier, tx: mpsc::Sender<WorkerEvent>) {
     tokio::spawn(async move {
         let cache_path = crate::thumbnails::disk_path(&url);
         let bytes = match tokio::fs::read(&cache_path).await {
@@ -83,13 +84,13 @@ pub fn spawn_thumbnail_processing(url: String, tx: mpsc::Sender<WorkerEvent>) {
 
         let artwork = match bytes {
             // Thumbnails are never pixelated — the effect is for the large covers.
-            Some(bytes) => decode(bytes, 0, THUMB_EDGE).await.map(Arc::new),
+            Some(bytes) => decode(bytes, 0, tier.edge()).await.map(Arc::new),
             None => None,
         };
 
         // Always report back, even on failure, so Loading entries resolve.
         let _ = tx
-            .send(WorkerEvent::ThumbnailProcessed { url, artwork })
+            .send(WorkerEvent::ThumbnailProcessed { url, tier, artwork })
             .await;
     });
 }

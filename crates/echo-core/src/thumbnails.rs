@@ -17,6 +17,29 @@ const MAX_IN_FLIGHT: usize = 4;
 const MAX_MEMORY_ENTRIES: usize = 300;
 const MAX_DISK_FILES: usize = 500;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ThumbTier {
+    Small,
+    Card,
+}
+
+impl ThumbTier {
+    pub fn edge(self) -> u32 {
+        match self {
+            Self::Small => crate::artwork::THUMB_EDGE,
+            Self::Card => 320,
+        }
+    }
+}
+
+pub fn tier_for_edge(edge: f32) -> ThumbTier {
+    if edge > ThumbTier::Small.edge() as f32 {
+        ThumbTier::Card
+    } else {
+        ThumbTier::Small
+    }
+}
+
 pub enum ThumbState {
     Loading,
     Ready {
@@ -27,19 +50,20 @@ pub enum ThumbState {
 
 #[derive(Default)]
 pub struct ThumbnailCache {
-    pub entries: HashMap<String, ThumbState>,
-    pending: Vec<String>,
+    pub entries: HashMap<(String, ThumbTier), ThumbState>,
+    pending: Vec<(String, ThumbTier)>,
     disk_pruned: bool,
 }
 
 impl ThumbnailCache {
     /// Called from the renderer for each visible row whose thumbnail is not
     /// yet loaded. Actual spawning happens later in `drain_pending`.
-    pub fn request(&mut self, url: &str) {
-        if self.entries.contains_key(url) || self.pending.iter().any(|u| u == url) {
+    pub fn request(&mut self, url: &str, tier: ThumbTier) {
+        let key = (url.to_string(), tier);
+        if self.entries.contains_key(&key) || self.pending.contains(&key) {
             return;
         }
-        self.pending.push(url.to_string());
+        self.pending.push(key);
     }
 
     /// Whether any request is waiting for `drain_pending`.
@@ -47,8 +71,8 @@ impl ThumbnailCache {
         !self.pending.is_empty()
     }
 
-    pub fn get(&self, url: &str) -> Option<&ThumbState> {
-        self.entries.get(url)
+    pub fn get(&self, url: &str, tier: ThumbTier) -> Option<&ThumbState> {
+        self.entries.get(&(url.to_string(), tier))
     }
 
     fn loading_count(&self) -> usize {
@@ -62,7 +86,7 @@ impl ThumbnailCache {
     /// in-flight loads and the most recently requested urls. Evicted covers
     /// reload cheaply from the disk byte cache when they scroll back on
     /// screen.
-    fn evict_if_needed(&mut self, keep: &[String]) {
+    fn evict_if_needed(&mut self, keep: &[(String, ThumbTier)]) {
         if self.entries.len() <= MAX_MEMORY_ENTRIES {
             return;
         }
@@ -144,19 +168,19 @@ pub fn drain_pending(state: &mut AppState, tx: &mpsc::Sender<WorkerEvent>) {
     }
     let visible = std::mem::take(&mut state.ui.thumbnails.pending);
     let mut slots = MAX_IN_FLIGHT.saturating_sub(state.ui.thumbnails.loading_count());
-    for url in &visible {
+    for key in &visible {
         if slots == 0 {
             break;
         }
-        if state.ui.thumbnails.entries.contains_key(url) {
+        if state.ui.thumbnails.entries.contains_key(key) {
             continue;
         }
         state
             .ui
             .thumbnails
             .entries
-            .insert(url.clone(), ThumbState::Loading);
-        crate::image_tasks::spawn_thumbnail_processing(url.clone(), tx.clone());
+            .insert(key.clone(), ThumbState::Loading);
+        crate::image_tasks::spawn_thumbnail_processing(key.0.clone(), key.1, tx.clone());
         slots -= 1;
     }
     state.ui.thumbnails.evict_if_needed(&visible);
@@ -165,6 +189,83 @@ pub fn drain_pending(state: &mut AppState, tx: &mpsc::Sender<WorkerEvent>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tier_edges_and_display_size_selection() {
+        assert_eq!(ThumbTier::Small.edge(), 64);
+        assert_eq!(ThumbTier::Card.edge(), 320);
+        for edge in [0.0, 26.0, 32.0, 40.0, 56.0, 64.0] {
+            assert_eq!(tier_for_edge(edge), ThumbTier::Small);
+        }
+        for edge in [64.01, 92.0, 160.0, 320.0] {
+            assert_eq!(tier_for_edge(edge), ThumbTier::Card);
+        }
+    }
+
+    #[test]
+    fn requests_and_failures_are_independent_per_tier() {
+        let mut cache = ThumbnailCache::default();
+        cache.request("same", ThumbTier::Small);
+        cache.request("same", ThumbTier::Card);
+        cache.request("same", ThumbTier::Card);
+        assert_eq!(
+            cache.pending,
+            [
+                ("same".into(), ThumbTier::Small),
+                ("same".into(), ThumbTier::Card)
+            ]
+        );
+        cache
+            .entries
+            .insert(("same".into(), ThumbTier::Small), ThumbState::Failed);
+        assert!(matches!(
+            cache.get("same", ThumbTier::Small),
+            Some(ThumbState::Failed)
+        ));
+        assert!(cache.get("same", ThumbTier::Card).is_none());
+    }
+
+    #[tokio::test]
+    async fn both_tiers_decode_shared_disk_bytes_and_resolve_through_the_reducer() {
+        let url = format!(
+            "file://missing-tiered-thumbnail-source-{}",
+            std::process::id()
+        );
+        let path = disk_path(&url);
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(640, 480)
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .unwrap();
+        tokio::fs::create_dir_all(thumbs_dir()).await.unwrap();
+        tokio::fs::write(&path, bytes.get_ref()).await.unwrap();
+        let mut state = AppState::new();
+        let (tx, mut rx) = mpsc::channel(2);
+        let (app_tx, _) = mpsc::unbounded_channel();
+        state.ui.thumbnails.request(&url, ThumbTier::Small);
+        state.ui.thumbnails.request(&url, ThumbTier::Card);
+        drain_pending(&mut state, &tx);
+        assert_eq!(state.ui.thumbnails.loading_count(), 2);
+        assert!(!state.ui.thumbnails.has_pending());
+        for _ in 0..2 {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            crate::apply_worker_event::apply_worker_event(event, &mut state, &app_tx, &tx);
+        }
+        for tier in [ThumbTier::Small, ThumbTier::Card] {
+            let Some(ThumbState::Ready { artwork }) = state.ui.thumbnails.get(&url, tier) else {
+                panic!("tier did not resolve");
+            };
+            assert_eq!(artwork.width, tier.edge());
+            assert_eq!(artwork.height, tier.edge() * 3 / 4);
+            state.ui.thumbnails.request(&url, tier);
+        }
+        assert_eq!(state.ui.thumbnails.entries.len(), 2);
+        assert!(!state.ui.thumbnails.has_pending());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes.into_inner());
+        tokio::fs::remove_file(path).await.unwrap();
+    }
 
     #[test]
     fn disk_path_uses_spotify_url_segment() {
@@ -191,11 +292,13 @@ mod tests {
     #[test]
     fn request_dedupes_pending_and_existing() {
         let mut cache = ThumbnailCache::default();
-        cache.request("a");
-        cache.request("a");
+        cache.request("a", ThumbTier::Small);
+        cache.request("a", ThumbTier::Small);
         assert_eq!(cache.pending.len(), 1);
-        cache.entries.insert("b".to_string(), ThumbState::Failed);
-        cache.request("b");
+        cache
+            .entries
+            .insert(("b".to_string(), ThumbTier::Small), ThumbState::Failed);
+        cache.request("b", ThumbTier::Small);
         assert_eq!(cache.pending.len(), 1);
     }
 
@@ -203,15 +306,22 @@ mod tests {
     fn eviction_keeps_loading_and_visible() {
         let mut cache = ThumbnailCache::default();
         for i in 0..(MAX_MEMORY_ENTRIES + 10) {
-            cache.entries.insert(format!("u{i}"), ThumbState::Failed);
+            cache
+                .entries
+                .insert((format!("u{i}"), ThumbTier::Small), ThumbState::Failed);
         }
+        cache.entries.insert(
+            ("loading".to_string(), ThumbTier::Card),
+            ThumbState::Loading,
+        );
         cache
             .entries
-            .insert("loading".to_string(), ThumbState::Loading);
-        let visible = vec!["u1".to_string()];
+            .insert(("u1".to_string(), ThumbTier::Card), ThumbState::Failed);
+        let visible = vec![("u1".to_string(), ThumbTier::Card)];
         cache.evict_if_needed(&visible);
-        assert!(cache.entries.contains_key("loading"));
-        assert!(cache.entries.contains_key("u1"));
+        assert!(cache.get("loading", ThumbTier::Card).is_some());
+        assert!(cache.get("u1", ThumbTier::Card).is_some());
+        assert!(cache.get("u1", ThumbTier::Small).is_none());
         assert!(cache.entries.len() <= 2);
     }
 }

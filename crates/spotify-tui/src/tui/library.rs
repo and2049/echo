@@ -407,8 +407,16 @@ fn render_library_thumbnails(
         let Some(url) = row.thumb_url.as_deref() else {
             continue;
         };
-        if !state.ui.thumbnails.entries.contains_key(url) {
-            state.ui.thumbnails.request(url);
+        if state
+            .ui
+            .thumbnails
+            .get(url, echo_core::thumbnails::ThumbTier::Small)
+            .is_none()
+        {
+            state
+                .ui
+                .thumbnails
+                .request(url, echo_core::thumbnails::ThumbTier::Small);
         }
     }
 
@@ -470,13 +478,16 @@ fn render_library_thumbnails(
                 width: THUMB_W,
                 height: THUMB_H.min(row_bottom.saturating_sub(y)),
             };
-            let artwork =
-                row.thumb_url
-                    .as_deref()
-                    .and_then(|url| match state.ui.thumbnails.get(url) {
-                        Some(ThumbState::Ready { artwork }) => Some(artwork.clone()),
-                        _ => None,
-                    });
+            let artwork = row.thumb_url.as_deref().and_then(|url| {
+                match state
+                    .ui
+                    .thumbnails
+                    .get(url, echo_core::thumbnails::ThumbTier::Small)
+                {
+                    Some(ThumbState::Ready { artwork }) => Some(artwork.clone()),
+                    _ => None,
+                }
+            });
             if let Some(artwork) = artwork {
                 crate::tui::image::draw(buf, img_area, &artwork);
             } else {

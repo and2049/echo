@@ -12,7 +12,7 @@
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
-use echo_core::thumbnails::ThumbState;
+use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
 mod playlist_edit;
 mod search;
 use gpui::{
@@ -887,8 +887,8 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
 
                             let thumb: Option<AnyElement> = has_thumb.then(|| {
                                 let artwork = thumb_url.as_deref().and_then(|url| {
-                                    this.state.ui.thumbnails.request(url);
-                                    match this.state.ui.thumbnails.get(url) {
+                                    this.state.ui.thumbnails.request(url, ThumbTier::Small);
+                                    match this.state.ui.thumbnails.get(url, ThumbTier::Small) {
                                         Some(ThumbState::Ready { artwork }) => {
                                             Some(artwork.clone())
                                         }
@@ -2628,8 +2628,9 @@ fn thumb_element(
     muted: gpui::Hsla,
 ) -> AnyElement {
     let artwork = url.and_then(|url| {
-        this.state.ui.thumbnails.request(url);
-        match this.state.ui.thumbnails.get(url) {
+        let tier = tier_for_edge(edge);
+        this.state.ui.thumbnails.request(url, tier);
+        match this.state.ui.thumbnails.get(url, tier) {
             Some(ThumbState::Ready { artwork }) => Some(artwork.clone()),
             _ => None,
         }

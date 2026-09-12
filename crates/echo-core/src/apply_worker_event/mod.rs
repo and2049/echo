@@ -132,8 +132,8 @@ pub fn apply_worker_event(
             playback::handle_audio_visualization_ready(state, bands, flag)
         }
         WorkerEvent::HeaderImageProcessed(artwork) => images::handle(state, artwork),
-        WorkerEvent::ThumbnailProcessed { url, artwork } => {
-            images::handle_thumbnail(state, url, artwork)
+        WorkerEvent::ThumbnailProcessed { url, tier, artwork } => {
+            images::handle_thumbnail(state, url, tier, artwork)
         }
         WorkerEvent::TracksLoaded(tracks, context) => {
             data::handle_tracks_loaded(state, worker_tx, tracks, context)
