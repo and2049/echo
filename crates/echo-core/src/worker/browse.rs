@@ -1,7 +1,27 @@
 use tokio::sync::mpsc;
 
 use crate::events::WorkerEvent;
+use crate::home::HomeFeed;
 use crate::models::Album;
+
+struct HomeRequest {
+    tx: mpsc::Sender<WorkerEvent>,
+    feed: HomeFeed,
+}
+
+impl Drop for HomeRequest {
+    fn drop(&mut self) {
+        let tx = self.tx.clone();
+        let event = WorkerEvent::HomeFeedFinished {
+            feed: self.feed,
+            range: None,
+            success: false,
+        };
+        tokio::spawn(async move {
+            let _ = tx.send(event).await;
+        });
+    }
+}
 
 use super::{
     api::client::{ArtistAlbumsCachePolicy, EchoSpotifyClient},
@@ -18,10 +38,16 @@ pub fn spawn_top_tracks(
     tx: mpsc::Sender<WorkerEvent>,
     range: crate::models::TopItemsRange,
 ) {
+    let request = HomeRequest {
+        tx: tx.clone(),
+        feed: HomeFeed::TopTracks,
+    };
     let Some(api) = api_client else {
         return;
     };
     tokio::spawn(async move {
+        let _request = request;
+        let api = api.third_party_only();
         match api.top_tracks(range).await {
             Ok(Some(tracks)) => {
                 let _ = tx.send(WorkerEvent::TopTracksLoaded(tracks)).await;
@@ -39,10 +65,16 @@ pub fn spawn_top_artists(
     tx: mpsc::Sender<WorkerEvent>,
     range: crate::models::TopItemsRange,
 ) {
+    let request = HomeRequest {
+        tx: tx.clone(),
+        feed: HomeFeed::TopArtists,
+    };
     let Some(api) = api_client else {
         return;
     };
     tokio::spawn(async move {
+        let _request = request;
+        let api = api.third_party_only();
         match api.top_artists(range).await {
             Ok(Some(artists)) => {
                 let _ = tx.send(WorkerEvent::TopArtistsLoaded(artists)).await;
@@ -56,10 +88,16 @@ pub fn spawn_top_artists(
 }
 
 pub fn spawn_recently_played(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>) {
+    let request = HomeRequest {
+        tx: tx.clone(),
+        feed: HomeFeed::RecentlyPlayed,
+    };
     let Some(api) = api_client else {
         return;
     };
     tokio::spawn(async move {
+        let _request = request;
+        let api = api.third_party_only();
         match api.recently_played().await {
             Ok(Some(tracks)) => {
                 let _ = tx.send(WorkerEvent::RecentlyPlayedLoaded(tracks)).await;
@@ -80,6 +118,7 @@ pub fn spawn_followed_artists(
         return;
     };
     tokio::spawn(async move {
+        let api = api.third_party_only();
         match api.followed_artists().await {
             Ok(Some(artists)) => {
                 let _ = tx.send(WorkerEvent::FollowedArtistsLoaded(artists)).await;
@@ -96,10 +135,16 @@ pub fn spawn_followed_artists(
 /// cache when fresh; otherwise walks artists sequentially through the shared artist-albums
 /// cache (warming artist pages as a side effect), emitting cumulative snapshots as it goes.
 pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>) {
+    let request = HomeRequest {
+        tx: tx.clone(),
+        feed: HomeFeed::NewReleases,
+    };
     let Some(api) = api_client else {
         return;
     };
     tokio::spawn(async move {
+        let _request = request;
+        let api = api.third_party_only();
         if let Some(albums) = crate::config::AppConfig::load_cache().get_whats_new() {
             let _ = tx
                 .send(WorkerEvent::WhatsNewLoaded {
@@ -126,14 +171,21 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
         for (index, artist) in artists.into_iter().take(WHATS_NEW_MAX_ARTISTS).enumerate() {
             let done = index + 1;
             let mut from_network = false;
-            if let Ok(response) = api
+            match api
                 .artist_albums_with_policy(&artist.id, ArtistAlbumsCachePolicy::UseCache)
                 .await
             {
-                from_network = response.refreshed.is_some();
-                if let Some(albums) = response.refreshed.or(response.cached) {
-                    merged.extend(albums);
+                Ok(response) => {
+                    from_network = response.refreshed.is_some();
+                    if let Some(albums) = response.refreshed.or(response.cached) {
+                        merged.extend(albums);
+                    }
                 }
+                Err(error) if super::api::rate_limit::is_probable_rate_limit(&error) => {
+                    send_api_error(tx, "What's New", "whats_new", error).await;
+                    return;
+                }
+                Err(_) => {}
             }
             if done % 3 == 0 && done < total {
                 let _ = tx
@@ -167,6 +219,27 @@ fn whats_new_cutoff() -> String {
     (chrono::Utc::now() - chrono::Duration::days(WHATS_NEW_WINDOW_DAYS))
         .format("%Y-%m-%d")
         .to_string()
+}
+
+pub fn spawn_recent_contexts(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>) {
+    let request = HomeRequest {
+        tx: tx.clone(),
+        feed: HomeFeed::RecentContexts,
+    };
+    let Some(api) = api_client else {
+        return;
+    };
+    tokio::spawn(async move {
+        let _request = request;
+        match api.third_party_only().recent_contexts().await {
+            Ok(contexts) => {
+                let _ = tx.send(WorkerEvent::RecentContextsLoaded(contexts)).await;
+            }
+            Err(error) => {
+                send_api_error(tx, "Recently played contexts", "recent_contexts", error).await
+            }
+        }
+    });
 }
 
 /// Filters to releases dated on or after `cutoff` (ISO string compare, so year-only

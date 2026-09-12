@@ -30,6 +30,10 @@ pub enum AppEvent {
         current_track_id: Option<String>,
     },
     StartAuth,
+    PlayArtist {
+        artist_id: String,
+        current_track_id: Option<String>,
+    },
     Quit,
     TogglePlayback(bool),
     NextTrack {
@@ -81,6 +85,7 @@ pub enum AppEvent {
         range: crate::models::TopItemsRange,
     },
     FetchRecentlyPlayed,
+    FetchRecentContexts,
     FetchFollowedArtists,
     FetchWhatsNew,
     LoadArtistPage {
@@ -173,6 +178,12 @@ pub enum WorkerEvent {
     TopTracksLoaded(Vec<Track>),
     TopArtistsLoaded(Vec<crate::models::Artist>),
     RecentlyPlayedLoaded(Vec<Track>),
+    RecentContextsLoaded(Vec<crate::home::ResolvedRecentContext>),
+    HomeFeedFinished {
+        feed: crate::home::HomeFeed,
+        range: Option<crate::models::TopItemsRange>,
+        success: bool,
+    },
     FollowedArtistsLoaded(Vec<crate::models::Artist>),
     /// Cumulative snapshot of the What's New scan: the full merged album list so far,
     /// plus scan progress. `done == total` marks the final emission.

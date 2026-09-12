@@ -28,6 +28,7 @@ pub struct UIState {
     pub pending_browse_open: Option<BrowseNode>,
     // Selection indices
     pub selected_playlist_index: usize,
+    pub selected_home_index: usize,
     pub selected_artist_index: usize,
     pub selected_whats_new_index: usize,
     pub selected_track_index: usize,
@@ -106,6 +107,7 @@ impl UIState {
             artist_list_source: ArtistListSource::Followed,
             pending_browse_open: None,
             selected_playlist_index: 0,
+            selected_home_index: 0,
             selected_artist_index: 0,
             selected_whats_new_index: 0,
             selected_track_index: 0,
@@ -266,6 +268,8 @@ pub struct DataState {
     pub top_tracks: Vec<Track>,
     pub top_artists: Vec<crate::models::Artist>,
     pub recently_played: Vec<Track>,
+    pub recent_contexts: Vec<crate::home::ResolvedRecentContext>,
+    pub home_fetches: HashMap<crate::home::HomeFeed, crate::home::HomeFetch>,
     pub followed_artists: Vec<crate::models::Artist>,
     pub whats_new: Vec<crate::models::Album>,
     /// `(done, total)` artists scanned by an in-flight What's New refresh; `None` when idle.
@@ -304,6 +308,8 @@ impl DataState {
             top_tracks: Vec::new(),
             top_artists: Vec::new(),
             recently_played: Vec::new(),
+            recent_contexts: Vec::new(),
+            home_fetches: HashMap::new(),
             followed_artists: Vec::new(),
             whats_new: Vec::new(),
             whats_new_progress: None,
@@ -339,6 +345,7 @@ pub enum ArtistListSource {
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ActiveView {
+    Home,
     Library,
     TrackList,
     SearchResults,
@@ -404,6 +411,7 @@ const HISTORY_LIMIT: usize = 20;
 
 #[derive(Clone)]
 pub struct NavigationSnapshot {
+    selected_home_index: usize,
     active_view: ActiveView,
     selected_playlist_index: usize,
     selected_track_index: usize,
@@ -536,6 +544,7 @@ impl AppState {
 
         if let Some(start) = self.ui.visual_selection_start {
             let current = match self.ui.active_view {
+                ActiveView::Home => return None,
                 ActiveView::TrackList => self.ui.selected_track_index,
                 ActiveView::SearchResults => self.ui.selected_search_index,
                 ActiveView::Queue => self.ui.selected_queue_index,
@@ -600,6 +609,7 @@ impl AppState {
 
     fn navigation_snapshot(&self) -> NavigationSnapshot {
         NavigationSnapshot {
+            selected_home_index: self.ui.selected_home_index,
             active_view: self.ui.active_view,
             selected_playlist_index: self.ui.selected_playlist_index,
             selected_track_index: self.ui.selected_track_index,
@@ -624,6 +634,7 @@ impl AppState {
     }
 
     fn restore_navigation_snapshot(&mut self, snapshot: NavigationSnapshot) {
+        self.ui.selected_home_index = snapshot.selected_home_index;
         self.ui.active_view = snapshot.active_view;
         self.ui.selected_playlist_index = snapshot.selected_playlist_index;
         self.ui.selected_track_index = snapshot.selected_track_index;

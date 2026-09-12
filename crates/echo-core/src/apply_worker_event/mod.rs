@@ -19,7 +19,30 @@ pub fn apply_worker_event(
     app_tx: &mpsc::UnboundedSender<AppEvent>,
     worker_tx: &mpsc::Sender<WorkerEvent>,
 ) {
+    use crate::home::HomeFeed;
+    let completed = match &worker_event {
+        WorkerEvent::PlaylistsLoaded(_) => Some(HomeFeed::MadeForYou),
+        WorkerEvent::TopTracksLoaded(_) => Some(HomeFeed::TopTracks),
+        WorkerEvent::TopArtistsLoaded(_) => Some(HomeFeed::TopArtists),
+        WorkerEvent::RecentlyPlayedLoaded(_) => Some(HomeFeed::RecentlyPlayed),
+        WorkerEvent::RecentContextsLoaded(_) => Some(HomeFeed::RecentContexts),
+        WorkerEvent::WhatsNewLoaded { done, total, .. } if done == total => {
+            Some(HomeFeed::NewReleases)
+        }
+        _ => None,
+    };
+    if let Some(feed) = completed {
+        let range = matches!(feed, HomeFeed::TopTracks | HomeFeed::TopArtists)
+            .then_some(state.ui.library_config.top_items_range);
+        data::handle_home_feed_finished(state, feed, range, true);
+    }
     match worker_event {
+        WorkerEvent::RecentContextsLoaded(contexts) => state.data.recent_contexts = contexts,
+        WorkerEvent::HomeFeedFinished {
+            feed,
+            range,
+            success,
+        } => data::handle_home_feed_finished(state, feed, range, success),
         WorkerEvent::AuthenticationComplete => auth::handle(state),
         WorkerEvent::SpotifyReauthorizationRequired => {
             auth::handle_reauthorization_required(state, app_tx)

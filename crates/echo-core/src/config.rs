@@ -57,6 +57,10 @@ pub struct CacheData {
     #[serde(default)]
     pub recently_played: Option<CachedEntry<Vec<Track>>>,
     #[serde(default)]
+    pub recent_history: Option<CachedEntry<crate::home::RecentHistory>>,
+    #[serde(default)]
+    pub recent_playlists: HashMap<String, CachedEntry<Playlist>>,
+    #[serde(default)]
     pub whats_new: Option<CachedEntry<Vec<Album>>>,
     #[serde(default)]
     pub context_tracks: HashMap<String, CachedEntry<ContextTracksCacheEntry>>,
@@ -110,6 +114,19 @@ impl<T: Clone> CachedEntry<T> {
 }
 
 impl CacheData {
+    pub fn get_recent_playlist(&self, id: &str) -> Option<Playlist> {
+        self.recent_playlists
+            .get(id)
+            .and_then(|entry| entry.fresh_value(ARTIST_PAGE_CACHE_TTL))
+    }
+
+    pub fn set_recent_playlist(&mut self, playlist: Playlist) {
+        self.recent_playlists
+            .retain(|_, entry| is_fresh(entry.fetched_at, ARTIST_PAGE_CACHE_TTL));
+        self.recent_playlists
+            .insert(playlist.id.clone(), CachedEntry::new(playlist));
+    }
+
     pub fn get_playlists(&self) -> Option<Vec<Playlist>> {
         self.playlists
             .as_ref()
@@ -851,6 +868,23 @@ fn load_themes_from_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recent_playlist_cache_round_trips_and_expires_after_twenty_four_hours() {
+        let playlist: Playlist = serde_json::from_value(
+            serde_json::json!({"id":"p","name":"P","owner":"O","owner_id":"o","image_url":null}),
+        )
+        .unwrap();
+        let mut cache = CacheData::default();
+        cache.set_recent_playlist(playlist);
+        let mut cache: CacheData =
+            serde_json::from_str(&serde_json::to_string(&cache).unwrap()).unwrap();
+        assert_eq!(cache.get_recent_playlist("p").unwrap().name, "P");
+        cache.recent_playlists.get_mut("p").unwrap().fetched_at =
+            now_epoch_secs() - ARTIST_PAGE_CACHE_TTL.as_secs() - 1;
+        assert!(cache.get_recent_playlist("p").is_none());
+        assert!(cache.get_recent_playlist("absent").is_none());
+    }
+
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 

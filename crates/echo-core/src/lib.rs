@@ -14,6 +14,7 @@ pub mod commands;
 pub mod config;
 pub mod context_details;
 pub mod events;
+pub mod home;
 pub mod i18n;
 pub mod image_tasks;
 pub mod intent;

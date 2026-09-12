@@ -67,6 +67,11 @@
     "title": " Actions: {} "
   },
   "desktop": {
+    "home": "Home",
+    "home_morning": "Good morning", "home_afternoon": "Good afternoon", "home_evening": "Good evening",
+    "home_quick_picks": "Quick picks", "home_liked_songs": "Liked Songs", "home_made_for_you": "Made for you",
+    "home_recently_played": "Recently played", "home_top_artists": "Your top artists", "home_top_songs": "Your top songs", "home_new_releases": "New releases",
+    "home_artist": "Artist", "home_loading": "Loading", "home_empty": "Nothing to show yet",
     "context": {
       "playlist": "Playlist", "public": "Public playlist", "private": "Private playlist", "collaborative": "Collaborative playlist",
       "album": "Album", "single": "Single", "compilation": "Compilation",

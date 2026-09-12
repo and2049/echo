@@ -694,6 +694,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .border_r_1()
         .border_color(palette.border)
         .child(nav_row)
+        .child(div().id("home-link").mx_2().mt_2().px_2().py_2().rounded_md().flex().items_center().gap_2().text_sm().text_color(if app.state.ui.active_view == ActiveView::Home { accent } else { muted }).when(app.state.ui.active_view == ActiveView::Home, |el| el.bg(palette.row_selected)).hover(move |style| style.bg(palette.row_hover)).cursor_pointer().on_click(cx.listener(|this: &mut EchoApp, _, window, cx| { this.open_home(cx); window.focus(&this.focus_handle, cx); })).child(svg().path("icons/home.svg").size(px(18.0)).text_color(muted)).child(tr(&app.state, "desktop.home")))
         .child(
             div()
                 .flex()
@@ -1125,6 +1126,7 @@ pub fn main_area(
         setup_view(app, window, cx).into_any_element()
     } else {
         match app.state.ui.active_view {
+            ActiveView::Home => home_view(app, window, cx).into_any_element(),
             ActiveView::TrackList => track_list(app, window, cx).into_any_element(),
             ActiveView::Queue => queue_list(app, cx).into_any_element(),
             ActiveView::SearchResults => search_results(app, cx).into_any_element(),
@@ -1137,7 +1139,8 @@ pub fn main_area(
             {
                 track_list(app, window, cx).into_any_element()
             }
-            _ => library_placeholder(app),
+            _ if app.state.ui.mode == AppMode::Authenticating => library_placeholder(app),
+            _ => home_view(app, window, cx).into_any_element(),
         }
     };
 
@@ -2598,6 +2601,8 @@ fn thumb_element(
             let el = img(image).flex_none().w(px(edge)).h(px(edge));
             if round {
                 el.rounded_full()
+            } else if edge >= 56.0 {
+                el.rounded(px(8.0))
             } else {
                 el.rounded_sm()
             }
@@ -2621,6 +2626,8 @@ fn thumb_element(
                 );
             if round {
                 el.rounded_full()
+            } else if edge >= 56.0 {
+                el.rounded(px(8.0))
             } else {
                 el.rounded_sm()
             }
@@ -4311,6 +4318,14 @@ pub const KEY_HELP: &[(&str, &[(&str, &str)])] = &[
         "desktop.help.nav",
         &[
             ("j / k / ↓ / ↑", "desktop.help.move"),
+            (
+                if cfg!(target_os = "macos") {
+                    "ctrl-shift-h"
+                } else {
+                    "ctrl-h"
+                },
+                "desktop.home",
+            ),
             ("gg / G / home / end", "desktop.help.first_last"),
             ("ctrl-b / ctrl-f / pgup / pgdn", "desktop.help.page"),
             ("ctrl-u / ctrl-d", "desktop.help.half_page"),
@@ -5441,6 +5456,401 @@ fn library_placeholder(app: &EchoApp) -> AnyElement {
         )
         .child(div().text_xs().text_color(muted).child(counts))
         .into_any_element()
+}
+
+fn home_item_title(
+    state: &echo_core::app::AppState,
+    item: &echo_core::home::HomeItem,
+) -> SharedString {
+    if item.id == "LIKED_SONGS" {
+        tr(state, "desktop.home_liked_songs")
+    } else {
+        item.title.clone().into()
+    }
+}
+
+fn home_play_button(
+    item: echo_core::home::HomeItem,
+    accent: Hsla,
+    fg: Hsla,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    div()
+        .id("home-play")
+        .absolute()
+        .right(px(8.0))
+        .bottom(px(8.0))
+        .size(px(36.0))
+        .rounded_full()
+        .bg(accent)
+        .flex()
+        .items_center()
+        .justify_center()
+        .invisible()
+        .group_hover("home-item", |style| style.visible())
+        .cursor_pointer()
+        .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
+            cx.stop_propagation();
+            window.focus(&this.focus_handle, cx);
+            if let Some(event) = echo_core::intent::play_home_item(&mut this.state, item.clone()) {
+                this.dispatch(event);
+            }
+            cx.notify();
+        }))
+        .child(svg().path("icons/play.svg").size(px(18.0)).text_color(fg))
+}
+
+fn home_card(
+    app: &mut EchoApp,
+    item: echo_core::home::HomeItem,
+    index: usize,
+    quick: bool,
+    cx: &mut Context<EchoApp>,
+) -> AnyElement {
+    use echo_core::home::HomeItemKind;
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let background = theme.background.gpui(crate::theme::WINDOW_BG());
+    let title = home_item_title(&app.state, &item);
+    let subtitle = if item.kind == HomeItemKind::Artist {
+        tr(&app.state, "desktop.home_artist")
+    } else if let Some(year) = &item.release_year {
+        year.clone().into()
+    } else {
+        item.subtitle.clone().into()
+    };
+    let selected =
+        app.state.ui.active_view == ActiveView::Home && app.state.ui.selected_home_index == index;
+    let edge = if quick { 56.0 } else { 160.0 };
+    let cover = if item.id == "LIKED_SONGS" {
+        div()
+            .size(px(edge))
+            .flex_none()
+            .rounded(px(8.0))
+            .bg(palette.wash)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                svg()
+                    .path("icons/heart.svg")
+                    .size(px(edge * 0.45))
+                    .text_color(accent),
+            )
+            .into_any_element()
+    } else {
+        thumb_element(
+            app,
+            item.image_url.as_deref(),
+            edge,
+            item.kind == HomeItemKind::Artist,
+            muted,
+        )
+    };
+    let play = home_play_button(item.clone(), accent, background, cx).into_any_element();
+    let base = div()
+        .id(("home-item", index))
+        .group("home-item")
+        .relative()
+        .min_w_0()
+        .cursor_pointer()
+        .rounded(px(8.0))
+        .text_color(fg)
+        .when(selected, |el| el.bg(palette.row_selected))
+        .hover(move |style| style.bg(palette.row_hover))
+        .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
+            window.focus(&this.focus_handle, cx);
+            this.state.ui.selected_home_index = index;
+            if let Some(event) = echo_core::intent::open_home_item(&mut this.state, item.clone()) {
+                this.dispatch(event);
+            }
+            cx.notify();
+        }));
+    if quick {
+        base.flex_1()
+            .h(px(56.0))
+            .flex()
+            .items_center()
+            .gap_2()
+            .overflow_hidden()
+            .border_1()
+            .border_color(palette.border)
+            .when(!selected, |el| el.bg(palette.wash))
+            .child(cover)
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .pr_2()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .line_clamp(2)
+                    .child(title),
+            )
+            .child(play)
+            .into_any_element()
+    } else {
+        base.flex_none()
+            .w(px(160.0))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().relative().size(px(160.0)).child(cover).child(play))
+            .child(
+                div()
+                    .px_1()
+                    .h(px(40.0))
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .line_clamp(2)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .px_1()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(muted)
+                    .truncate()
+                    .child(subtitle),
+            )
+            .into_any_element()
+    }
+}
+
+fn home_scrollbar(
+    scroll: gpui::ScrollHandle,
+    palette: DesktopPalette,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    let paint_scroll = scroll.clone();
+    let drag_scroll = scroll.clone();
+    div()
+        .id("home-scrollbar")
+        .h(px(12.0))
+        .w_full()
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |_: &mut EchoApp, event: &MouseDownEvent, _, cx| {
+                let bounds = scroll.bounds();
+                let fraction = (f32::from(event.position.x - bounds.left())
+                    / f32::from(bounds.size.width).max(1.0))
+                .clamp(0.0, 1.0);
+                scroll.set_offset(gpui::point(-scroll.max_offset().x * fraction, px(0.0)));
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .on_mouse_move(cx.listener(
+            move |_: &mut EchoApp, event: &gpui::MouseMoveEvent, _, cx| {
+                if event.pressed_button == Some(MouseButton::Left) {
+                    let bounds = drag_scroll.bounds();
+                    let fraction = (f32::from(event.position.x - bounds.left())
+                        / f32::from(bounds.size.width).max(1.0))
+                    .clamp(0.0, 1.0);
+                    drag_scroll
+                        .set_offset(gpui::point(-drag_scroll.max_offset().x * fraction, px(0.0)));
+                    cx.notify();
+                }
+            },
+        ))
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    let max = f32::from(paint_scroll.max_offset().x);
+                    if max <= 0.0 {
+                        return;
+                    }
+                    let width = f32::from(bounds.size.width);
+                    let thumb = (width * width / (width + max)).max(24.0).min(width);
+                    let left = -f32::from(paint_scroll.offset().x) / max * (width - thumb);
+                    window.paint_quad(gpui::fill(
+                        gpui::Bounds::new(
+                            bounds.origin + gpui::point(px(0.0), px(4.0)),
+                            gpui::size(bounds.size.width, px(4.0)),
+                        ),
+                        palette.wash,
+                    ));
+                    window.paint_quad(gpui::fill(
+                        gpui::Bounds::new(
+                            bounds.origin + gpui::point(px(left), px(4.0)),
+                            gpui::size(px(thumb), px(4.0)),
+                        ),
+                        palette.border,
+                    ));
+                },
+            )
+            .size_full(),
+        )
+}
+
+fn home_view(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    use echo_core::home::{HomeShelfKind, home_shelves, pending_shelves};
+    let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
+    let fg = app.state.ui.active_theme.text.gpui(WINDOW_FG());
+    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
+    let mut shelves = home_shelves(&app.state);
+    let width = f32::from(window.viewport_size().width)
+        - if app.sidebar_collapsed {
+            0.0
+        } else {
+            app.sidebar_width
+        };
+    let columns = if width >= 640.0 {
+        4
+    } else if width >= 320.0 {
+        2
+    } else {
+        1
+    };
+    let pending = pending_shelves(&app.state.data.home_fetches);
+    let empty = shelves
+        .iter()
+        .all(|shelf| shelf.kind == HomeShelfKind::QuickPicks);
+    let mut content = div()
+        .id("home-scroll")
+        .flex_1()
+        .min_h_0()
+        .w_full()
+        .overflow_y_scroll()
+        .track_scroll(&app.home_scroll)
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_6()
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(28.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(fg)
+                        .child(tr(&app.state, echo_core::home::local_greeting_key())),
+                )
+                .when(empty, |el| {
+                    el.child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(tr(&app.state, "desktop.home_empty")),
+                    )
+                }),
+        );
+    let mut index = 0;
+    let mut section = 1;
+    app.home_section_indices.clear();
+    for kind in HomeShelfKind::ALL {
+        let Some(position) = shelves.iter().position(|shelf| shelf.kind == kind) else {
+            if pending.contains(&kind) {
+                content = content.child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(px(18.0))
+                                .font_weight(gpui::FontWeight::BOLD)
+                                .text_color(fg)
+                                .child(tr(&app.state, kind.title_key())),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(&app.state, "desktop.home_loading")),
+                        ),
+                );
+                section += 1;
+            }
+            continue;
+        };
+        let shelf = shelves.remove(position);
+        app.home_section_indices.insert(kind, section);
+        section += 1;
+        if shelf.kind == HomeShelfKind::QuickPicks {
+            let mut grid = div().flex_none().flex().flex_col().gap_2();
+            for chunk in shelf.items.chunks(columns) {
+                let mut row = div().flex().gap_2().w_full();
+                for item in chunk {
+                    row = row.child(home_card(app, item.clone(), index, true, cx));
+                    index += 1;
+                }
+                for _ in chunk.len()..columns {
+                    row = row.child(div().flex_1().min_w_0());
+                }
+                grid = grid.child(row);
+            }
+            content = content.child(grid);
+            continue;
+        }
+        let scroll = app
+            .home_shelf_scrolls
+            .entry(shelf.kind)
+            .or_default()
+            .clone();
+        let wheel_scroll = scroll.clone();
+        let mut row = div()
+            .id(SharedString::from(format!("home-shelf-{:?}", shelf.kind)))
+            .flex()
+            .gap_3()
+            .overflow_x_scroll()
+            .restrict_scroll_to_axis()
+            .track_scroll(&scroll)
+            .on_scroll_wheel(cx.listener(
+                move |_: &mut EchoApp, event: &gpui::ScrollWheelEvent, window, cx| {
+                    if event.modifiers.shift {
+                        let delta = event.delta.pixel_delta(window.line_height());
+                        let x = wheel_scroll.offset().x
+                            + if delta.x != px(0.0) { delta.x } else { delta.y };
+                        wheel_scroll.set_offset(gpui::point(
+                            x.clamp(-wheel_scroll.max_offset().x, px(0.0)),
+                            px(0.0),
+                        ));
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                },
+            ));
+        for item in shelf.items {
+            row = row.child(home_card(app, item, index, false, cx));
+            index += 1;
+        }
+        content = content.child(
+            div()
+                .id(SharedString::from(format!("home-section-{:?}", shelf.kind)))
+                .flex_none()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(18.0))
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(fg)
+                        .child(tr(&app.state, shelf.kind.title_key())),
+                )
+                .child(row)
+                .child(home_scrollbar(scroll, palette, cx)),
+        );
+    }
+    echo_core::thumbnails::drain_pending(&mut app.state, &app.worker_tx);
+    content
 }
 
 fn lerp_hsla(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {

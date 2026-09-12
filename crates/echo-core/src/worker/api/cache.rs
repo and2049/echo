@@ -48,6 +48,9 @@ impl<T: Clone> Timed<T> {
 
 #[derive(Default)]
 pub struct SpotifyApiCache {
+    pub(crate) recent_playlists:
+        HashMap<String, crate::config::CachedEntry<crate::models::Playlist>>,
+    pub(crate) recent_history: Option<crate::config::CachedEntry<crate::home::RecentHistory>>,
     pub(crate) user_names: HashMap<String, String>,
     pub(crate) current_user_loaded: bool,
     user_lookups: HashMap<String, HashSet<String>>,

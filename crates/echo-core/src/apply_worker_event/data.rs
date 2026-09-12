@@ -9,6 +9,20 @@ use crate::{
 
 use super::misc::set_timed_status;
 
+pub fn handle_home_feed_finished(
+    state: &mut AppState,
+    feed: crate::home::HomeFeed,
+    range: Option<crate::models::TopItemsRange>,
+    success: bool,
+) {
+    let fetch = state.data.home_fetches.entry(feed).or_default();
+    fetch.in_flight = false;
+    if success {
+        fetch.fetched_at = Some(std::time::Instant::now());
+        fetch.range = range;
+    }
+}
+
 pub fn handle_context_details_loaded(
     state: &mut AppState,
     context_id: &str,
@@ -227,6 +241,34 @@ fn refresh_open_generated_list(state: &mut AppState, context_id: &str, tracks: &
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn home_requests_finish_without_marking_failures_fresh() {
+        use crate::home::{HomeFeed, HomeFetch};
+        let mut state = AppState::new();
+        state.data.home_fetches.insert(
+            HomeFeed::TopTracks,
+            HomeFetch {
+                in_flight: true,
+                ..Default::default()
+            },
+        );
+        handle_home_feed_finished(&mut state, HomeFeed::TopTracks, None, false);
+        let fetch = &state.data.home_fetches[&HomeFeed::TopTracks];
+        assert!(!fetch.in_flight);
+        assert!(fetch.fetched_at.is_none());
+        handle_home_feed_finished(
+            &mut state,
+            HomeFeed::TopTracks,
+            Some(crate::models::TopItemsRange::Short),
+            true,
+        );
+        let at = state.data.home_fetches[&HomeFeed::TopTracks].fetched_at;
+        handle_home_feed_finished(&mut state, HomeFeed::TopTracks, None, false);
+        let fetch = &state.data.home_fetches[&HomeFeed::TopTracks];
+        assert_eq!(fetch.fetched_at, at);
+        assert_eq!(fetch.range, Some(crate::models::TopItemsRange::Short));
+    }
+
     #[test]
     fn details_ignore_stale_context_and_survive_history() {
         use crate::context_details::ContextDetails;

@@ -146,6 +146,7 @@ fn selected_list_len(state: &AppState) -> usize {
             .as_ref()
             .map_or(0, |data| data.albums.len()),
         ActiveView::WhatsNew => state.data.whats_new.len(),
+        ActiveView::Home => 0,
     }
 }
 
@@ -159,6 +160,7 @@ fn selected_index(state: &AppState) -> usize {
         ActiveView::ArtistList => state.ui.selected_artist_index,
         ActiveView::ArtistPage => state.ui.artist_page_album_index,
         ActiveView::WhatsNew => state.ui.selected_whats_new_index,
+        ActiveView::Home => 0,
     }
 }
 
@@ -172,6 +174,7 @@ fn set_selected_index(state: &mut AppState, index: usize) {
         ActiveView::ArtistList => state.ui.selected_artist_index = index,
         ActiveView::ArtistPage => state.ui.artist_page_album_index = index,
         ActiveView::WhatsNew => state.ui.selected_whats_new_index = index,
+        ActiveView::Home => {}
     }
 }
 

@@ -67,6 +67,11 @@
     "title": " 操作: {} "
   },
   "desktop": {
+    "home": "首页",
+    "home_morning": "早上好", "home_afternoon": "下午好", "home_evening": "晚上好",
+    "home_quick_picks": "快捷精选", "home_liked_songs": "喜欢的歌曲", "home_made_for_you": "为你打造",
+    "home_recently_played": "最近播放", "home_top_artists": "常听艺人", "home_top_songs": "常听歌曲", "home_new_releases": "最新发行",
+    "home_artist": "艺人", "home_loading": "加载中", "home_empty": "暂无内容",
     "context": {
       "playlist": "歌单", "public": "公开歌单", "private": "私人歌单", "collaborative": "协作歌单",
       "album": "专辑", "single": "单曲", "compilation": "合辑",

@@ -45,6 +45,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
 
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => match state.ui.active_view {
+            ActiveView::Home => {}
             ActiveView::Library => {
                 if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
                     if state.ui.selected_playlist_index < 4 {
@@ -115,6 +116,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         },
         KeyCode::Char('k') | KeyCode::Up => match state.ui.active_view {
+            ActiveView::Home => {}
             ActiveView::Library => {
                 if state.ui.active_library_tab == echo_core::app::LibraryTab::Browse {
                     if state.ui.selected_playlist_index > 0 {
@@ -462,6 +464,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('v') => {
             state.ui.mode = echo_core::app::AppMode::Visual;
             let current_idx = match state.ui.active_view {
+                ActiveView::Home => 0,
                 ActiveView::TrackList => state.ui.selected_track_index,
                 ActiveView::SearchResults => state.ui.selected_search_index,
                 ActiveView::Queue => state.ui.selected_queue_index,

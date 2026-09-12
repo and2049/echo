@@ -44,7 +44,9 @@ pub fn init() -> Bootstrap {
     if let Some(albums) = cache.get_saved_albums() {
         state.data.saved_albums = albums;
     }
-    if let Some(tracks) = cache.get_top_tracks() {
+    if let Some(tracks) = cache.get_top_tracks()
+        && config.library.top_items_range == crate::models::TopItemsRange::Medium
+    {
         state.data.top_tracks = tracks;
     }
     if let Some(tracks) = cache.get_recently_played() {
@@ -52,6 +54,37 @@ pub fn init() -> Bootstrap {
     }
     if let Some(artists) = cache.get_followed_artists() {
         state.data.followed_artists = artists;
+    }
+    if config.library.top_items_range == crate::models::TopItemsRange::Medium {
+        state.data.top_artists = cache.get_top_artists().unwrap_or_default();
+    }
+    state.data.whats_new = cache.get_whats_new().unwrap_or_default();
+    if let Some(history) = cache
+        .recent_history
+        .as_ref()
+        .and_then(|entry| entry.fresh_value(crate::config::RECENTLY_PLAYED_CACHE_TTL))
+    {
+        let mut playlists = state.data.playlists.clone();
+        playlists.extend(
+            cache
+                .recent_playlists
+                .values()
+                .filter_map(|entry| entry.fresh_value(crate::config::ARTIST_PAGE_CACHE_TTL)),
+        );
+        let artists: Vec<_> = state
+            .data
+            .followed_artists
+            .iter()
+            .chain(&state.data.top_artists)
+            .cloned()
+            .collect();
+        state.data.recent_contexts = history
+            .contexts
+            .iter()
+            .filter_map(|context| {
+                crate::home::resolve_recent_context(context, &playlists, &artists)
+            })
+            .collect();
     }
     state.ui.library_config = config.library.clone();
 

@@ -31,6 +31,7 @@ icons!(
     "full-screen",
     // Filled, unlike the rest of the set — it marks liked state, not an action.
     "heart",
+    "home",
     "mic",
     "music-note",
     "next",

@@ -127,6 +127,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             state.ui.status_message = None;
         }
         KeyCode::Char('j') | KeyCode::Down => match state.ui.active_view {
+            ActiveView::Home => {}
             ActiveView::TrackList => {
                 if state.ui.selected_track_index + 1 < state.data.tracks.len() {
                     state.ui.selected_track_index += 1;
@@ -177,6 +178,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             }
         },
         KeyCode::Char('k') | KeyCode::Up => match state.ui.active_view {
+            ActiveView::Home => {}
             ActiveView::TrackList => {
                 if state.ui.selected_track_index > 0 {
                     state.ui.selected_track_index -= 1;

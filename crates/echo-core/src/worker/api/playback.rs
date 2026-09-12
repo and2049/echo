@@ -425,6 +425,12 @@ impl SpotifyWorker {
     }
 
     async fn play_context_inner(&mut self, context_id: &str, is_album: bool) -> Result<()> {
+        if context_id == "LIKED_SONGS" {
+            let tracks = self.fetch_tracks(context_id).await?;
+            let ids: Vec<_> = tracks.into_iter().map(|track| track.id).collect();
+            anyhow::ensure!(!ids.is_empty(), "No saved tracks to play");
+            return self.play_uris(&ids, 0).await;
+        }
         let target_device = self.require_device_id().await?;
         let context_uri = if is_album {
             rspotify::model::PlayContextId::Album(rspotify::model::AlbumId::from_id(context_id)?)
@@ -453,6 +459,21 @@ impl SpotifyWorker {
             }
             other => other,
         }
+    }
+
+    pub async fn play_artist_context(&mut self, artist_id: &str) -> Result<()> {
+        let device = self.require_device_id().await?;
+        self.client
+            .start_context_playback(
+                rspotify::model::PlayContextId::Artist(rspotify::model::ArtistId::from_id(
+                    artist_id,
+                )?),
+                Some(&device),
+                None,
+                None,
+            )
+            .await?;
+        Ok(())
     }
 
     async fn play_track_inner(

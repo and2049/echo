@@ -47,6 +47,7 @@ actions!(
         SelectFirst,
         SelectLast,
         Activate,
+        OpenHome,
         FocusLibrary,
         FocusTracks,
         ToggleSidebar,
@@ -209,6 +210,11 @@ pub(crate) struct EchoApp {
     pub(crate) artist_top_tracks_scroll: UniformListScrollHandle,
     pub(crate) artist_list_scroll: UniformListScrollHandle,
     pub(crate) whats_new_scroll: UniformListScrollHandle,
+    pub(crate) home_scroll: ScrollHandle,
+    pub(crate) home_shelf_scrolls:
+        std::collections::HashMap<echo_core::home::HomeShelfKind, ScrollHandle>,
+    pub(crate) home_section_indices:
+        std::collections::HashMap<echo_core::home::HomeShelfKind, usize>,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
     pub(crate) playlist_modal_scroll: ScrollHandle,
     pub(crate) device_modal_scroll: ScrollHandle,
@@ -409,19 +415,31 @@ fn resolve_mono_font(cx: &App) -> SharedString {
 impl EchoApp {
     fn new(boot: echo_core::bootstrap::Bootstrap, cx: &mut Context<Self>) -> Self {
         let echo_core::bootstrap::Bootstrap {
-            state,
+            mut state,
             config: _,
             app_tx,
             mut app_rx,
             worker_tx,
         } = boot;
+        if state.ui.mode == AppMode::Normal {
+            for event in echo_core::intent::open_home(&mut state) {
+                let _ = app_tx.send(event);
+            }
+        }
 
         // Bridge: worker events land here and become repaints. tokio's mpsc futures don't need
         // the tokio reactor, so awaiting on GPUI's foreground executor is fine.
         cx.spawn(async move |this, cx| {
             while let Some(event) = app_rx.recv().await {
                 let applied = this.update(cx, |app: &mut EchoApp, cx| {
+                    let signed_in = matches!(
+                        &event,
+                        echo_core::events::WorkerEvent::AuthenticationComplete
+                    );
                     apply_worker_event(event, &mut app.state, &app.app_tx, &app.worker_tx);
+                    if signed_in {
+                        app.open_home(cx);
+                    }
                     cx.notify();
                 });
                 if applied.is_err() {
@@ -502,6 +520,9 @@ impl EchoApp {
             artist_top_tracks_scroll: UniformListScrollHandle::new(),
             artist_list_scroll: UniformListScrollHandle::new(),
             whats_new_scroll: UniformListScrollHandle::new(),
+            home_scroll: ScrollHandle::new(),
+            home_shelf_scrolls: std::collections::HashMap::new(),
+            home_section_indices: std::collections::HashMap::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
@@ -631,6 +652,10 @@ impl EchoApp {
             return views::SORT_OPTIONS.len();
         }
         match self.state.ui.active_view {
+            ActiveView::Home => echo_core::home::home_shelves(&self.state)
+                .iter()
+                .map(|shelf| shelf.items.len())
+                .sum(),
             ActiveView::TrackList => self.state.data.tracks.len(),
             ActiveView::Queue => self.state.data.queue.len(),
             ActiveView::SearchResults => match self.state.ui.active_search_tab {
@@ -696,6 +721,23 @@ impl EchoApp {
             self.sort_menu_index = index;
         } else {
             match self.state.ui.active_view {
+                ActiveView::Home => {
+                    self.state.ui.selected_home_index = index;
+                    let shelves = echo_core::home::home_shelves(&self.state);
+                    let mut start = 0;
+                    for shelf in &shelves {
+                        if index < start + shelf.items.len() {
+                            if let Some(section) = self.home_section_indices.get(&shelf.kind) {
+                                self.home_scroll.scroll_to_item(*section);
+                            }
+                            if let Some(scroll) = self.home_shelf_scrolls.get(&shelf.kind) {
+                                scroll.scroll_to_item(index - start);
+                            }
+                            break;
+                        }
+                        start += shelf.items.len();
+                    }
+                }
                 ActiveView::TrackList => {
                     self.state.ui.selected_track_index = index;
                     self.tracks_scroll
@@ -761,6 +803,7 @@ impl EchoApp {
             self.sort_menu_index
         } else {
             match self.state.ui.active_view {
+                ActiveView::Home => self.state.ui.selected_home_index,
                 ActiveView::TrackList => self.state.ui.selected_track_index,
                 ActiveView::Queue => self.state.ui.selected_queue_index,
                 ActiveView::SearchResults => self.state.ui.selected_search_index,
@@ -870,6 +913,13 @@ impl EchoApp {
             None
         } else {
             match self.state.ui.active_view {
+                ActiveView::Home => {
+                    let item = echo_core::home::home_shelves(&self.state)
+                        .into_iter()
+                        .flat_map(|shelf| shelf.items)
+                        .nth(self.state.ui.selected_home_index);
+                    item.and_then(|item| echo_core::intent::open_home_item(&mut self.state, item))
+                }
                 ActiveView::TrackList => {
                     let index = self.state.ui.selected_track_index;
                     echo_core::intent::play_track_at(&mut self.state, index)
@@ -1862,6 +1912,13 @@ impl EchoApp {
     }
 
     fn refresh_view(&mut self, cx: &mut Context<Self>) {
+        if self.state.ui.active_view == ActiveView::Home {
+            for event in echo_core::intent::refresh_home(&mut self.state) {
+                self.dispatch(event);
+            }
+            cx.notify();
+            return;
+        }
         if let Some(event) = echo_core::intent::refresh_view(&mut self.state) {
             self.dispatch(event);
         }
@@ -2082,6 +2139,14 @@ impl EchoApp {
             _ => {
                 apply_text_edit(&mut self.search_input, &mut self.search_cursor, event);
             }
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn open_home(&mut self, cx: &mut Context<Self>) {
+        self.immersive = false;
+        for event in echo_core::intent::open_home(&mut self.state) {
+            self.dispatch(event);
         }
         cx.notify();
     }
@@ -3260,6 +3325,10 @@ impl Render for EchoApp {
             .on_action(cx.listener(|this, _: &TogglePin, _window, cx| this.toggle_pin(cx)))
             .on_action(cx.listener(|this, _: &CycleTab, _window, cx| this.cycle_tab(cx)))
             .on_action(cx.listener(|this, _: &Refresh, _window, cx| this.refresh_view(cx)))
+            .on_action(cx.listener(|this, _: &OpenHome, window, cx| {
+                this.open_home(cx);
+                window.focus(&this.focus_handle, cx);
+            }))
             .on_action(cx.listener(|this, _: &OpenFilter, window, cx| this.open_filter(window, cx)))
             .on_action(cx.listener(|this, _: &NextMatch, _window, cx| this.next_match(true, cx)))
             .on_action(cx.listener(|this, _: &PrevMatch, _window, cx| this.next_match(false, cx)))
@@ -3413,6 +3482,15 @@ fn main() {
         }
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
+            KeyBinding::new(
+                if cfg!(target_os = "macos") {
+                    "ctrl-shift-h"
+                } else {
+                    "ctrl-h"
+                },
+                OpenHome,
+                None,
+            ),
             // Everything else is scoped to the lists so plain letters can type into the
             // search box (whose context adds `search`, defeating the `!search` predicate).
             KeyBinding::new("space", TogglePlayback, LIST_KEYS),

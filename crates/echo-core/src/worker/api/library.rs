@@ -16,16 +16,16 @@ fn time_range(range: crate::models::TopItemsRange) -> rspotify::model::TimeRange
 impl SpotifyWorker {
     pub async fn fetch_playlists(&self) -> Result<Vec<Playlist>> {
         let api = super::client::EchoSpotifyClient::new(self.client.clone(), None);
-        let page = api
-            .third_party_json("https://api.spotify.com/v1/me/playlists")
-            .await?;
-        Ok(page
-            .get("items")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(super::parse::playlist)
-            .collect())
+        playlist_pages(|offset| {
+            let api = &api;
+            async move {
+                api.third_party_json(&format!(
+                    "https://api.spotify.com/v1/me/playlists?limit=50&offset={offset}"
+                ))
+                .await
+            }
+        })
+        .await
     }
 
     pub async fn fetch_albums(&self) -> Result<Vec<crate::models::Album>> {
@@ -201,9 +201,7 @@ impl SpotifyWorker {
         let mut stream = Box::pin(self.client.current_user_top_tracks(Some(time_range(range))));
         let mut out = Vec::new();
         while let Some(item) = stream.next().await {
-            if let Ok(track) = item
-                && let Some(track) = super::parse::track_from_full(track)
-            {
+            if let Some(track) = super::parse::track_from_full(item?) {
                 out.push(track);
             }
         }
@@ -232,104 +230,12 @@ impl SpotifyWorker {
             .collect())
     }
 
-    pub async fn fetch_recently_played(&self) -> Result<Vec<Track>> {
-        // rspotify's deserialization fails on missing external_ids for recently played tracks
-        // bypass using reqwest directly.
-        let token_mutex = self.client.get_token();
-        let token_guard = token_mutex.lock().await.unwrap();
-        let access_token = if let Some(t) = token_guard.as_ref() {
-            t.access_token.clone()
-        } else {
-            return Ok(vec![]);
-        };
-
-        let client = reqwest::Client::new();
-        let res = client
-            .get("https://api.spotify.com/v1/me/player/recently-played?limit=50")
-            .header("Authorization", format!("Bearer {}", access_token))
-            .send()
+    pub async fn fetch_recently_played(&self) -> Result<crate::home::RecentHistory> {
+        let api = super::client::EchoSpotifyClient::new(self.client.clone(), None);
+        let json = api
+            .third_party_json("https://api.spotify.com/v1/me/player/recently-played?limit=50")
             .await?;
-
-        let json: serde_json::Value = res.json().await?;
-        let mut tracks = Vec::new();
-
-        if let Some(items) = json.get("items").and_then(|i| i.as_array()) {
-            for history in items {
-                if let Some(track) = history.get("track") {
-                    let name = track
-                        .get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    let is_local = track
-                        .get("is_local")
-                        .and_then(|l| l.as_bool())
-                        .unwrap_or(false);
-                    if is_local {
-                        continue;
-                    }
-
-                    // Deduplicate
-                    if !tracks.iter().any(|t: &Track| t.name == name) {
-                        let id = track
-                            .get("id")
-                            .and_then(|i| i.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let duration_ms = track
-                            .get("duration_ms")
-                            .and_then(|d| d.as_u64())
-                            .unwrap_or_default() as u32;
-
-                        let artists = super::parse::track_artists_json(
-                            track.get("artists").and_then(|a| a.as_array()),
-                        );
-
-                        let album = track.get("album");
-                        let album_id = album
-                            .and_then(|a| a.get("id"))
-                            .and_then(|id| id.as_str())
-                            .map(|s| s.to_string());
-                        let album_name = album
-                            .and_then(|a| a.get("name"))
-                            .and_then(|name| name.as_str())
-                            .unwrap_or_default()
-                            .to_string();
-                        let image_url = album
-                            .and_then(|a| a.get("images"))
-                            .and_then(|imgs| imgs.as_array())
-                            .and_then(|imgs| imgs.first())
-                            .and_then(|img| img.get("url"))
-                            .and_then(|url| url.as_str())
-                            .map(|s| s.to_string());
-
-                        tracks.push(Track {
-                            explicit: track
-                                .get("explicit")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
-                            added_by: None,
-                            id,
-                            source: TrackSource::Spotify,
-                            local_path: None,
-                            name,
-                            artist: super::parse::joined_artist_names(&artists),
-                            album: album_name,
-                            added_at: history
-                                .get("played_at")
-                                .and_then(|value| value.as_str())
-                                .map(str::to_string),
-                            duration_ms,
-                            image_url,
-                            album_id,
-                            artist_id: artists.first().and_then(|a| a.id.clone()),
-                            artists,
-                        });
-                    }
-                }
-            }
-        }
-        Ok(tracks)
+        Ok(super::parse::recent_history(&json))
     }
 
     pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
@@ -346,5 +252,65 @@ impl SpotifyWorker {
                 image_url: artist.images.first().map(|img| img.url.clone()),
             })
             .collect())
+    }
+}
+
+async fn playlist_pages<F, Fut>(mut fetch: F) -> Result<Vec<Playlist>>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<serde_json::Value>>,
+{
+    let mut playlists = Vec::new();
+    let mut offset = 0;
+    loop {
+        let page = fetch(offset).await?;
+        playlists.extend(
+            page.get("items")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(super::parse::playlist),
+        );
+        if page.get("next").is_none_or(|next| next.is_null()) {
+            break;
+        }
+        offset += 50;
+    }
+    Ok(playlists)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn playlist_pagination_uses_fifty_item_offsets_until_null_next() {
+        let mut offsets = Vec::new();
+        let playlists = playlist_pages(|offset| {
+            offsets.push(offset);
+            async move { Ok(serde_json::json!({"items":[null, {"id":offset.to_string(),"name":"Playlist","owner":{"id":"owner"}}], "next": if offset < 100 { Some("next") } else { None }})) }
+        }).await.unwrap();
+        assert_eq!(offsets, [0, 50, 100]);
+        assert_eq!(
+            playlists.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["0", "50", "100"]
+        );
+    }
+
+    #[tokio::test]
+    async fn playlist_pagination_propagates_rate_limits_without_retrying() {
+        let mut offsets = Vec::new();
+        let result = playlist_pages(|offset| {
+            offsets.push(offset);
+            async move {
+                if offset > 0 {
+                    anyhow::bail!("429 Too Many Requests");
+                }
+                Ok(serde_json::json!({"items":[], "next":"next"}))
+            }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(offsets, [0, 50]);
     }
 }

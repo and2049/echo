@@ -18,6 +18,7 @@ echo is a native desktop music player and Spotify client written in Rust. echo b
 ## Features
 
 - **Native desktop app**: Built on GPUI (Zed's UI framework) for a fast, GPU-accelerated interface that runs on Windows, macOS, and Linux. Drive it with the mouse or entirely from the keyboard.
+  The Home page brings together quick picks, recent listening, top artists and songs, and new releases; open it with `ctrl-h` (`ctrl-shift-h` on macOS).
 - **Your whole library**: Playlists, albums, and followed artists in one sidebar, with Top Tracks, Recently Played, and Top Artists views.
 - **Full playback control**: Play/pause, next/previous, seek, shuffle, repeat, volume, queue, and device switching from the now-playing bar.
 - **Synced lyrics**: Time-synced lyrics inline in the player bar or as a full-screen view.

@@ -22,6 +22,8 @@ use super::{
 
 #[derive(Clone)]
 pub struct EchoSpotifyClient {
+    third_party_only: bool,
+    history_lock: Arc<Mutex<()>>,
     third_party: AuthCodeSpotify,
     first_party: Option<SpotifyWebApi>,
     cache: Arc<Mutex<SpotifyApiCache>>,
@@ -42,6 +44,113 @@ pub struct ArtistAlbumsResponse {
 }
 
 impl EchoSpotifyClient {
+    pub fn third_party_only(mut self) -> Self {
+        self.third_party_only = true;
+        self
+    }
+
+    pub async fn recent_history(&self) -> Result<crate::home::RecentHistory> {
+        let _guard = self.history_lock.lock().await;
+        if let Some(history) = self
+            .cache
+            .lock()
+            .await
+            .recent_history
+            .as_ref()
+            .and_then(|entry| entry.fresh_value(crate::config::RECENTLY_PLAYED_CACHE_TTL))
+        {
+            return Ok(history);
+        }
+        if let Some(entry) = AppConfig::load_cache().recent_history
+            && let Some(history) = entry.fresh_value(crate::config::RECENTLY_PLAYED_CACHE_TTL)
+        {
+            self.cache.lock().await.recent_history = Some(entry);
+            return Ok(history);
+        }
+        let key = CacheKey::RecentlyPlayed;
+        if !self.begin_fetch(key.clone(), "Recently played").await? {
+            anyhow::bail!("Recently played request is in progress");
+        }
+        let result = self.third_party_worker().fetch_recently_played().await;
+        self.finish_fetch(&key, &result).await;
+        let history = result?;
+        let entry = crate::config::CachedEntry::new(history.clone());
+        self.cache.lock().await.recent_history = Some(entry.clone());
+        update_persistent_cache(|cache| {
+            cache.set_recently_played(history.tracks.clone());
+            cache.recent_history = Some(entry);
+        });
+        Ok(history)
+    }
+
+    pub async fn recent_contexts(&self) -> Result<Vec<crate::home::ResolvedRecentContext>> {
+        use crate::home::{HomeItemKind, resolve_recent_context};
+        let history = self.recent_history().await?;
+        let persistent = AppConfig::load_cache();
+        let mut playlists = persistent
+            .get_playlists_entry()
+            .map(|entry| entry.value)
+            .unwrap_or_default();
+        let mut artists = persistent.get_followed_artists().unwrap_or_default();
+        artists.extend(persistent.get_top_artists().unwrap_or_default());
+        let mut resolved = Vec::new();
+        let mut lookups = 0;
+        for context in history.contexts {
+            if let Some(item) = resolve_recent_context(&context, &playlists, &artists) {
+                resolved.push(item);
+                continue;
+            }
+            if context.kind != HomeItemKind::Playlist {
+                continue;
+            }
+            let Some(id) = context.uri.rsplit(':').next() else {
+                continue;
+            };
+            let cached = self
+                .cache
+                .lock()
+                .await
+                .recent_playlists
+                .get(id)
+                .cloned()
+                .or_else(|| persistent.recent_playlists.get(id).cloned())
+                .filter(|entry| {
+                    entry
+                        .fresh_value(crate::config::ARTIST_PAGE_CACHE_TTL)
+                        .is_some()
+                });
+            let entry = if let Some(entry) = cached {
+                entry
+            } else {
+                if lookups >= 6 {
+                    continue;
+                }
+                lookups += 1;
+                let url = recent_playlist_url(id);
+                let json = match self.third_party_json(&url).await {
+                    Ok(json) => json,
+                    Err(error) if is_probable_rate_limit(&error) => return Err(error),
+                    Err(_) => continue,
+                };
+                let Some(playlist) = parse::playlist(&json) else {
+                    continue;
+                };
+                update_persistent_cache(|cache| cache.set_recent_playlist(playlist.clone()));
+                crate::config::CachedEntry::new(playlist)
+            };
+            self.cache
+                .lock()
+                .await
+                .recent_playlists
+                .insert(id.to_string(), entry.clone());
+            playlists.push(entry.value);
+            if let Some(item) = resolve_recent_context(&context, &playlists, &artists) {
+                resolved.push(item);
+            }
+        }
+        Ok(resolved)
+    }
+
     pub async fn context_details(
         &self,
         context: &crate::models::TrackListContext,
@@ -184,6 +293,8 @@ impl EchoSpotifyClient {
 
     pub fn new(third_party: AuthCodeSpotify, first_party: Option<SpotifyWebApi>) -> Self {
         Self {
+            third_party_only: false,
+            history_lock: Arc::new(Mutex::new(())),
             third_party,
             first_party,
             cache: Arc::new(Mutex::new(SpotifyApiCache::default())),
@@ -223,7 +334,7 @@ impl EchoSpotifyClient {
                 }
                 Err(err) => {
                     log_api(&format!("top_tracks route=third_party failed={err:?}"));
-                    if is_probable_rate_limit(&err) {
+                    if self.third_party_only || is_probable_rate_limit(&err) {
                         Err(err)
                     } else {
                         self.first_party_top_tracks(range).await
@@ -285,6 +396,12 @@ impl EchoSpotifyClient {
     }
 
     pub async fn recently_played(&self) -> Result<Option<Vec<Track>>> {
+        if self.third_party_only {
+            return self
+                .recent_history()
+                .await
+                .map(|history| Some(history.tracks));
+        }
         if let Some(tracks) = self.cache.lock().await.recently_played() {
             log_api("recently_played route=cache");
             return Ok(Some(tracks));
@@ -301,14 +418,19 @@ impl EchoSpotifyClient {
         }
 
         let result = async {
-            match self.third_party_worker().fetch_recently_played().await {
+            match self
+                .third_party_worker()
+                .fetch_recently_played()
+                .await
+                .map(|history| history.tracks)
+            {
                 Ok(tracks) => {
                     log_api("recently_played route=third_party");
                     Ok(tracks)
                 }
                 Err(err) => {
                     log_api(&format!("recently_played route=third_party failed={err:?}"));
-                    if is_probable_rate_limit(&err) {
+                    if self.third_party_only || is_probable_rate_limit(&err) {
                         Err(err)
                     } else {
                         self.first_party_recently_played().await
@@ -354,7 +476,7 @@ impl EchoSpotifyClient {
                     log_api(&format!(
                         "followed_artists route=third_party failed={err:?}"
                     ));
-                    if is_probable_rate_limit(&err) {
+                    if self.third_party_only || is_probable_rate_limit(&err) {
                         Err(err)
                     } else {
                         self.first_party_followed_artists().await
@@ -656,7 +778,7 @@ impl EchoSpotifyClient {
                 log_api(&format!(
                     "artist_albums route=third_party failed artist={artist_id} err={err:?}"
                 ));
-                if is_probable_rate_limit(&err) {
+                if self.third_party_only || is_probable_rate_limit(&err) {
                     Err(err)
                 } else {
                     self.first_party_artist_albums(artist_id)
@@ -801,6 +923,16 @@ impl EchoSpotifyClient {
 
 const ARTIST_ALBUMS_PAGE_LIMIT: usize = 10;
 
+fn recent_playlist_url(id: &str) -> String {
+    let mut url = reqwest::Url::parse("https://api.spotify.com/v1/playlists/").unwrap();
+    url.path_segments_mut().unwrap().pop_if_empty().push(id);
+    url.query_pairs_mut().append_pair(
+        "fields",
+        "id,name,images,owner(display_name,id),public,collaborative,description,tracks.total",
+    );
+    url.into()
+}
+
 fn artist_albums_url(artist_id: &str, offset: usize) -> String {
     format!(
         "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
@@ -867,6 +999,22 @@ fn log_api(message: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recent_playlist_lookup_requests_only_the_needed_third_party_fields() {
+        let url = reqwest::Url::parse(&recent_playlist_url("playlist")).unwrap();
+        assert_eq!(url.host_str(), Some("api.spotify.com"));
+        assert_eq!(url.path(), "/v1/playlists/playlist");
+        let fields = url
+            .query_pairs()
+            .find(|(key, _)| key == "fields")
+            .unwrap()
+            .1;
+        assert_eq!(
+            fields,
+            "id,name,images,owner(display_name,id),public,collaborative,description,tracks.total"
+        );
+    }
+
     use super::*;
 
     #[test]

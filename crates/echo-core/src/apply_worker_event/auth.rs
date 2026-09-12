@@ -3,6 +3,12 @@ use crate::events::AppEvent;
 use tokio::sync::mpsc;
 
 pub fn handle(state: &mut AppState) {
+    state
+        .data
+        .home_fetches
+        .entry(crate::home::HomeFeed::MadeForYou)
+        .or_default()
+        .in_flight = true;
     state.ui.mode = app::AppMode::Normal;
     state.ui.status_message = None;
     state.ui.status_message_expiry = None;

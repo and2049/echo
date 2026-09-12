@@ -383,6 +383,13 @@ async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>
                 save_playlists_cache(playlists.clone());
                 let _ = tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
             }
+            let _ = tx
+                .send(WorkerEvent::HomeFeedFinished {
+                    feed: crate::home::HomeFeed::MadeForYou,
+                    range: None,
+                    success: false,
+                })
+                .await;
         });
     }
 
@@ -417,6 +424,13 @@ fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>)
             save_playlists_cache(playlists.clone());
             let _ = tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
         }
+        let _ = tx
+            .send(WorkerEvent::HomeFeedFinished {
+                feed: crate::home::HomeFeed::MadeForYou,
+                range: None,
+                success: false,
+            })
+            .await;
         if let Ok(albums) = sp.fetch_albums().await {
             save_saved_albums_cache(albums.clone());
             let _ = tx.send(WorkerEvent::AlbumsLoaded(albums)).await;
@@ -916,6 +930,8 @@ impl Worker {
                             AppEvent::RefreshLibraryLists => {
                                 if let Some(sp) = spotify_opt.as_ref() {
                                     spawn_refresh_library_lists(sp.clone(), self.tx.clone());
+                                } else {
+                                    let _ = self.tx.send(WorkerEvent::HomeFeedFinished { feed: crate::home::HomeFeed::MadeForYou, range: None, success: false }).await;
                                 }
                             }
                             AppEvent::ScanLocalLibrary(path) => {
@@ -1176,6 +1192,24 @@ impl Worker {
                                                 label: "playback".to_string(),
                                                 message: crate::worker::errors::playback_error_message(&e),
                                             }).await;
+                                        }
+                                    }
+                                }
+                            }
+                            AppEvent::PlayArtist { artist_id, current_track_id: ui_current_track_id } => {
+                                if let Some(sp) = spotify_opt.as_mut() {
+                                    let Some(_guard) = PlayGuard::try_acquire(&self.play_in_flight) else { continue; };
+                                    if active_playback_source == Some(ActivePlaybackSource::Local) { local_playback.stop(); }
+                                    active_playback_source = Some(ActivePlaybackSource::Spotify);
+                                    match sp.play_artist_context(&artist_id).await {
+                                        Ok(()) => {
+                                            is_playing.store(true, Ordering::SeqCst);
+                                            if self.spotify_output_available.load(Ordering::SeqCst) { emit_audio_output_recovered(&self.tx).await; }
+                                            Self::spawn_playback_sync(sp.client.clone(), self.tx.clone(), sync_inflight.clone(), ui_current_track_id.or_else(|| current_track_id.clone()), true, self.spotify_output_available.clone());
+                                            sync_interval.reset_after(std::time::Duration::from_secs(12));
+                                        }
+                                        Err(error) => {
+                                            let _ = self.tx.send(WorkerEvent::ApiRequestFailed { label: "playback".into(), message: crate::worker::errors::playback_error_message(&error) }).await;
                                         }
                                     }
                                 }
@@ -1824,6 +1858,9 @@ impl Worker {
                             }
                             AppEvent::FetchRecentlyPlayed => {
                                 browse::spawn_recently_played(api_client.clone(), self.tx.clone());
+                            }
+                            AppEvent::FetchRecentContexts => {
+                                browse::spawn_recent_contexts(api_client.clone(), self.tx.clone());
                             }
                             AppEvent::FetchFollowedArtists => {
                                 browse::spawn_followed_artists(api_client.clone(), self.tx.clone());

@@ -5,7 +5,7 @@
 //! and return the event the worker should receive. The frontends translate their input idioms
 //! into these calls and send whatever comes back over `app_tx`.
 
-use crate::app::{ActiveView, AppState, SearchTab};
+use crate::app::{ActiveView, AppMode, AppState, SearchTab};
 use crate::events::AppEvent;
 use crate::models::{
     Artist, LibraryNode, PlaybackTarget, PlayingContext, SearchTrack, Track, TrackListContext,
@@ -995,6 +995,132 @@ pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
     None
 }
 
+pub fn open_home(state: &mut AppState) -> Vec<AppEvent> {
+    if state.ui.active_view != ActiveView::Home {
+        state.push_view_history();
+    }
+    exit_visual(state);
+    if state.ui.mode == AppMode::Command {
+        state.ui.mode = AppMode::Normal;
+        state.ui.command_buffer.clear();
+    }
+    state.clear_pending_artist_page();
+    state.ui.pending_browse_open = None;
+    state.ui.active_view = ActiveView::Home;
+    home_fetches(state, false)
+}
+
+pub fn refresh_home(state: &mut AppState) -> Vec<AppEvent> {
+    home_fetches(state, true)
+}
+
+fn home_fetches(state: &mut AppState, force: bool) -> Vec<AppEvent> {
+    use crate::home::HomeFeed;
+    let now = std::time::Instant::now();
+    let mut events = Vec::new();
+    for feed in HomeFeed::ALL {
+        let range = matches!(feed, HomeFeed::TopArtists | HomeFeed::TopTracks)
+            .then_some(state.ui.library_config.top_items_range);
+        let empty = match feed {
+            HomeFeed::MadeForYou => state.data.playlists.is_empty(),
+            HomeFeed::RecentlyPlayed => state.data.recently_played.is_empty(),
+            HomeFeed::RecentContexts => state.data.recent_contexts.is_empty(),
+            HomeFeed::TopArtists => state.data.top_artists.is_empty(),
+            HomeFeed::TopTracks => state.data.top_tracks.is_empty(),
+            HomeFeed::NewReleases => state.data.whats_new.is_empty(),
+        };
+        let fetch = state.data.home_fetches.entry(feed).or_default();
+        if fetch.in_flight || (!force && !empty && !fetch.needs_fetch(now, feed.ttl(), range)) {
+            continue;
+        }
+        fetch.in_flight = true;
+        events.push(match feed {
+            HomeFeed::MadeForYou => AppEvent::RefreshLibraryLists,
+            HomeFeed::RecentlyPlayed => AppEvent::FetchRecentlyPlayed,
+            HomeFeed::RecentContexts => AppEvent::FetchRecentContexts,
+            HomeFeed::TopArtists => AppEvent::FetchTopArtists {
+                range: range.unwrap(),
+            },
+            HomeFeed::TopTracks => AppEvent::FetchTopTracks {
+                range: range.unwrap(),
+            },
+            HomeFeed::NewReleases => AppEvent::FetchWhatsNew,
+        });
+    }
+    events
+}
+
+pub fn open_home_item(state: &mut AppState, item: crate::home::HomeItem) -> Option<AppEvent> {
+    use crate::home::HomeItemKind;
+    let context = match item.kind {
+        HomeItemKind::Playlist => TrackListContext::playlist(
+            item.id.clone(),
+            if item.id == "LIKED_SONGS" {
+                crate::i18n::t(
+                    "desktop.home_liked_songs",
+                    &state.ui.library_config.language,
+                )
+            } else {
+                item.title
+            },
+            item.subtitle,
+            item.owner_id.unwrap_or_default(),
+            item.image_url,
+        ),
+        HomeItemKind::Album => {
+            TrackListContext::album(item.id, item.title, item.subtitle, item.image_url)
+        }
+        HomeItemKind::Artist => {
+            state.begin_artist_page_load(
+                item.id.clone(),
+                item.title.clone(),
+                item.image_url.clone(),
+            );
+            return Some(AppEvent::LoadArtistPage {
+                artist_id: item.id,
+                artist_name: Some(item.title),
+                artist_image_url: item.image_url,
+            });
+        }
+        HomeItemKind::Track => return play_home_item(state, item),
+    };
+    state.begin_tracklist_load(context.clone());
+    Some(AppEvent::LoadContextTracks(context))
+}
+
+pub fn play_home_item(state: &mut AppState, item: crate::home::HomeItem) -> Option<AppEvent> {
+    use crate::home::HomeItemKind;
+    match item.kind {
+        HomeItemKind::Playlist | HomeItemKind::Album => {
+            let is_album = item.kind == HomeItemKind::Album;
+            if !is_album && item.id != "LIKED_SONGS" {
+                restore_or_snapshot_playlist_pref(state, &item.id);
+            }
+            state.playback.playing_context = Some(PlayingContext {
+                context_id: item.id.clone(),
+                is_album,
+            });
+            Some(AppEvent::PlayContext {
+                context_id: item.id,
+                is_album,
+                current_track_id: state.playback.playing_track_id.clone(),
+            })
+        }
+        HomeItemKind::Track => {
+            let track = item.track?;
+            state.playback.playing_context = None;
+            play_event(&track, &TrackListContext::generated("HOME", ""))
+        }
+        HomeItemKind::Artist => {
+            state.playback.playing_context = None;
+            Some(AppEvent::PlayArtist {
+                artist_id: item.id,
+                current_track_id: state.playback.playing_track_id.clone(),
+            })
+        }
+    }
+}
+
 // Library drag-and-drop: moving playlists between folders, the pinned section and the loose
 // list, plus reordering within each. Positions are visible `library_view` row indices.
 
@@ -1621,6 +1747,92 @@ pub fn next_search_match(state: &mut AppState, forward: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn home_navigation_fetches_once_then_refreshes_and_restores_selection() {
+        let mut state = AppState::new();
+        assert_eq!(open_home(&mut state).len(), 6);
+        assert_eq!(state.ui.active_view, ActiveView::Home);
+        assert!(open_home(&mut state).is_empty());
+        for fetch in state.data.home_fetches.values_mut() {
+            fetch.in_flight = false;
+            fetch.fetched_at = Some(std::time::Instant::now());
+        }
+        for feed in [
+            crate::home::HomeFeed::TopArtists,
+            crate::home::HomeFeed::TopTracks,
+        ] {
+            state.data.home_fetches.get_mut(&feed).unwrap().range =
+                Some(state.ui.library_config.top_items_range);
+        }
+        assert_eq!(open_home(&mut state).len(), 6);
+        for fetch in state.data.home_fetches.values_mut() {
+            fetch.in_flight = false;
+        }
+        state.ui.selected_home_index = 3;
+        let item = crate::home::HomeItem {
+            id: "album".into(),
+            kind: crate::home::HomeItemKind::Album,
+            title: "Album".into(),
+            subtitle: "Artist".into(),
+            image_url: Some("cover".into()),
+            owner_id: None,
+            track: None,
+            release_year: None,
+        };
+        assert!(matches!(
+            open_home_item(&mut state, item.clone()),
+            Some(AppEvent::LoadContextTracks(_))
+        ));
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+        state.pop_view_history();
+        assert_eq!(state.ui.active_view, ActiveView::Home);
+        assert_eq!(state.ui.selected_home_index, 3);
+        assert_eq!(refresh_home(&mut state).len(), 6);
+        assert!(matches!(
+            play_home_item(&mut state, item),
+            Some(AppEvent::PlayContext { is_album: true, .. })
+        ));
+    }
+
+    #[test]
+    fn home_items_use_music_specific_open_and_play_routes() {
+        crate::i18n::init();
+        let mut state = AppState::new();
+        let song = crate::home::HomeItem::from(&track("track"));
+        assert!(matches!(
+            open_home_item(&mut state, song),
+            Some(AppEvent::PlayTrack {
+                target: PlaybackTarget::SpotifyTrack { .. },
+                ..
+            })
+        ));
+        let artist = crate::home::HomeItem::from(&Artist {
+            id: "artist".into(),
+            name: "Artist".into(),
+            image_url: None,
+        });
+        assert!(matches!(
+            play_home_item(&mut state, artist.clone()),
+            Some(AppEvent::PlayArtist { .. })
+        ));
+        assert!(matches!(
+            open_home_item(&mut state, artist),
+            Some(AppEvent::LoadArtistPage { .. })
+        ));
+        let liked = crate::home::home_shelves(&state).remove(0).items.remove(0);
+        assert!(
+            matches!(play_home_item(&mut state, liked.clone()), Some(AppEvent::PlayContext { ref context_id, .. }) if context_id == "LIKED_SONGS")
+        );
+        assert!(matches!(
+            open_home_item(&mut state, liked),
+            Some(AppEvent::LoadContextTracks(_))
+        ));
+        assert_eq!(
+            state.data.active_tracklist_context.as_ref().unwrap().title,
+            "Liked Songs"
+        );
+    }
+
     #[test]
     fn column_sort_toggles_direction_and_preserves_selection() {
         use crate::app::TrackSort;

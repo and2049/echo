@@ -1,5 +1,67 @@
 use crate::models::{Album, Artist, Track, TrackArtist, TrackSource};
 
+pub(crate) fn recent_history(value: &serde_json::Value) -> crate::home::RecentHistory {
+    use crate::home::{HomeItemKind, RecentContext, RecentHistory};
+    let mut result = RecentHistory::default();
+    let mut tracks = std::collections::HashSet::new();
+    let mut contexts = std::collections::HashSet::new();
+    for item in value
+        .get("items")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let Some(raw) = item.get("track") else {
+            continue;
+        };
+        if raw
+            .get("type")
+            .and_then(|v| v.as_str())
+            .is_some_and(|kind| kind != "track")
+        {
+            continue;
+        }
+        let Some(mut track) = track(raw) else {
+            continue;
+        };
+        track.added_at = item
+            .get("played_at")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        if tracks.insert(track.id.clone()) {
+            result.tracks.push(track.clone());
+        }
+        let Some(context) = item.get("context") else {
+            continue;
+        };
+        let kind = match context.get("type").and_then(|v| v.as_str()) {
+            Some("playlist") => HomeItemKind::Playlist,
+            Some("album") => HomeItemKind::Album,
+            Some("artist") => HomeItemKind::Artist,
+            _ => continue,
+        };
+        let Some(uri) = context.get("uri").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let parts: Vec<_> = uri.split(':').collect();
+        if parts.len() != 3
+            || parts[0] != "spotify"
+            || Some(parts[1]) != context.get("type").and_then(|v| v.as_str())
+            || parts[2].is_empty()
+        {
+            continue;
+        }
+        if result.contexts.len() < 12 && contexts.insert(uri.to_string()) {
+            result.contexts.push(RecentContext {
+                uri: uri.to_string(),
+                kind,
+                first_track: track,
+            });
+        }
+    }
+    result
+}
+
 pub(crate) fn playlist(value: &serde_json::Value) -> Option<crate::models::Playlist> {
     let owner_id = value.pointer("/owner/id")?.as_str()?.to_string();
     let images = value.get("images").and_then(|v| v.as_array());
@@ -218,6 +280,25 @@ pub(crate) fn artist(artist: &serde_json::Value) -> Option<Artist> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recent_history_filters_non_music_and_keeps_recent_unique_contexts() {
+        let mut items = Vec::new();
+        for index in 0..15 {
+            items.push(serde_json::json!({"track":{"type":"track","id":"same-track","name":"Song","album":{"id":"album","name":"Album"}},"context":{"type":"playlist","uri":format!("spotify:playlist:{index}")}}));
+        }
+        items.insert(1, items[0].clone());
+        items.insert(0, serde_json::json!({"track":{"type":"episode","id":"episode","name":"Podcast"},"context":{"type":"show","uri":"spotify:show:show"}}));
+        let history = recent_history(&serde_json::json!({"items":items}));
+        assert_eq!(history.tracks.len(), 1);
+        assert_eq!(history.contexts.len(), 12);
+        assert_eq!(history.contexts[0].uri, "spotify:playlist:0");
+        assert_eq!(history.contexts[11].uri, "spotify:playlist:11");
+        let invalid = recent_history(
+            &serde_json::json!({"items":[{"track":{"id":"t","name":"Song"},"context":{"type":"album","uri":"spotify:show:bad"}}]}),
+        );
+        assert!(invalid.contexts.is_empty());
+    }
+
     #[test]
     fn playlist_metadata_handles_both_total_fields_and_nulls() {
         let mut value = serde_json::json!({"id":"p", "name":"P", "owner":{"id":"owner", "display_name":"Owner"}, "description":"Description", "public":true, "collaborative":true, "items":{"total":125}, "snapshot_id":"snapshot"});
