@@ -76,7 +76,7 @@ impl EchoSpotifyClient {
         let history = result?;
         let entry = crate::config::CachedEntry::new(history.clone());
         self.cache.lock().await.recent_history = Some(entry.clone());
-        update_persistent_cache(|cache| {
+        AppConfig::update_cache(|cache| {
             cache.set_recently_played(history.tracks.clone());
             cache.recent_history = Some(entry);
         });
@@ -135,7 +135,7 @@ impl EchoSpotifyClient {
                 let Some(playlist) = parse::playlist(&json) else {
                     continue;
                 };
-                update_persistent_cache(|cache| cache.set_recent_playlist(playlist.clone()));
+                AppConfig::update_cache(|cache| cache.set_recent_playlist(playlist.clone()));
                 crate::config::CachedEntry::new(playlist)
             };
             self.cache
@@ -351,7 +351,7 @@ impl EchoSpotifyClient {
             .await
             .set_top_tracks(range, tracks.clone());
         if persist {
-            update_persistent_cache(|cache| cache.set_top_tracks(tracks.clone()));
+            AppConfig::update_cache(|cache| cache.set_top_tracks(tracks.clone()));
         }
         Ok(Some(tracks))
     }
@@ -390,7 +390,7 @@ impl EchoSpotifyClient {
             .await
             .set_top_artists(range, artists.clone());
         if persist {
-            update_persistent_cache(|cache| cache.set_top_artists(artists.clone()));
+            AppConfig::update_cache(|cache| cache.set_top_artists(artists.clone()));
         }
         Ok(Some(artists))
     }
@@ -443,7 +443,7 @@ impl EchoSpotifyClient {
         self.finish_fetch(&key, &result).await;
         let tracks = result?;
         self.cache.lock().await.set_recently_played(tracks.clone());
-        update_persistent_cache(|cache| cache.set_recently_played(tracks.clone()));
+        AppConfig::update_cache(|cache| cache.set_recently_played(tracks.clone()));
         Ok(Some(tracks))
     }
 
@@ -492,7 +492,7 @@ impl EchoSpotifyClient {
             .lock()
             .await
             .set_followed_artists(artists.clone());
-        update_persistent_cache(|cache| cache.set_followed_artists(artists.clone()));
+        AppConfig::update_cache(|cache| cache.set_followed_artists(artists.clone()));
         Ok(Some(artists))
     }
 
@@ -619,13 +619,11 @@ impl EchoSpotifyClient {
 
     async fn begin_fetch(&self, key: CacheKey, _label: &str) -> Result<bool> {
         let persistent_key = persistent_cooldown_key(&key);
-        let mut persistent_cache = AppConfig::load_cache();
-        if let Some(remaining) = persistent_cache.cooldown_remaining(&persistent_key) {
+        if let Some(remaining) = AppConfig::load_cache().cooldown_remaining(&persistent_key) {
             log_api(&format!(
                 "fetch gate=persistent_cooldown key={key:?} persistent_key={persistent_key} remaining={}",
                 format_retry_after(remaining)
             ));
-            let _ = AppConfig::save_cache(&persistent_cache);
             anyhow::bail!(
                 "rate limited. Try again in {}.",
                 format_retry_after(remaining)
@@ -677,7 +675,7 @@ impl EchoSpotifyClient {
             log_api(&format!(
                 "fetch cooldown=clear key={key:?} persistent_key={persistent_key}"
             ));
-            update_persistent_cache(|cache| cache.clear_cooldown(&persistent_key));
+            AppConfig::update_cache(|cache| cache.clear_cooldown(&persistent_key));
         }
     }
 
@@ -798,7 +796,7 @@ impl EchoSpotifyClient {
             .lock()
             .await
             .set_artist_albums(artist_id.to_string(), albums.clone());
-        update_persistent_cache(|cache| {
+        AppConfig::update_cache(|cache| {
             let mut page = cache
                 .get_artist_page_entry(artist_id)
                 .map(|entry| entry.value)
@@ -949,17 +947,8 @@ fn parse_artist_albums_page(json: &serde_json::Value) -> (Vec<Album>, bool) {
     (albums, has_next)
 }
 
-fn update_persistent_cache(update: impl FnOnce(&mut CacheData)) {
-    let mut cache = AppConfig::load_cache();
-    update(&mut cache);
-    let _ = AppConfig::save_cache(&cache);
-}
-
 fn record_rate_limit_cooldown(key: &str, retry_after: Duration) -> Duration {
-    let mut cache = AppConfig::load_cache();
-    let cooldown = cache.record_rate_limit_cooldown(key.to_string(), retry_after);
-    let _ = AppConfig::save_cache(&cache);
-    cooldown
+    AppConfig::update_cache(|cache| cache.record_rate_limit_cooldown(key.to_string(), retry_after))
 }
 
 fn persistent_cooldown_key(key: &CacheKey) -> String {

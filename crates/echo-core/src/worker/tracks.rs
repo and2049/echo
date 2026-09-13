@@ -142,9 +142,7 @@ async fn load_playlist_tracks(
 }
 
 fn update_context_cache(context: TrackListContext, tracks: Vec<crate::models::Track>) {
-    let mut cache = AppConfig::load_cache();
-    cache.set_context_tracks(context, tracks);
-    let _ = AppConfig::save_cache(&cache);
+    AppConfig::update_cache(|cache| cache.set_context_tracks(context, tracks));
 }
 
 async fn send_loaded(

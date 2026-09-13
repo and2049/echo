@@ -78,21 +78,15 @@ pub struct Worker {
 }
 
 fn save_playlists_cache(playlists: Vec<crate::models::Playlist>) {
-    let mut cache = AppConfig::load_cache();
-    cache.set_playlists(playlists);
-    let _ = AppConfig::save_cache(&cache);
+    AppConfig::update_cache(|cache| cache.set_playlists(playlists));
 }
 
 fn save_saved_albums_cache(albums: Vec<crate::models::Album>) {
-    let mut cache = AppConfig::load_cache();
-    cache.set_saved_albums(albums);
-    let _ = AppConfig::save_cache(&cache);
+    AppConfig::update_cache(|cache| cache.set_saved_albums(albums));
 }
 
 fn invalidate_playlist_context_cache(playlist_id: &str) {
-    let mut cache = AppConfig::load_cache();
-    cache.invalidate_playlist_context(playlist_id);
-    let _ = AppConfig::save_cache(&cache);
+    AppConfig::update_cache(|cache| cache.invalidate_playlist_context(playlist_id));
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -767,8 +761,8 @@ impl Worker {
                                             let tx = self.tx.clone();
                                             tokio::spawn(async move {
                                                 use futures_util::stream::StreamExt;
-                                                let mut cache = crate::config::AppConfig::load_cache();
-                                                let mut tracks = cache.liked_tracks.clone();
+                                                let cache = crate::config::AppConfig::load_cache();
+                                                let mut tracks = cache.liked_tracks;
                                                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
                                                 // A full walk rebuilds the set, so unlikes made elsewhere disappear; it is
                                                 // the expensive path, so it runs daily. In between, top up hourly with the
@@ -798,10 +792,11 @@ impl Worker {
                                                     // Replace rather than union: the point of the walk is to drop ids that
                                                     // are no longer saved.
                                                     tracks = rebuilt;
-                                                    cache.last_liked_full_sync_time = Some(now);
-                                                    cache.last_liked_sync_time = Some(now);
-                                                    cache.liked_tracks = tracks.clone();
-                                                    let _ = crate::config::AppConfig::save_cache(&cache);
+                                                    crate::config::AppConfig::update_cache(|cache| {
+                                                        cache.last_liked_full_sync_time = Some(now);
+                                                        cache.last_liked_sync_time = Some(now);
+                                                        cache.liked_tracks = tracks.clone();
+                                                    });
                                                 } else if top_up {
                                                     let mut stream = client.current_user_saved_tracks(None);
                                                     let mut fetched_count = 0;
@@ -817,9 +812,10 @@ impl Worker {
                                                         }
                                                     }
 
-                                                    cache.last_liked_sync_time = Some(now);
-                                                    cache.liked_tracks = tracks.clone();
-                                                    let _ = crate::config::AppConfig::save_cache(&cache);
+                                                    crate::config::AppConfig::update_cache(|cache| {
+                                                        cache.last_liked_sync_time = Some(now);
+                                                        cache.liked_tracks = tracks.clone();
+                                                    });
                                                 }
 
                                                     let mut results = std::collections::HashMap::new();
@@ -1819,13 +1815,13 @@ impl Worker {
                             }
                             AppEvent::ToggleTrackLike(track_id, like) => {
                                 if track_id.starts_with("local:") {
-                                    let mut cache = AppConfig::load_cache();
-                                    if like {
-                                        cache.liked_tracks.insert(track_id.clone());
-                                    } else {
-                                        cache.liked_tracks.remove(&track_id);
-                                    }
-                                    let _ = AppConfig::save_cache(&cache);
+                                    AppConfig::update_cache(|cache| {
+                                        if like {
+                                            cache.liked_tracks.insert(track_id.clone());
+                                        } else {
+                                            cache.liked_tracks.remove(&track_id);
+                                        }
+                                    });
                                     let mut update = std::collections::HashMap::new();
                                     update.insert(track_id, like);
                                     let _ = self.tx.send(WorkerEvent::LikedStatusUpdate(update)).await;
@@ -1838,13 +1834,13 @@ impl Worker {
                                         } else {
                                             let _ = sp.client.library_remove([lib_id]).await;
                                         }
-                                        let mut cache = AppConfig::load_cache();
-                                        if like {
-                                            cache.liked_tracks.insert(track_id.clone());
-                                        } else {
-                                            cache.liked_tracks.remove(&track_id);
-                                        }
-                                        let _ = AppConfig::save_cache(&cache);
+                                        AppConfig::update_cache(|cache| {
+                                            if like {
+                                                cache.liked_tracks.insert(track_id.clone());
+                                            } else {
+                                                cache.liked_tracks.remove(&track_id);
+                                            }
+                                        });
                                     }
                                 }
                             }

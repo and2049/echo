@@ -202,9 +202,7 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
         }
 
         let albums = recent_releases(&merged, &cutoff);
-        let mut cache = crate::config::AppConfig::load_cache();
-        cache.set_whats_new(albums.clone());
-        let _ = crate::config::AppConfig::save_cache(&cache);
+        crate::config::AppConfig::update_cache(|cache| cache.set_whats_new(albums.clone()));
         let _ = tx
             .send(WorkerEvent::WhatsNewLoaded {
                 albums,

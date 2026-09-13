@@ -1473,9 +1473,9 @@ pub fn toggle_like_track(state: &mut AppState, track_id: String) -> Option<AppEv
         return None;
     }
     state.data.liked_tracks.insert(track_id.clone());
-    let mut cache = crate::config::AppConfig::load_cache();
-    cache.liked_tracks = state.data.liked_tracks.clone();
-    let _ = crate::config::AppConfig::save_cache(&cache);
+    crate::config::AppConfig::update_cache(|cache| {
+        cache.liked_tracks = state.data.liked_tracks.clone()
+    });
     state.ui.status_message = Some(crate::i18n::t(
         "messages.added_to_liked",
         &state.ui.library_config.language,
@@ -1744,9 +1744,9 @@ pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
     }
     if let Some(track_id) = state.ui.liked_track_remove_prompt.take() {
         state.data.liked_tracks.remove(&track_id);
-        let mut cache = crate::config::AppConfig::load_cache();
-        cache.liked_tracks = state.data.liked_tracks.clone();
-        let _ = crate::config::AppConfig::save_cache(&cache);
+        crate::config::AppConfig::update_cache(|cache| {
+            cache.liked_tracks = state.data.liked_tracks.clone()
+        });
         return Some(AppEvent::ToggleTrackLike(track_id, false));
     }
     None

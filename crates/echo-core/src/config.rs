@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::models::{
@@ -651,22 +652,44 @@ impl AppConfig {
         echo_config_root().join("cache.json")
     }
 
+    /// A copy of the process-wide cache. Reads never touch the disk after the first load.
     pub fn load_cache() -> CacheData {
-        let path = Self::cache_path();
-        if let Ok(contents) = fs::read_to_string(&path) {
-            serde_json::from_str(&contents).unwrap_or_default()
-        } else {
-            CacheData::default()
-        }
+        Self::cache_cell()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
-    pub fn save_cache(cache: &CacheData) -> Result<()> {
+    /// The only way to change the cache: `update` runs under the lock on the single
+    /// in-process copy, which is then written out. Callers must never hold a `load_cache`
+    /// copy across an await and write it back whole, or they revert every other writer.
+    pub fn update_cache<R>(update: impl FnOnce(&mut CacheData) -> R) -> R {
+        let mut cache = Self::cache_cell()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let result = update(&mut cache);
+        let _ = Self::write_cache(&cache);
+        result
+    }
+
+    fn cache_cell() -> &'static Mutex<CacheData> {
+        static CACHE: OnceLock<Mutex<CacheData>> = OnceLock::new();
+        CACHE.get_or_init(|| Mutex::new(Self::read_cache()))
+    }
+
+    fn read_cache() -> CacheData {
+        fs::read_to_string(Self::cache_path())
+            .ok()
+            .and_then(|contents| serde_json::from_str(&contents).ok())
+            .unwrap_or_default()
+    }
+
+    fn write_cache(cache: &CacheData) -> Result<()> {
         let path = Self::cache_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let contents = serde_json::to_string(cache)?;
-        fs::write(path, contents)?;
+        fs::write(path, serde_json::to_string(cache)?)?;
         Ok(())
     }
 
@@ -878,6 +901,18 @@ fn load_themes_from_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn update_cache_keeps_every_writers_fields() {
+        AppConfig::update_cache(|cache| cache.cooldown_failures.insert("first".into(), 1));
+        AppConfig::update_cache(|cache| cache.cooldown_failures.insert("second".into(), 2));
+        let cache = AppConfig::load_cache();
+        assert_eq!(cache.cooldown_failures.get("first"), Some(&1));
+        assert_eq!(cache.cooldown_failures.get("second"), Some(&2));
+        let on_disk = AppConfig::read_cache();
+        assert_eq!(on_disk.cooldown_failures.get("first"), Some(&1));
+        assert_eq!(on_disk.cooldown_failures.get("second"), Some(&2));
+    }
+
     #[test]
     fn auto_update_defaults_on_and_round_trips() {
         assert!(LibraryConfig::default().auto_update);
