@@ -87,12 +87,7 @@ impl EchoSpotifyClient {
         use crate::home::{HomeItemKind, resolve_recent_context};
         let history = self.recent_history().await?;
         let persistent = AppConfig::load_cache();
-        let mut playlists = persistent
-            .get_playlists_entry()
-            .map(|entry| entry.value)
-            .unwrap_or_default();
-        let mut artists = persistent.get_followed_artists().unwrap_or_default();
-        artists.extend(persistent.get_top_artists().unwrap_or_default());
+        let (mut playlists, artists) = crate::home::recent_lookup(&persistent);
         let mut resolved = Vec::new();
         let mut lookups = 0;
         for context in history.contexts {

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::AppState,
+    config::{CacheData, stale_value},
     models::{Album, Artist, Playlist, TopItemsRange, Track},
 };
 
@@ -205,6 +206,33 @@ impl From<&Track> for HomeItem {
     }
 }
 
+/// The persisted playlists and artists a recent context can be matched against, fresh or not.
+pub fn recent_lookup(cache: &CacheData) -> (Vec<Playlist>, Vec<Artist>) {
+    let mut artists = stale_value(&cache.followed_artists).unwrap_or_default();
+    artists.extend(stale_value(&cache.top_artists).unwrap_or_default());
+    (stale_value(&cache.playlists).unwrap_or_default(), artists)
+}
+
+/// Recent contexts resolved from the persisted history alone, whatever its age, so the
+/// shelf renders before the refresh lands; contexts nothing on disk can name are skipped.
+pub fn stale_recent_contexts(cache: &CacheData) -> Vec<ResolvedRecentContext> {
+    let Some(history) = stale_value(&cache.recent_history) else {
+        return Vec::new();
+    };
+    let (mut playlists, artists) = recent_lookup(cache);
+    playlists.extend(
+        cache
+            .recent_playlists
+            .values()
+            .map(|entry| entry.value.clone()),
+    );
+    history
+        .contexts
+        .iter()
+        .filter_map(|context| resolve_recent_context(context, &playlists, &artists))
+        .collect()
+}
+
 pub fn resolve_recent_context(
     context: &RecentContext,
     playlists: &[Playlist],
@@ -360,6 +388,41 @@ mod tests {
 
     fn track() -> Track {
         serde_json::from_value(serde_json::json!({"id":"track", "name":"Song", "artist":"Artist", "album":"Album", "album_id":"album", "image_url":"cover", "duration_ms":1000, "artists":[{"id":"artist","name":"Artist"}]})).unwrap()
+    }
+
+    #[test]
+    fn stale_recent_contexts_use_expired_entries_and_skip_unknown_playlists() {
+        let mut cache = CacheData::default();
+        let mut history = RecentHistory::default();
+        for (uri, kind) in [
+            ("spotify:album:album", HomeItemKind::Album),
+            ("spotify:playlist:known", HomeItemKind::Playlist),
+            ("spotify:playlist:unknown", HomeItemKind::Playlist),
+        ] {
+            history.contexts.push(RecentContext {
+                uri: uri.into(),
+                kind,
+                first_track: track(),
+            });
+        }
+        fn expired<T>(value: T) -> crate::config::CachedEntry<T> {
+            crate::config::CachedEntry {
+                fetched_at: 0,
+                value,
+            }
+        }
+        cache.recent_history = Some(expired(history));
+        let playlist: Playlist = serde_json::from_value(serde_json::json!({
+            "id": "known", "name": "Known", "owner": "Owner", "owner_id": "owner", "image_url": null
+        }))
+        .unwrap();
+        cache.playlists = Some(expired(vec![playlist]));
+        let ids: Vec<String> = stale_recent_contexts(&cache)
+            .into_iter()
+            .map(|resolved| resolved.item.id)
+            .collect();
+        assert_eq!(ids, ["album", "known"]);
+        assert!(stale_recent_contexts(&CacheData::default()).is_empty());
     }
 
     #[test]

@@ -873,33 +873,37 @@ pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
 // Browse nodes: generated lists that fetch on first use.
 
 /// Opens the user's top tracks; fetches them first when none are cached yet.
+/// Opens the top tracks list. A list restored from disk shows at once and refreshes in
+/// place; an empty one is fetched first.
 pub fn open_top_tracks(state: &mut AppState) -> Option<AppEvent> {
+    let refresh = home_feed_fetch(state, crate::home::HomeFeed::TopTracks, false);
     if state.data.top_tracks.is_empty() {
         state.ui.pending_browse_open = Some(crate::models::BrowseNode::TopTracks);
-        return Some(AppEvent::FetchTopTracks {
+        return Some(refresh.unwrap_or(AppEvent::FetchTopTracks {
             range: state.ui.library_config.top_items_range,
-        });
+        }));
     }
     state.ui.pending_browse_open = None;
     state.show_generated_tracks(
         state.data.top_tracks.clone(),
         TrackListContext::generated("TOP_TRACKS", "Top Tracks"),
     );
-    None
+    refresh
 }
 
 /// Opens the recently-played list; fetches it first when none is cached yet.
 pub fn open_recently_played(state: &mut AppState) -> Option<AppEvent> {
+    let refresh = home_feed_fetch(state, crate::home::HomeFeed::RecentlyPlayed, false);
     if state.data.recently_played.is_empty() {
         state.ui.pending_browse_open = Some(crate::models::BrowseNode::RecentlyPlayed);
-        return Some(AppEvent::FetchRecentlyPlayed);
+        return Some(refresh.unwrap_or(AppEvent::FetchRecentlyPlayed));
     }
     state.ui.pending_browse_open = None;
     state.show_generated_tracks(
         state.data.recently_played.clone(),
         TrackListContext::generated("RECENTLY_PLAYED", "Recently Played"),
     );
-    None
+    refresh
 }
 
 /// Switches the Top Tracks / Top Artists time window, persists it, and refetches
@@ -1080,39 +1084,49 @@ pub fn refresh_home(state: &mut AppState) -> Vec<AppEvent> {
 }
 
 fn home_fetches(state: &mut AppState, force: bool) -> Vec<AppEvent> {
+    crate::home::HomeFeed::ALL
+        .into_iter()
+        .filter_map(|feed| home_feed_fetch(state, feed, force))
+        .collect()
+}
+
+/// The fetch a feed needs now, marking it in flight: data that is empty, never fetched this
+/// session, or older than the feed's TTL. Persisted data restored at startup counts as
+/// never fetched, so it shows at once and refreshes behind the view.
+fn home_feed_fetch(
+    state: &mut AppState,
+    feed: crate::home::HomeFeed,
+    force: bool,
+) -> Option<AppEvent> {
     use crate::home::HomeFeed;
+    let range = matches!(feed, HomeFeed::TopArtists | HomeFeed::TopTracks)
+        .then_some(state.ui.library_config.top_items_range);
+    let empty = match feed {
+        HomeFeed::MadeForYou => state.data.playlists.is_empty(),
+        HomeFeed::RecentlyPlayed => state.data.recently_played.is_empty(),
+        HomeFeed::RecentContexts => state.data.recent_contexts.is_empty(),
+        HomeFeed::TopArtists => state.data.top_artists.is_empty(),
+        HomeFeed::TopTracks => state.data.top_tracks.is_empty(),
+        HomeFeed::NewReleases => state.data.whats_new.is_empty(),
+    };
+    let fetch = state.data.home_fetches.entry(feed).or_default();
     let now = std::time::Instant::now();
-    let mut events = Vec::new();
-    for feed in HomeFeed::ALL {
-        let range = matches!(feed, HomeFeed::TopArtists | HomeFeed::TopTracks)
-            .then_some(state.ui.library_config.top_items_range);
-        let empty = match feed {
-            HomeFeed::MadeForYou => state.data.playlists.is_empty(),
-            HomeFeed::RecentlyPlayed => state.data.recently_played.is_empty(),
-            HomeFeed::RecentContexts => state.data.recent_contexts.is_empty(),
-            HomeFeed::TopArtists => state.data.top_artists.is_empty(),
-            HomeFeed::TopTracks => state.data.top_tracks.is_empty(),
-            HomeFeed::NewReleases => state.data.whats_new.is_empty(),
-        };
-        let fetch = state.data.home_fetches.entry(feed).or_default();
-        if fetch.in_flight || (!force && !empty && !fetch.needs_fetch(now, feed.ttl(), range)) {
-            continue;
-        }
-        fetch.in_flight = true;
-        events.push(match feed {
-            HomeFeed::MadeForYou => AppEvent::RefreshLibraryLists,
-            HomeFeed::RecentlyPlayed => AppEvent::FetchRecentlyPlayed,
-            HomeFeed::RecentContexts => AppEvent::FetchRecentContexts,
-            HomeFeed::TopArtists => AppEvent::FetchTopArtists {
-                range: range.unwrap(),
-            },
-            HomeFeed::TopTracks => AppEvent::FetchTopTracks {
-                range: range.unwrap(),
-            },
-            HomeFeed::NewReleases => AppEvent::FetchWhatsNew,
-        });
+    if fetch.in_flight || (!force && !empty && !fetch.needs_fetch(now, feed.ttl(), range)) {
+        return None;
     }
-    events
+    fetch.in_flight = true;
+    Some(match feed {
+        HomeFeed::MadeForYou => AppEvent::RefreshLibraryLists,
+        HomeFeed::RecentlyPlayed => AppEvent::FetchRecentlyPlayed,
+        HomeFeed::RecentContexts => AppEvent::FetchRecentContexts,
+        HomeFeed::TopArtists => AppEvent::FetchTopArtists {
+            range: range.unwrap(),
+        },
+        HomeFeed::TopTracks => AppEvent::FetchTopTracks {
+            range: range.unwrap(),
+        },
+        HomeFeed::NewReleases => AppEvent::FetchWhatsNew,
+    })
 }
 
 pub fn open_home_item(state: &mut AppState, item: crate::home::HomeItem) -> Option<AppEvent> {
@@ -1857,6 +1871,19 @@ mod tests {
         clear_recent_searches(&mut state);
         assert!(state.ui.library_config.recent_searches.is_empty());
     }
+    #[test]
+    fn restored_top_tracks_open_at_once_and_refresh_behind_the_view() {
+        let mut state = AppState::new();
+        state.data.top_tracks = vec![track("restored")];
+        assert!(matches!(
+            open_top_tracks(&mut state),
+            Some(AppEvent::FetchTopTracks { .. })
+        ));
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
+        assert!(state.data.home_fetches[&crate::home::HomeFeed::TopTracks].in_flight);
+        assert!(open_top_tracks(&mut state).is_none());
+    }
+
     #[test]
     fn home_navigation_fetches_once_then_refreshes_and_restores_selection() {
         let mut state = AppState::new();

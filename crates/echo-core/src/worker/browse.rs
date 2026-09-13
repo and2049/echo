@@ -134,6 +134,8 @@ pub fn spawn_followed_artists(
 /// Scans followed artists' discographies for recent releases. Serves the 6h persistent
 /// cache when fresh; otherwise walks artists sequentially through the shared artist-albums
 /// cache (warming artist pages as a side effect), emitting cumulative snapshots as it goes.
+/// The snapshots keep the stale persisted releases so a restored shelf never shrinks
+/// mid-walk; only the final list is the walk alone.
 pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>) {
     let request = HomeRequest {
         tx: tx.clone(),
@@ -166,6 +168,8 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
         };
 
         let cutoff = whats_new_cutoff();
+        let stale = crate::config::stale_value(&crate::config::AppConfig::load_cache().whats_new)
+            .unwrap_or_default();
         let total = artists.len().min(WHATS_NEW_MAX_ARTISTS);
         let mut merged: Vec<Album> = Vec::new();
         for (index, artist) in artists.into_iter().take(WHATS_NEW_MAX_ARTISTS).enumerate() {
@@ -190,7 +194,7 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
             if done % 3 == 0 && done < total {
                 let _ = tx
                     .send(WorkerEvent::WhatsNewLoaded {
-                        albums: recent_releases(&merged, &cutoff),
+                        albums: recent_releases(&[merged.as_slice(), &stale].concat(), &cutoff),
                         done,
                         total,
                     })

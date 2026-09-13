@@ -399,6 +399,62 @@ async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>
     }
 }
 
+/// The startup handoff: loads the user identity, then polls playback with backoff
+/// (1s, 2s, 4s) so the librespot daemon has time to register before echo gives up, pausing
+/// a stream librespot resumed by itself. Runs as its own task: the worker loop must keep
+/// serving events (the Home feeds queue up behind authentication) while this waits.
+/// The current track id, when one is playing, goes back to the loop through `handoff_tx`.
+async fn playback_handoff(
+    mut sp: SpotifyWorker,
+    tx: mpsc::Sender<WorkerEvent>,
+    is_playing: Arc<AtomicBool>,
+    handoff_tx: mpsc::Sender<String>,
+) {
+    use rspotify::prelude::{Id, OAuthClient};
+
+    if let Ok(user) = sp.client.current_user().await {
+        let _ = tx
+            .send(WorkerEvent::UserIdentityLoaded(user.id.id().to_string()))
+            .await;
+    }
+
+    for attempt in 0..4u32 {
+        if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item, context))) =
+            sp.sync_playback_state().await
+        {
+            let mut actual_playing = playing;
+            if playing && dev_name == "echo-rs" {
+                let _ = sp.toggle_playback(false).await;
+                actual_playing = false;
+            }
+            is_playing.store(actual_playing, Ordering::SeqCst);
+            if let Some(item) = item.as_ref() {
+                let _ = handoff_tx.send(item.id.clone()).await;
+            }
+            let _ = tx
+                .send(WorkerEvent::SyncPlaybackState {
+                    is_playing: actual_playing,
+                    is_shuffled,
+                    repeat_mode: repeat,
+                    volume: vol,
+                    device_name: dev_name,
+                    progress_ms,
+                    item,
+                    context,
+                })
+                .await;
+            if let Ok(queue) = sp.fetch_queue().await {
+                let _ = tx.send(WorkerEvent::QueueLoaded(queue)).await;
+            }
+            return;
+        }
+        let _ = sp.wake_up_device().await;
+        if attempt < 3 {
+            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+        }
+    }
+}
+
 /// Maps a "move `from` → `to`" (post-move index) onto Spotify's `insert_before`, which is
 /// measured against the list before the item is removed — moving down needs `to + 1`.
 pub(crate) fn reorder_insert_before(from: usize, to: usize) -> usize {
@@ -581,6 +637,7 @@ impl Worker {
         let mut local_playback = LocalPlaybackEngine::default();
         let (local_scan_tx, mut local_scan_rx) = mpsc::channel::<(PathBuf, LocalScanResult)>(4);
         let (local_watch_tx, mut local_watch_rx) = mpsc::channel::<PathBuf>(32);
+        let (handoff_tx, mut handoff_rx) = mpsc::channel::<String>(1);
         let mut local_scan_inflight = false;
         let mut pending_local_scan: Option<PathBuf> = None;
         let mut pending_watch_scan: Option<PathBuf> = None;
@@ -612,6 +669,13 @@ impl Worker {
                         } else {
                             let _ = path;
                         }
+                    }
+                }
+                track_id = handoff_rx.recv() => {
+                    if let Some(track_id) = track_id
+                        && current_track_id.is_none()
+                    {
+                        current_track_id = Some(track_id);
                     }
                 }
                 watch_path = local_watch_rx.recv() => {
@@ -824,10 +888,6 @@ impl Worker {
                                                     }
                                                     let _ = tx.send(WorkerEvent::LikedStatusUpdate(results)).await;
                                             });
-
-                                            if let Ok(user) = sp.client.current_user().await {
-                                                let _ = self.tx.send(WorkerEvent::UserIdentityLoaded(user.id.id().to_string())).await;
-                                            }
                                         }
 
                                         audio::spawn_librespot_daemon(
@@ -844,50 +904,9 @@ impl Worker {
                                             config.library.volume,
                                         ).await;
 
-                                        // Hydrate library lists from cache immediately, then refresh stale entries in background.
-                                        if let Some(ref mut sp) = spotify_opt {
+                                        if let Some(sp) = spotify_opt.as_ref() {
                                             hydrate_library_lists(sp, self.tx.clone()).await;
-                                            // Initial State Sync (Seamless Handoff)
-                                            // Retry with exponential backoff to give the librespot daemon time to
-                                            // authenticate and register the device. 1s → 2s → 4s = ~7s total wait.
-                                            let mut found_playback = false;
-                                            for attempt in 0..4u32 {
-                                                if let Ok(Some((playing, is_shuffled, repeat, vol, dev_name, progress_ms, item, context))) = sp.sync_playback_state().await {
-                                                    let mut actual_playing = playing;
-
-                                                    // On first boot, if librespot automatically resumed playing, force it to pause
-                                                    if playing && dev_name == "echo-rs" {
-                                                        let _ = sp.toggle_playback(false).await;
-                                                        actual_playing = false;
-                                                    }
-
-                                                    is_playing.store(actual_playing, std::sync::atomic::Ordering::SeqCst);
-                                                    if let Some(item) = item.as_ref() {
-                                                        current_track_id = Some(item.id.clone());
-                                                    }
-                                                    let _ = self.tx.send(WorkerEvent::SyncPlaybackState { is_playing: actual_playing, is_shuffled, repeat_mode: repeat, volume: vol, device_name: dev_name, progress_ms, item, context }).await;
-                                                    found_playback = true;
-                                                    break;
-                                                }
-
-                                                // If no active session exists, forcefully wake up our integrated device
-                                                let _ = sp.wake_up_device().await;
-                                                if attempt < 3 {
-                                                    tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
-                                                }
-                                            }
-
-                                            // Volume is deliberately not touched here. The stream arrives at full
-                                            // scale and all attenuation is client-side, so the mixer is seeded from
-                                            // the saved volume via ConnectConfig::initial_volume when the daemon
-                                            // spawns. Setting the server-side volume would come back as a remote
-                                            // volume update and overwrite that.
-
-                                            // Fetch queue initially only if we have an active session
-                                            if found_playback
-                                                && let Ok(queue) = sp.fetch_queue().await {
-                                                    let _ = self.tx.send(WorkerEvent::QueueLoaded(queue)).await;
-                                                }
+                                            tokio::spawn(playback_handoff(sp.clone(), self.tx.clone(), is_playing.clone(), handoff_tx.clone()));
                                         }
                                         }
                                         Err(error) => {

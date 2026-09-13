@@ -327,6 +327,11 @@ pub fn now_epoch_secs() -> u64 {
         .as_secs()
 }
 
+/// The persisted value whatever its age: what a view shows while the fresh one loads.
+pub fn stale_value<T: Clone>(entry: &Option<CachedEntry<T>>) -> Option<T> {
+    entry.as_ref().map(|entry| entry.value.clone())
+}
+
 fn is_fresh(fetched_at: u64, ttl: Duration) -> bool {
     now_epoch_secs().saturating_sub(fetched_at) <= ttl.as_secs()
 }

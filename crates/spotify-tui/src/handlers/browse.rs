@@ -29,6 +29,17 @@ mod tests {
     use super::*;
     use echo_core::app::ActiveView;
 
+    fn fetched_this_session(state: &mut AppState) {
+        state.data.home_fetches.insert(
+            echo_core::home::HomeFeed::TopTracks,
+            echo_core::home::HomeFetch {
+                in_flight: false,
+                fetched_at: Some(std::time::Instant::now()),
+                range: Some(state.ui.library_config.top_items_range),
+            },
+        );
+    }
+
     #[test]
     fn top_tracks_selection_does_not_request_fetch() {
         let mut state = AppState::new();
@@ -94,6 +105,7 @@ mod tests {
             image_url: None,
             artists: Vec::new(),
         }];
+        fetched_this_session(&mut state);
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
@@ -104,6 +116,34 @@ mod tests {
                 .unwrap()
                 .requires_worker_load()
         );
+    }
+
+    #[test]
+    fn restored_top_tracks_open_and_refresh_in_place() {
+        let mut state = AppState::new();
+        state.ui.active_browse_node = BrowseNode::TopTracks;
+        state.data.top_tracks = vec![echo_core::models::Track {
+            explicit: false,
+            added_by: None,
+            id: "track".to_string(),
+            source: echo_core::models::TrackSource::Spotify,
+            local_path: None,
+            name: "Track".to_string(),
+            artist: "Artist".to_string(),
+            album: String::new(),
+            added_at: None,
+            artist_id: None,
+            duration_ms: 1000,
+            image_url: None,
+            album_id: None,
+            artists: Vec::new(),
+        }];
+
+        assert!(matches!(
+            enter_active_node(&mut state),
+            Some(AppEvent::FetchTopTracks { .. })
+        ));
+        assert_eq!(state.ui.active_view, ActiveView::TrackList);
     }
 
     #[test]
@@ -126,6 +166,7 @@ mod tests {
             album_id: None,
             artists: Vec::new(),
         }];
+        fetched_this_session(&mut state);
 
         assert!(enter_active_node(&mut state).is_none());
         assert!(
