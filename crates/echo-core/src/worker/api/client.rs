@@ -297,9 +297,12 @@ impl EchoSpotifyClient {
         }
     }
 
+    /// The user's top tracks, walking every page; `on_first_page` sees the first page of a
+    /// network walk early (see `SpotifyWorker::fetch_top_tracks`), never a cache hit.
     pub async fn top_tracks(
         &self,
         range: crate::models::TopItemsRange,
+        on_first_page: impl FnMut(&[Track]),
     ) -> Result<Option<Vec<Track>>> {
         // Only the default range is persisted; the others live in the session cache.
         let persist = range == crate::models::TopItemsRange::Medium;
@@ -322,7 +325,11 @@ impl EchoSpotifyClient {
         }
 
         let result = async {
-            match self.third_party_worker().fetch_top_tracks(range).await {
+            match self
+                .third_party_worker()
+                .fetch_top_tracks(range, on_first_page)
+                .await
+            {
                 Ok(tracks) => {
                     log_api("top_tracks route=third_party");
                     Ok(tracks)

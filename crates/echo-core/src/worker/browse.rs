@@ -48,7 +48,20 @@ pub fn spawn_top_tracks(
     tokio::spawn(async move {
         let _request = request;
         let api = api.third_party_only();
-        match api.top_tracks(range).await {
+        let restored = range == crate::models::TopItemsRange::Medium
+            && crate::config::AppConfig::load_cache().top_tracks.is_some();
+        let first_page_tx = tx.clone();
+        let on_first_page = |page: &[crate::models::Track]| {
+            if restored {
+                return;
+            }
+            let tx = first_page_tx.clone();
+            let page = page.to_vec();
+            tokio::spawn(async move {
+                let _ = tx.send(WorkerEvent::TopTracksLoaded(page)).await;
+            });
+        };
+        match api.top_tracks(range, on_first_page).await {
             Ok(Some(tracks)) => {
                 let _ = tx.send(WorkerEvent::TopTracksLoaded(tracks)).await;
             }

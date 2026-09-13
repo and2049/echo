@@ -193,19 +193,31 @@ impl SpotifyWorker {
         Ok((out, metadata))
     }
 
+    /// Every page of the user's top tracks (hundreds, at 50 a request). The first page
+    /// goes to `on_first_page` as soon as it lands so a view can show it while the walk
+    /// continues; a list that fits in one page skips the callback.
     pub async fn fetch_top_tracks(
         &self,
         range: crate::models::TopItemsRange,
+        on_first_page: impl FnMut(&[Track]),
     ) -> Result<Vec<Track>> {
-        use futures_util::StreamExt;
-        let mut stream = Box::pin(self.client.current_user_top_tracks(Some(time_range(range))));
-        let mut out = Vec::new();
-        while let Some(item) = stream.next().await {
-            if let Some(track) = super::parse::track_from_full(item?) {
-                out.push(track);
-            }
-        }
-        Ok(out)
+        top_track_pages(
+            |offset| async move {
+                let page = self
+                    .client
+                    .current_user_top_tracks_manual(Some(time_range(range)), Some(50), Some(offset))
+                    .await?;
+                let has_next = page.next.is_some();
+                let tracks = page
+                    .items
+                    .into_iter()
+                    .filter_map(super::parse::track_from_full)
+                    .collect();
+                Ok((tracks, has_next))
+            },
+            on_first_page,
+        )
+        .await
     }
 
     pub async fn fetch_top_artists(
@@ -255,6 +267,29 @@ impl SpotifyWorker {
     }
 }
 
+async fn top_track_pages<F, Fut>(
+    mut fetch: F,
+    mut on_first_page: impl FnMut(&[Track]),
+) -> Result<Vec<Track>>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<(Vec<Track>, bool)>>,
+{
+    let mut tracks = Vec::new();
+    let mut offset = 0;
+    loop {
+        let (page, has_next) = fetch(offset).await?;
+        tracks.extend(page);
+        if !has_next {
+            return Ok(tracks);
+        }
+        if offset == 0 {
+            on_first_page(&tracks);
+        }
+        offset += 50;
+    }
+}
+
 async fn playlist_pages<F, Fut>(mut fetch: F) -> Result<Vec<Playlist>>
 where
     F: FnMut(u32) -> Fut,
@@ -282,6 +317,39 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn track(id: u32) -> Track {
+        serde_json::from_value(serde_json::json!({"id": id.to_string(), "name": "Song", "artist": "Artist", "album": "Album", "duration_ms": 1000, "artists": []})).unwrap()
+    }
+
+    #[tokio::test]
+    async fn top_track_pages_hand_over_the_first_page_then_keep_walking() {
+        let mut first = Vec::new();
+        let tracks = top_track_pages(
+            |offset| async move {
+                let ids = (offset..offset + if offset < 100 { 50 } else { 3 }).map(track);
+                Ok((ids.collect(), offset < 100))
+            },
+            |page| first.push(page.len()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, [50]);
+        assert_eq!(tracks.len(), 103);
+        assert_eq!(tracks[100].id, "100");
+    }
+
+    #[tokio::test]
+    async fn a_single_page_of_top_tracks_skips_the_early_hand_over() {
+        let mut calls = 0;
+        let tracks = top_track_pages(
+            |_| async move { Ok((vec![track(1)], false)) },
+            |_| calls += 1,
+        )
+        .await
+        .unwrap();
+        assert_eq!((calls, tracks.len()), (0, 1));
+    }
 
     #[tokio::test]
     async fn playlist_pagination_uses_fifty_item_offsets_until_null_next() {
