@@ -34,9 +34,12 @@ pub fn handle_playback_started(
     state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.playing_track_source = Some(item.source);
     state.playback.playing_track_local_path = item.local_path.clone();
+    state.playback.playing_track_image_url = item.image_url.clone();
     state.playback.previous_track_image = state.playback.playing_track_image.take();
     state.playback.duration_ms = item.duration_ms;
-    state.playback.progress_ms = 0;
+    if !crate::session::complete_resume(state, app_tx, &item.id) {
+        state.playback.progress_ms = 0;
+    }
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if state.playback.current_lyric_track_id.as_deref() != Some(item.id.as_str()) {
@@ -77,15 +80,22 @@ pub fn handle_sync_playback_state(
     item: Option<PlaybackItem>,
     context: Option<crate::models::PlayingContext>,
 ) {
-    state.playback.is_playing = is_playing;
+    let keep_restored = item.is_none() && state.playback.pending_resume.is_some();
     state.playback.is_shuffled = is_shuffled;
     state.playback.repeat_mode = repeat_mode;
     state.playback.device_name = device_name;
+    if keep_restored {
+        return;
+    }
+    state.playback.is_playing = is_playing;
     state.playback.progress_ms = progress_ms;
     state.playback.playing_context = context;
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
 
     if let Some(item) = item {
+        if state.playback.playing_track_id.as_deref() != Some(item.id.as_str()) {
+            state.playback.pending_resume = None;
+        }
         apply_synced_playback_item(item, state, app_tx, worker_tx);
     }
 }
@@ -109,6 +119,7 @@ pub fn handle_track_metadata_loaded(
 
     state.playback.playing_track_title = title;
     state.playback.playing_track_artist = artist;
+    state.playback.playing_track_image_url = image_url.clone();
 
     if let Some(url) = image_url {
         image_tasks::spawn_track_image_processing(
@@ -167,6 +178,7 @@ fn apply_synced_playback_item(
     state.playback.playing_track_artist_id = item.artist_id.clone();
     state.playback.playing_track_source = Some(item.source);
     state.playback.playing_track_local_path = item.local_path.clone();
+    state.playback.playing_track_image_url = item.image_url.clone();
     state.playback.duration_ms = item.duration_ms;
 
     if track_changed {
@@ -241,5 +253,91 @@ mod tests {
             .filter(|event| matches!(event, AppEvent::FetchQueue))
             .count();
         assert_eq!(fetches, 1);
+    }
+
+    fn restored_state(worker_tx: &mpsc::Sender<WorkerEvent>) -> AppState {
+        let mut state = AppState::new();
+        crate::session::restore(
+            &mut state,
+            crate::session::PlaybackSession {
+                item: item("a"),
+                context: Some(crate::models::PlayingContext {
+                    context_id: "pl".to_string(),
+                    is_album: false,
+                }),
+                progress_ms: 500,
+                is_shuffled: false,
+                repeat_mode: "Off".to_string(),
+                queue: Vec::new(),
+            },
+            worker_tx,
+        );
+        state
+    }
+
+    #[tokio::test]
+    async fn an_empty_playback_report_leaves_the_restored_session_alone() {
+        let (app_tx, _app_rx) = mpsc::unbounded_channel();
+        let (worker_tx, _worker_rx) = mpsc::channel(8);
+        let mut state = restored_state(&worker_tx);
+
+        handle_sync_playback_state(
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            false,
+            true,
+            "Context".to_string(),
+            None,
+            "echo-rs".to_string(),
+            0,
+            None,
+            None,
+        );
+
+        assert_eq!(state.playback.progress_ms, 500);
+        assert!(state.playback.playing_context.is_some());
+        assert!(state.playback.pending_resume.is_some());
+        assert!(state.playback.is_shuffled);
+    }
+
+    #[tokio::test]
+    async fn a_track_reported_by_another_device_replaces_the_restored_session() {
+        let (app_tx, _app_rx) = mpsc::unbounded_channel();
+        let (worker_tx, _worker_rx) = mpsc::channel(8);
+        let mut state = restored_state(&worker_tx);
+
+        handle_sync_playback_state(
+            &mut state,
+            &app_tx,
+            &worker_tx,
+            true,
+            false,
+            "Off".to_string(),
+            None,
+            "phone".to_string(),
+            7_000,
+            Some(item("b")),
+            None,
+        );
+
+        assert_eq!(state.playback.playing_track_id.as_deref(), Some("b"));
+        assert_eq!(state.playback.progress_ms, 7_000);
+        assert!(state.playback.pending_resume.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_resumed_start_keeps_its_position_while_any_other_start_resets_it() {
+        let (app_tx, _app_rx) = mpsc::unbounded_channel();
+        let (worker_tx, _worker_rx) = mpsc::channel(8);
+        let mut state = restored_state(&worker_tx);
+        handle_playback_started(&mut state, &app_tx, &worker_tx, item("a"));
+        assert_eq!(state.playback.progress_ms, 500);
+        assert!(state.playback.is_playing);
+
+        let mut state = restored_state(&worker_tx);
+        handle_playback_started(&mut state, &app_tx, &worker_tx, item("b"));
+        assert_eq!(state.playback.progress_ms, 0);
+        assert!(state.playback.pending_resume.is_none());
     }
 }

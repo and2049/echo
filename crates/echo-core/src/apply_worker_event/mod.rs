@@ -196,6 +196,7 @@ pub fn apply_worker_event(
             artist::handle_top_tracks_load_failed(state, artist_id, message)
         }
     }
+    crate::session::persist_if_changed(state);
 }
 
 #[cfg(test)]

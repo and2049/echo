@@ -21,6 +21,7 @@ pub mod intent;
 pub mod models;
 pub mod platform;
 pub mod search;
+pub mod session;
 pub mod theme;
 pub mod thumbnails;
 pub mod update;

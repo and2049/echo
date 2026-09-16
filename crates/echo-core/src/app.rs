@@ -191,6 +191,9 @@ pub struct PlaybackState {
     pub current_lyric_track_id: Option<String>,
     pub is_fetching_lyrics: bool,
     pub playback_last_updated_at: Option<std::time::Instant>,
+    pub playing_track_image_url: Option<String>,
+    pub pending_resume: Option<crate::session::PendingResume>,
+    pub session_mark: Option<crate::session::SaveMark>,
 }
 
 impl Default for PlaybackState {
@@ -221,6 +224,9 @@ impl Default for PlaybackState {
             current_lyric_track_id: None,
             is_fetching_lyrics: false,
             playback_last_updated_at: None,
+            playing_track_image_url: None,
+            pending_resume: None,
+            session_mark: None,
         }
     }
 }

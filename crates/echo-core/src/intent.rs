@@ -274,6 +274,9 @@ fn play_event_with_target(track: &Track, target: PlaybackTarget) -> Option<AppEv
 // confirm or correct, and returns the event for the worker.
 
 pub fn toggle_playback(state: &mut AppState) -> AppEvent {
+    if let Some(resume) = crate::session::resume_event(state) {
+        return resume;
+    }
     state.playback.is_playing = !state.playback.is_playing;
     state.playback.playback_last_updated_at = Some(std::time::Instant::now());
     AppEvent::TogglePlayback(state.playback.is_playing)
@@ -320,6 +323,9 @@ pub fn sort_by_column(state: &mut AppState, sort: crate::app::TrackSort) {
 /// Pops the queue head optimistically so the queue view moves at once; the playback sync that
 /// follows a skip refetches the real queue while that view is open.
 pub fn next_track(state: &mut AppState) -> AppEvent {
+    if let Some(resume) = crate::session::resume_event(state) {
+        return resume;
+    }
     if !state.data.queue.is_empty() {
         state.data.queue.remove(0);
         state.ui.selected_queue_index = state.ui.selected_queue_index.saturating_sub(1);
@@ -333,6 +339,9 @@ pub fn next_track(state: &mut AppState) -> AppEvent {
 }
 
 pub fn previous_track(state: &AppState) -> AppEvent {
+    if let Some(resume) = crate::session::resume_event(state) {
+        return resume;
+    }
     AppEvent::PreviousTrack {
         current_track_id: state.playback.playing_track_id.clone(),
     }
@@ -404,6 +413,10 @@ pub fn seek_to(state: &mut AppState, target_ms: u32) -> Option<AppEvent> {
         return None;
     }
     state.playback.set_optimistic_progress(target_ms);
+    if let Some(pending) = state.playback.pending_resume.as_mut() {
+        pending.progress_ms = state.playback.progress_ms;
+        return None;
+    }
     Some(AppEvent::SeekTo(target_ms))
 }
 

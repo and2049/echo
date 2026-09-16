@@ -639,8 +639,9 @@ impl EchoApp {
     /// three `WindowBounds` variants carry the restore bounds, so a window closed while
     /// maximized still remembers a sensible windowed size. Called from every way out:
     /// `on_close_request` for the platform's close request and the Linux caption button, and
-    /// the `Quit` action the keybinding dispatches.
+    /// the `Quit` action the keybinding dispatches. The playback session is saved alongside.
     fn persist_window_bounds(&mut self, window: &Window) {
+        echo_core::session::persist(&self.state);
         let bounds = match window.window_bounds() {
             WindowBounds::Windowed(bounds)
             | WindowBounds::Maximized(bounds)

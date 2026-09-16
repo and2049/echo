@@ -97,6 +97,7 @@ async fn main() -> Result<()> {
             let outgoing_event = handlers::handle_event(&mut state, &key);
 
             if !state.ui.is_running {
+                echo_core::session::persist(&state);
                 let _ = app_tx.send(AppEvent::Quit);
             } else if let Some(ev) = outgoing_event {
                 if let AppEvent::LoadContextTracks(ref context) = ev {

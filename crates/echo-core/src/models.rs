@@ -43,7 +43,7 @@ pub enum PlaybackTarget {
 /// The playlist or album the playing device reports as its context, from the status poll.
 /// Artist, show and collection (Liked Songs) contexts can't be restarted through the API's
 /// context-playback call, so they map to `None` and queue jumps fall back to standalone plays.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PlayingContext {
     pub context_id: String,
     pub is_album: bool,
@@ -276,7 +276,7 @@ impl TrackListContext {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlaybackItem {
     pub id: String,
     #[serde(default)]

@@ -53,6 +53,9 @@ pub fn init() -> Bootstrap {
     state.data.whats_new = stale_value(&cache.whats_new).unwrap_or_default();
     state.data.recent_contexts = crate::home::stale_recent_contexts(&cache);
     state.ui.library_config = config.library.clone();
+    if let Some(session) = crate::session::load() {
+        crate::session::restore(&mut state, session, &worker_tx);
+    }
 
     if config.spotify_credentials.is_some() {
         state.ui.mode = AppMode::Authenticating;
