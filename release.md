@@ -1,5 +1,12 @@
 # Changelog
 
 ### Desktop App
- - Show the Home page from the on-disk cache the moment the window opens and refresh every shelf behind it, instead of loading placeholders on each launch; the cache used to be overwritten by the liked-songs sync so most sessions started cold, and the Home feeds used to wait behind the startup playback handoff
- - Load the first page of Your top songs before the rest of the list is walked
+ - Resume the last session: the track that was playing comes back paused where it stopped, with its queue, shuffle and repeat, and Play, Next or Previous start it from that position
+ - Keep a local play history and show it behind a Recent tab in the queue view, merged by time with Spotify's own recently played list; a play counts after 30 seconds or half the track, and every Recent row plays its song directly
+ - Ctrl-click (cmd-click on macOS) picks several rows, and the whole selection can be dragged to a sidebar playlist, dropped on Liked Songs, or dropped between the rows of an editable playlist to insert it there; lists scroll while a drag hovers near their edge
+ - Add Refresh to the playlist and album page menu
+ - Add `:clearhistory` to forget the local play history
+
+### Terminal client
+ - The last session is restored paused on launch and starts again from its position
+ - The queue view gains a Recent tab (`tab` switches) with the local play history
