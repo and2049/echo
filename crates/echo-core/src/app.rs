@@ -34,6 +34,7 @@ pub struct UIState {
     pub selected_track_index: usize,
     pub selected_search_index: usize,
     pub selected_queue_index: usize,
+    pub queue_tab: QueueTab,
     pub selected_device_index: usize,
     pub artist_page_album_index: usize,
     pub selected_action_index: usize,
@@ -116,6 +117,7 @@ impl UIState {
             selected_track_index: 0,
             selected_search_index: 0,
             selected_queue_index: 0,
+            queue_tab: QueueTab::Queue,
             selected_device_index: 0,
             artist_page_album_index: 0,
             selected_action_index: 0,
@@ -194,6 +196,7 @@ pub struct PlaybackState {
     pub playing_track_image_url: Option<String>,
     pub pending_resume: Option<crate::session::PendingResume>,
     pub session_mark: Option<crate::session::SaveMark>,
+    pub listen: Option<crate::history::ListenTimer>,
 }
 
 impl Default for PlaybackState {
@@ -227,6 +230,7 @@ impl Default for PlaybackState {
             playing_track_image_url: None,
             pending_resume: None,
             session_mark: None,
+            listen: None,
         }
     }
 }
@@ -297,6 +301,8 @@ pub struct DataState {
     // Queue
     pub queue: Vec<Track>,
     pub manual_queue: Vec<String>,
+    pub play_history: Vec<crate::history::PlayRecord>,
+    pub recent_plays: Vec<crate::history::PlayRecord>,
     // Devices
     pub devices: Vec<crate::models::Device>,
     // Artist page
@@ -333,6 +339,8 @@ impl DataState {
             tracklist_image_url: None,
             queue: Vec::new(),
             manual_queue: Vec::new(),
+            play_history: Vec::new(),
+            recent_plays: Vec::new(),
             devices: Vec::new(),
             artist_page_data: None,
             pending_artist_page_id: None,
@@ -401,6 +409,31 @@ impl AppState {
             .position(|row| matches!(row, QueueRow::Track(ix, _) if *ix == track_index))
     }
 
+    /// The rows of whichever queue tab is showing: the live queue, or the recent plays.
+    pub fn queue_view_len(&self) -> usize {
+        match self.ui.queue_tab {
+            QueueTab::Queue => self.data.queue.len(),
+            QueueTab::Recent => self.data.recent_plays.len(),
+        }
+    }
+
+    pub fn queue_view_track(&self, index: usize) -> Option<&Track> {
+        match self.ui.queue_tab {
+            QueueTab::Queue => self.data.queue.get(index),
+            QueueTab::Recent => self
+                .data
+                .recent_plays
+                .get(index)
+                .map(|record| &record.track),
+        }
+    }
+
+    pub fn queue_view_tracks(&self, start: usize, end: usize) -> Vec<Track> {
+        (start..=end)
+            .filter_map(|index| self.queue_view_track(index).cloned())
+            .collect()
+    }
+
     fn playing_context_name(&self) -> Option<String> {
         let context = self.playback.playing_context.as_ref()?;
         if context.is_album {
@@ -444,6 +477,13 @@ pub struct NavigationSnapshot {
     tracklist_image_url: Option<String>,
     search_results: SearchResults,
     artist_page_data: Option<ArtistPageData>,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
+pub enum QueueTab {
+    #[default]
+    Queue,
+    Recent,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]

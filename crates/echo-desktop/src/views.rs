@@ -10,7 +10,7 @@
 //! that flag exists because thumbnails cost real estate and glitch on some terminals, neither of
 //! which applies here.
 
-use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, SearchTab};
+use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, QueueTab, SearchTab};
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
 mod playlist_edit;
@@ -2301,6 +2301,12 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
 
     let count = app.state.data.queue.len();
     let row_count = app.state.queue_rows().len();
+    let recent = app.state.ui.queue_tab == QueueTab::Recent;
+    let subtitle = if recent {
+        tr(&app.state, "ui.recently_played").to_string()
+    } else {
+        tr(&app.state, "desktop.queue_upcoming").replace("{}", &count.to_string())
+    };
 
     div()
         .flex_grow(1.0)
@@ -2319,12 +2325,13 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     div()
                         .text_xs()
                         .text_color(muted)
-                        .child(SharedString::from(
-                            tr(&app.state, "desktop.queue_upcoming").replace("{}", &count.to_string()),
-                        )),
-                ),
+                        .child(SharedString::from(subtitle)),
+                )
+                .child(queue_tab_strip(app, cx)),
         )
-        .child(if count == 0 {
+        .child(if recent {
+            recent_list(app, cx).into_any_element()
+        } else if count == 0 {
             div()
                 .flex_grow(1.0)
                 .flex()
@@ -2450,6 +2457,213 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
             .flex_grow(1.0)
             .into_any_element()
         })
+}
+
+fn queue_tab_strip(app: &EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let palette = DesktopPalette::resolve(theme);
+    let active = app.state.ui.queue_tab;
+    let tabs = [
+        (
+            QueueTab::Queue,
+            "queue-tab-queue",
+            tr(&app.state, "ui.queue"),
+        ),
+        (
+            QueueTab::Recent,
+            "queue-tab-recent",
+            tr(&app.state, "ui.recent"),
+        ),
+    ];
+    div()
+        .mt_2()
+        .flex()
+        .gap_2()
+        .children(tabs.into_iter().map(|(tab, id, label)| {
+            let is_active = tab == active;
+            div()
+                .id(id)
+                .cursor_pointer()
+                .px_3()
+                .py_1()
+                .rounded_md()
+                .text_sm()
+                .text_color(if is_active { fg } else { muted })
+                .when(is_active, |el| el.bg(palette.row_selected))
+                .when(!is_active, |el| {
+                    el.hover(move |style| style.bg(palette.row_hover))
+                })
+                .child(label)
+                .on_click(cx.listener(
+                    move |this: &mut EchoApp, _: &gpui::ClickEvent, _window, cx| {
+                        if this.state.ui.queue_tab != tab {
+                            echo_core::intent::cycle_queue_tab(&mut this.state);
+                        }
+                        cx.notify();
+                    },
+                ))
+        }))
+}
+
+fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
+    let row_count = app.state.data.recent_plays.len();
+    if row_count == 0 {
+        return div()
+            .flex_grow(1.0)
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(muted)
+            .child(tr(&app.state, "desktop.recent_empty"))
+            .into_any_element();
+    }
+    uniform_list(
+        "recent-rows",
+        row_count,
+        cx.processor(
+            move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                let theme = &this.state.ui.active_theme;
+                let fg = theme.text.gpui(WINDOW_FG());
+                let muted = theme.text_muted.gpui(WINDOW_FG());
+                let palette = DesktopPalette::resolve(theme);
+                let secondary = theme.secondary.gpui(WINDOW_FG());
+                let selected = this.state.ui.selected_queue_index;
+                let visual = visual_range_in(&this.state, ActiveView::Queue);
+                let ago = |played_at: &str| {
+                    echo_core::context_details::format_added_at_with(
+                        std::time::SystemTime::now().into(),
+                        played_at,
+                        &|key| tr(&this.state, key).to_string(),
+                    )
+                };
+
+                range
+                    .filter_map(|ix| {
+                        this.state
+                            .data
+                            .recent_plays
+                            .get(ix)
+                            .map(|record| (ix, record))
+                    })
+                    .map(|(ix, record)| {
+                        let track = &record.track;
+                        let is_liked = this.state.data.liked_tracks.contains(&track.id);
+                        let played = ago(&record.played_at);
+
+                        pill_row(
+                            ix,
+                            COMPACT_PILL,
+                            row_selected(ix, selected, visual),
+                            palette.row_selected,
+                            palette.row_hover,
+                            |row| {
+                                row.gap_3()
+                                    .on_click(cx.listener(
+                                        move |this: &mut EchoApp,
+                                              event: &gpui::ClickEvent,
+                                              _window,
+                                              cx| {
+                                            if event.modifiers().shift {
+                                                this.extend_selection_to(ix, cx);
+                                                return;
+                                            }
+                                            this.state.ui.selected_queue_index = ix;
+                                            if event.click_count() >= 2
+                                                && let Some(event) =
+                                                    echo_core::intent::play_queue_track_at(
+                                                        &mut this.state,
+                                                        ix,
+                                                    )
+                                            {
+                                                this.dispatch(event);
+                                            }
+                                            cx.notify();
+                                        },
+                                    ))
+                                    .on_mouse_down(
+                                        MouseButton::Right,
+                                        cx.listener(
+                                            move |this: &mut EchoApp,
+                                                  event: &MouseDownEvent,
+                                                  _window,
+                                                  cx| {
+                                                this.state.ui.selected_queue_index = ix;
+                                                this.context_menu = None;
+                                                if let Some(ctx) = this.action_target() {
+                                                    this.track_menu = Some(crate::TrackMenuState {
+                                                        ctx,
+                                                        position: Some(event.position),
+                                                        selected: 0,
+                                                        submenu: None,
+                                                    });
+                                                }
+                                                cx.notify();
+                                            },
+                                        ),
+                                    )
+                                    .when_some(
+                                        row_number(&this.state, ix, selected),
+                                        |row, number| {
+                                            row.child(
+                                                div()
+                                                    .flex_none()
+                                                    .w(px(32.0))
+                                                    .text_color(muted)
+                                                    .child(number),
+                                            )
+                                        },
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_grow(2.0)
+                                            .flex_basis(px(0.0))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_color(fg)
+                                            .child(SharedString::from(track.name.clone())),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_grow(1.5)
+                                            .flex_basis(px(0.0))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .text_color(muted)
+                                            .child(SharedString::from(track.artist.clone())),
+                                    )
+                                    .child(liked_cell(
+                                        "recent",
+                                        ix,
+                                        track.id.clone(),
+                                        is_liked,
+                                        secondary,
+                                        palette,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .w(px(112.0))
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(SharedString::from(played)),
+                                    )
+                            },
+                        )
+                        .into_any_element()
+                    })
+                    .collect()
+            },
+        ),
+    )
+    .track_scroll(&app.queue_scroll)
+    .flex_grow(1.0)
+    .into_any_element()
 }
 
 fn queue_header(

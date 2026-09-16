@@ -52,6 +52,8 @@ pub fn init() -> Bootstrap {
     state.data.followed_artists = stale_value(&cache.followed_artists).unwrap_or_default();
     state.data.whats_new = stale_value(&cache.whats_new).unwrap_or_default();
     state.data.recent_contexts = crate::home::stale_recent_contexts(&cache);
+    state.data.play_history = crate::history::load();
+    crate::history::rebuild_recent(&mut state);
     state.ui.library_config = config.library.clone();
     if let Some(session) = crate::session::load() {
         crate::session::restore(&mut state, session, &worker_tx);

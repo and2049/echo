@@ -137,7 +137,7 @@ fn selected_list_len(state: &AppState) -> usize {
             SearchTab::Artists => state.data.search_results.artists.len(),
             SearchTab::Playlists => state.data.search_results.playlists.len(),
         },
-        ActiveView::Queue => state.data.queue.len(),
+        ActiveView::Queue => state.queue_view_len(),
         ActiveView::Devices => state.data.devices.len(),
         ActiveView::ArtistList => state.artist_list().len(),
         ActiveView::ArtistPage => state

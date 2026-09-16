@@ -691,7 +691,7 @@ impl EchoApp {
                 .map(|shelf| shelf.items.len())
                 .sum(),
             ActiveView::TrackList => self.state.data.tracks.len(),
-            ActiveView::Queue => self.state.data.queue.len(),
+            ActiveView::Queue => self.state.queue_view_len(),
             ActiveView::SearchResults => match self.state.ui.active_search_tab {
                 SearchTab::All => echo_core::search::all_tab_rows(
                     &self.state.data.search_results,
@@ -792,7 +792,12 @@ impl EchoApp {
                 }
                 ActiveView::Queue => {
                     self.state.ui.selected_queue_index = index;
-                    let row = self.state.queue_row_of(index).unwrap_or(index);
+                    let row = match self.state.ui.queue_tab {
+                        echo_core::app::QueueTab::Queue => {
+                            self.state.queue_row_of(index).unwrap_or(index)
+                        }
+                        echo_core::app::QueueTab::Recent => index,
+                    };
                     self.queue_scroll
                         .scroll_to_item(row, ScrollStrategy::Nearest);
                 }
@@ -1422,7 +1427,7 @@ impl EchoApp {
         let data = &self.state.data;
         let row = match ui.active_view {
             ActiveView::TrackList => data.tracks.get(ui.selected_track_index),
-            ActiveView::Queue => data.queue.get(ui.selected_queue_index),
+            ActiveView::Queue => self.state.queue_view_track(ui.selected_queue_index),
             ActiveView::SearchResults
                 if ui.active_search_tab == echo_core::app::SearchTab::Tracks =>
             {
@@ -2186,6 +2191,7 @@ impl EchoApp {
                     self.dispatch(AppEvent::FetchFollowedArtists);
                 }
             }
+            ActiveView::Queue => echo_core::intent::cycle_queue_tab(&mut self.state),
             _ => {}
         }
         cx.notify();

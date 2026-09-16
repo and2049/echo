@@ -26,6 +26,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("search <query>", "Search Spotify and local tracks"),
     ("queue", "Open the queue"),
     ("clearqueue", "Clear the manually queued tracks"),
+    ("clearhistory", "Forget the local play history"),
     ("vis", "Toggle the audio visualizer"),
     ("visbins <5-32>", "Visualizer frequency bands"),
     ("album", "Jump to the selected track's album"),
@@ -827,6 +828,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 }
             }
             "clearqueue" => return crate::intent::clear_queue(state),
+            "clearhistory" => crate::intent::clear_play_history(state),
             "queue" => {
                 state.ui.active_view = crate::app::ActiveView::Queue;
                 state.ui.selected_queue_index = 0;

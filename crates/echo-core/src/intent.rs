@@ -197,27 +197,50 @@ pub fn play_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
 /// handles as a fallback — the track plays standalone and the device rebuilds its up-next list
 /// around it, which is why this can't reuse [`play_track_at`].
 pub fn play_queue_track_at(state: &mut AppState, index: usize) -> Option<AppEvent> {
-    if index >= state.data.queue.len() {
+    if index >= state.queue_view_len() {
         return None;
     }
     state.ui.selected_queue_index = index;
-    let track = state.data.queue.get(index)?;
+    let track = state.queue_view_track(index)?;
     let target = match track.source {
         TrackSource::Local => PlaybackTarget::LocalTrack {
             track_id: track.id.clone(),
             path: track.local_path.clone()?,
         },
         TrackSource::Spotify => match &state.playback.playing_context {
-            Some(context) => PlaybackTarget::SpotifyContextJump {
-                context_id: context.context_id.clone(),
-                is_album: context.is_album,
-            },
-            None => PlaybackTarget::SpotifyTrack {
+            Some(context) if state.ui.queue_tab == crate::app::QueueTab::Queue => {
+                PlaybackTarget::SpotifyContextJump {
+                    context_id: context.context_id.clone(),
+                    is_album: context.is_album,
+                }
+            }
+            _ => PlaybackTarget::SpotifyTrack {
                 track_id: track.id.clone(),
             },
         },
     };
     play_event_with_target(track, target)
+}
+
+/// `tab` in the queue view: the live queue and the recent plays share the selection index.
+pub fn cycle_queue_tab(state: &mut AppState) {
+    state.ui.queue_tab = match state.ui.queue_tab {
+        crate::app::QueueTab::Queue => crate::app::QueueTab::Recent,
+        crate::app::QueueTab::Recent => crate::app::QueueTab::Queue,
+    };
+    state.ui.selected_queue_index = 0;
+    state.ui.visual_selection_start = None;
+}
+
+pub fn clear_play_history(state: &mut AppState) {
+    crate::history::clear(state);
+    state.ui.selected_queue_index = 0;
+    state.ui.status_message = Some(crate::i18n::t(
+        "messages.history_cleared",
+        &state.ui.library_config.language,
+    ));
+    state.ui.status_message_expiry =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
 }
 
 /// Optimistically records the context a play `target` starts, so a queue jump issued before the
@@ -247,7 +270,7 @@ fn note_playing_context(state: &mut AppState, target: &PlaybackTarget) {
 /// to know which list they were opened over.
 pub fn row_track(state: &AppState, index: usize) -> Option<&Track> {
     match state.ui.active_view {
-        ActiveView::Queue => state.data.queue.get(index),
+        ActiveView::Queue => state.queue_view_track(index),
         _ => state.data.tracks.get(index),
     }
 }
@@ -1413,8 +1436,8 @@ pub fn visual_tracks(state: &AppState) -> Vec<Track> {
         ActiveView::TrackList => slice(state.data.tracks.len())
             .map(|(s, e)| state.data.tracks[s..=e].to_vec())
             .unwrap_or_default(),
-        ActiveView::Queue => slice(state.data.queue.len())
-            .map(|(s, e)| state.data.queue[s..=e].to_vec())
+        ActiveView::Queue => slice(state.queue_view_len())
+            .map(|(s, e)| state.queue_view_tracks(s, e))
             .unwrap_or_default(),
         ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => {
             slice(state.data.search_results.tracks.len())
@@ -1522,9 +1545,7 @@ pub fn toggle_like_selected(state: &mut AppState) -> Option<AppEvent> {
             .get(state.ui.selected_track_index)
             .map(|track| track.id.clone()),
         ActiveView::Queue => state
-            .data
-            .queue
-            .get(state.ui.selected_queue_index)
+            .queue_view_track(state.ui.selected_queue_index)
             .map(|track| track.id.clone()),
         ActiveView::SearchResults
             if state.ui.active_search_tab == crate::app::SearchTab::Tracks =>
@@ -3150,5 +3171,60 @@ mod tests {
             album_id: None,
             artists: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_recent_tab_plays_its_rows_standalone_and_shares_the_selection() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::Queue;
+        state.playback.playing_context = Some(PlayingContext {
+            context_id: "pl".to_string(),
+            is_album: false,
+        });
+        state.data.queue = vec![spotify_track("q")];
+        state.data.recent_plays = vec![
+            crate::history::PlayRecord {
+                track: spotify_track("r1"),
+                played_at: "2026-09-16T10:00:00Z".to_string(),
+                context: None,
+            },
+            crate::history::PlayRecord {
+                track: spotify_track("r2"),
+                played_at: "2026-09-16T09:00:00Z".to_string(),
+                context: None,
+            },
+        ];
+        state.ui.selected_queue_index = 0;
+
+        let Some(AppEvent::PlayTrack { target, .. }) = play_queue_track_at(&mut state, 0) else {
+            panic!("expected a queue play");
+        };
+        assert!(matches!(target, PlaybackTarget::SpotifyContextJump { .. }));
+
+        cycle_queue_tab(&mut state);
+        assert_eq!(state.ui.queue_tab, crate::app::QueueTab::Recent);
+        assert_eq!(state.queue_view_len(), 2);
+        assert_eq!(
+            row_track(&state, 1).map(|track| track.id.as_str()),
+            Some("r2")
+        );
+        let Some(AppEvent::PlayTrack {
+            target, track_id, ..
+        }) = play_queue_track_at(&mut state, 1)
+        else {
+            panic!("expected a recent play");
+        };
+        assert_eq!(track_id, "r2");
+        assert_eq!(
+            target,
+            PlaybackTarget::SpotifyTrack {
+                track_id: "r2".to_string()
+            }
+        );
+        assert_eq!(state.ui.selected_queue_index, 1);
+
+        cycle_queue_tab(&mut state);
+        assert_eq!(state.ui.queue_tab, crate::app::QueueTab::Queue);
+        assert_eq!(state.ui.selected_queue_index, 0);
     }
 }

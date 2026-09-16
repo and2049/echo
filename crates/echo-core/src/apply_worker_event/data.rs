@@ -111,10 +111,12 @@ pub fn handle_search_results_loaded(state: &mut AppState, results: SearchResults
 
 pub fn handle_queue_loaded(state: &mut AppState, tracks: Vec<Track>) {
     reconcile_manual_queue(&mut state.data.manual_queue, &tracks);
-    state.ui.selected_queue_index = state
-        .ui
-        .selected_queue_index
-        .min(tracks.len().saturating_sub(1));
+    if state.ui.queue_tab == crate::app::QueueTab::Queue {
+        state.ui.selected_queue_index = state
+            .ui
+            .selected_queue_index
+            .min(tracks.len().saturating_sub(1));
+    }
     state.data.queue = tracks;
 }
 
@@ -163,6 +165,7 @@ pub fn handle_top_tracks_loaded(state: &mut AppState, tracks: Vec<Track>) {
 
 pub fn handle_recently_played_loaded(state: &mut AppState, tracks: Vec<Track>) {
     state.data.recently_played = tracks;
+    crate::history::rebuild_recent(state);
     if take_pending(state, crate::models::BrowseNode::RecentlyPlayed) {
         let _ = crate::intent::open_recently_played(state);
     } else {

@@ -96,7 +96,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                                     vec![]
                                 }
                             }
-                            ActiveView::Queue => state.data.queue[start..=end].to_vec(),
+                            ActiveView::Queue => state.queue_view_tracks(start, end),
                             _ => vec![],
                         }
                     } else {
@@ -140,7 +140,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::Queue => {
-                if state.ui.selected_queue_index + 1 < state.data.queue.len() {
+                if state.ui.selected_queue_index + 1 < state.queue_view_len() {
                     state.ui.selected_queue_index += 1;
                 }
             }
@@ -237,7 +237,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                             vec![]
                         }
                     }
-                    ActiveView::Queue => state.data.queue[start..=end]
+                    ActiveView::Queue => state
+                        .queue_view_tracks(start, end)
                         .iter()
                         .map(|t| t.id.clone())
                         .collect(),

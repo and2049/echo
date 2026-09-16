@@ -93,9 +93,7 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 }
             }
             ActiveView::Queue => {
-                if !state.data.queue.is_empty()
-                    && state.ui.selected_queue_index < state.data.queue.len().saturating_sub(1)
-                {
+                if state.ui.selected_queue_index + 1 < state.queue_view_len() {
                     state.ui.selected_queue_index += 1;
                 }
             }
@@ -285,9 +283,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 let t = &state.data.tracks[state.ui.selected_track_index];
                 Some(echo_core::models::ActionMenuContext::from(t))
             } else if state.ui.active_view == ActiveView::Queue
-                && state.ui.selected_queue_index < state.data.queue.len()
+                && let Some(t) = state.queue_view_track(state.ui.selected_queue_index)
             {
-                let t = &state.data.queue[state.ui.selected_queue_index];
                 Some(echo_core::models::ActionMenuContext::from(t))
             } else if state.ui.active_view == ActiveView::SearchResults
                 && state.ui.active_search_tab == echo_core::app::SearchTab::Tracks
@@ -528,7 +525,9 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
             return Some(echo_core::intent::adjust_volume(state, -5));
         }
         KeyCode::Tab => {
-            if state.ui.active_view == ActiveView::Library {
+            if state.ui.active_view == ActiveView::Queue {
+                echo_core::intent::cycle_queue_tab(state);
+            } else if state.ui.active_view == ActiveView::Library {
                 state.ui.active_library_tab = match state.ui.active_library_tab {
                     echo_core::app::LibraryTab::Playlists => echo_core::app::LibraryTab::Albums,
                     echo_core::app::LibraryTab::Albums => echo_core::app::LibraryTab::Browse,
