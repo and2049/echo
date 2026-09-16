@@ -52,6 +52,11 @@ pub enum AppEvent {
     FetchQueue,
     ClearQueue,
     AddTracksToPlaylist(String, Vec<Track>),
+    InsertTracksInPlaylist {
+        playlist_id: String,
+        tracks: Vec<Track>,
+        position: usize,
+    },
     RemoveTracksFromPlaylist(String, Vec<String>),
     /// Arm (or with `None`, clear) the sleep timer that pauses playback when it fires.
     SetSleepTimer {

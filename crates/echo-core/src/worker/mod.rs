@@ -1474,7 +1474,12 @@ impl Worker {
                                     let _ = self.tx.send(WorkerEvent::TracksQueued(track_ids)).await;
                                 }
                             }
-                            AppEvent::AddTracksToPlaylist(playlist_id, track_ids) => {
+                            AppEvent::AddTracksToPlaylist(..) | AppEvent::InsertTracksInPlaylist { .. } => {
+                                let (playlist_id, track_ids, position) = match event {
+                                    AppEvent::AddTracksToPlaylist(playlist_id, tracks) => (playlist_id, tracks, None),
+                                    AppEvent::InsertTracksInPlaylist { playlist_id, tracks, position } => (playlist_id, tracks, Some(position)),
+                                    _ => unreachable!(),
+                                };
                                 if playlist_id.starts_with("local-playlist:") {
                                     let mut local_playlists = AppConfig::load_local_playlists();
                                     if let Some(playlist) = local_playlists.playlists.iter_mut().find(|playlist| playlist.id == playlist_id) {
@@ -1482,7 +1487,8 @@ impl Worker {
                                             .iter()
                                             .filter_map(LocalPlaylistEntry::from_track)
                                             .collect();
-                                        playlist.entries.extend(entries);
+                                        let at = position.unwrap_or(playlist.entries.len()).min(playlist.entries.len());
+                                        playlist.entries.splice(at..at, entries);
                                         playlist.updated_unix_secs = current_unix_secs();
                                         let _ = AppConfig::save_local_playlists(&local_playlists);
                                         let _ = self.tx.send(WorkerEvent::LocalPlaylistsLoaded(local_playlists)).await;
@@ -1509,7 +1515,7 @@ impl Worker {
                                             }
                                         }
                                         if !items.is_empty() {
-                                            let res = sp.client.playlist_add_items(pid.clone(), items, None).await;
+                                            let res = sp.client.playlist_add_items(pid.clone(), items, position.map(|at| at as u32)).await;
                                             if let Err(e) = res {
                                                 let _ = std::fs::write(crate::config::debug_log_path("echo-debug-add.log"), format!("Add error: {:?}", e));
                                             } else {

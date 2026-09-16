@@ -227,10 +227,37 @@ pub fn find_duplicates(candidates: &[Track], existing: &[Track]) -> Vec<String> 
         .collect()
 }
 
+/// The worker event that adds `tracks` to a playlist, at the end or before `position`.
+pub fn playlist_add_event(
+    playlist_id: String,
+    tracks: Vec<Track>,
+    position: Option<usize>,
+) -> AppEvent {
+    match position {
+        Some(position) => AppEvent::InsertTracksInPlaylist {
+            playlist_id,
+            tracks,
+            position,
+        },
+        None => AppEvent::AddTracksToPlaylist(playlist_id, tracks),
+    }
+}
+
 pub fn stage_playlist_add(
     state: &mut AppState,
     playlist: &Playlist,
     tracks: Vec<Track>,
+) -> Option<AppEvent> {
+    stage_playlist_add_at(state, playlist, tracks, None)
+}
+
+/// Adds `tracks` to `playlist` unless some are already in it, in which case the duplicate
+/// prompt is staged instead and the eventual add keeps `position`.
+pub fn stage_playlist_add_at(
+    state: &mut AppState,
+    playlist: &Playlist,
+    tracks: Vec<Track>,
+    position: Option<usize>,
 ) -> Option<AppEvent> {
     if tracks.is_empty() {
         return None;
@@ -263,10 +290,11 @@ pub fn stage_playlist_add(
             playlist_name: playlist.name.clone(),
             tracks,
             duplicates,
+            position,
         });
         return None;
     }
-    Some(AppEvent::AddTracksToPlaylist(playlist.id.clone(), tracks))
+    Some(playlist_add_event(playlist.id.clone(), tracks, position))
 }
 
 pub fn filtered_playlist_add_choices(state: &AppState) -> Vec<(usize, Playlist)> {

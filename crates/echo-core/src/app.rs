@@ -54,6 +54,7 @@ pub struct UIState {
     pub action_menu_open: bool,
     pub action_menu_context: Option<ActionMenuContext>,
     pub visual_selection_start: Option<usize>,
+    pub picked_rows: std::collections::BTreeSet<usize>,
     pub pending_d_press: bool,
     // Text input (command & search)
     pub command_buffer: String,
@@ -136,6 +137,7 @@ impl UIState {
             action_menu_open: false,
             action_menu_context: None,
             visual_selection_start: None,
+            picked_rows: std::collections::BTreeSet::new(),
             pending_d_press: false,
             command_buffer: String::new(),
             command_suggestions: vec![],
@@ -719,6 +721,7 @@ impl AppState {
 
     pub fn push_view_history(&mut self) {
         let snapshot = self.navigation_snapshot();
+        self.ui.picked_rows.clear();
         Self::push_capped(&mut self.ui.view_history, snapshot);
         self.ui.forward_history.clear();
     }

@@ -1402,29 +1402,118 @@ pub fn enter_visual(state: &mut AppState) {
         // The remaining views have nothing a range operation could act on.
         _ => return,
     };
+    state.ui.picked_rows.clear();
     state.ui.mode = crate::app::AppMode::Visual;
     state.ui.visual_selection_start = Some(anchor);
 }
 
-/// Leave visual mode, dropping the anchor.
+/// Leave visual mode, dropping the anchor and any picked rows.
 pub fn exit_visual(state: &mut AppState) {
     if state.ui.mode == crate::app::AppMode::Visual {
         state.ui.mode = crate::app::AppMode::Normal;
         state.ui.status_message = None;
     }
     state.ui.visual_selection_start = None;
+    state.ui.picked_rows.clear();
     state.ui.pending_d_press = false;
 }
 
 /// Anchor the selection at `index` without entering visual mode first — the desktop's
 /// shift-click, which selects a range in one gesture.
 pub fn set_visual_anchor(state: &mut AppState, index: usize) {
+    state.ui.picked_rows.clear();
     state.ui.mode = crate::app::AppMode::Visual;
     state.ui.visual_selection_start = Some(index);
 }
 
-/// The tracks the current visual range covers, for the views that list tracks.
+/// The focused row of the views that list tracks; `None` elsewhere.
+fn focused_track_row(state: &AppState) -> Option<usize> {
+    match state.ui.active_view {
+        ActiveView::TrackList => Some(state.ui.selected_track_index),
+        ActiveView::Queue => Some(state.ui.selected_queue_index),
+        ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => {
+            Some(state.ui.selected_search_index)
+        }
+        _ => None,
+    }
+}
+
+fn focus_track_row(state: &mut AppState, index: usize) {
+    match state.ui.active_view {
+        ActiveView::TrackList => state.ui.selected_track_index = index,
+        ActiveView::Queue => state.ui.selected_queue_index = index,
+        ActiveView::SearchResults => state.ui.selected_search_index = index,
+        _ => {}
+    }
+}
+
+/// Ctrl-click (cmd-click on macOS): toggle `index` in the discontiguous pick set. The first
+/// pick also takes the focused row along, so two clicks select two rows. Picks replace any
+/// visual range; the range operations (`a`, `q`, `dd`, `l`, drags) then act on the picks.
+pub fn toggle_picked_row(state: &mut AppState, index: usize) {
+    let Some(focused) = focused_track_row(state) else {
+        return;
+    };
+    let seed = state.ui.picked_rows.is_empty() && focused != index;
+    if state.ui.mode == crate::app::AppMode::Visual {
+        state.ui.mode = crate::app::AppMode::Normal;
+        state.ui.status_message = None;
+    }
+    state.ui.visual_selection_start = None;
+    if seed {
+        state.ui.picked_rows.insert(focused);
+    }
+    if !state.ui.picked_rows.remove(&index) {
+        state.ui.picked_rows.insert(index);
+    }
+    focus_track_row(state, index);
+}
+
+pub fn clear_picks(state: &mut AppState) {
+    state.ui.picked_rows.clear();
+}
+
+/// Whether a range operation would cover more than the focused row.
+pub fn has_multi_selection(state: &AppState) -> bool {
+    !state.ui.picked_rows.is_empty() || state.get_visual_selection_range().is_some()
+}
+
+/// The rows a range operation covers, in display order: the picks, else the visual range,
+/// else the focused row alone.
+pub fn selected_rows(state: &AppState) -> Vec<usize> {
+    if !state.ui.picked_rows.is_empty() {
+        return state.ui.picked_rows.iter().copied().collect();
+    }
+    if let Some((start, end)) = state.get_visual_selection_range() {
+        return (start..=end).collect();
+    }
+    focused_track_row(state).into_iter().collect()
+}
+
+/// The track at `index` in whichever track list is showing.
+fn view_track(state: &AppState, index: usize) -> Option<Track> {
+    match state.ui.active_view {
+        ActiveView::TrackList => state.data.tracks.get(index).cloned(),
+        ActiveView::Queue => state.queue_view_track(index).cloned(),
+        ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => {
+            state.data.search_results.tracks.get(index).map(Track::from)
+        }
+        _ => None,
+    }
+}
+
+pub fn selected_tracks(state: &AppState) -> Vec<Track> {
+    selected_rows(state)
+        .into_iter()
+        .filter_map(|index| view_track(state, index))
+        .collect()
+}
+
+/// The tracks the current visual range, or the picked rows, cover in the views that list tracks.
 pub fn visual_tracks(state: &AppState) -> Vec<Track> {
+    if !state.ui.picked_rows.is_empty() {
+        return selected_tracks(state);
+    }
     let Some((start, end)) = state.get_visual_selection_range() else {
         return Vec::new();
     };
@@ -1762,9 +1851,10 @@ pub fn prompt_active(state: &AppState) -> bool {
 /// Confirms the pending prompt, performing the action or returning the worker event for it.
 pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
     if let Some(prompt) = state.ui.duplicate_prompt.take() {
-        return Some(AppEvent::AddTracksToPlaylist(
+        return Some(crate::action_menu::playlist_add_event(
             prompt.playlist_id,
             prompt.tracks,
+            prompt.position,
         ));
     }
     if let Some(folder_name) = state.ui.folder_delete_prompt.take() {
@@ -3226,5 +3316,40 @@ mod tests {
         cycle_queue_tab(&mut state);
         assert_eq!(state.ui.queue_tab, crate::app::QueueTab::Queue);
         assert_eq!(state.ui.selected_queue_index, 0);
+    }
+
+    #[test]
+    fn picks_seed_with_the_focused_row_and_drive_the_range_operations() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::TrackList;
+        state.data.tracks = (0..5).map(|ix| spotify_track(&ix.to_string())).collect();
+        state.ui.selected_track_index = 1;
+
+        toggle_picked_row(&mut state, 3);
+        assert_eq!(selected_rows(&state), vec![1, 3]);
+        assert_eq!(state.ui.selected_track_index, 3);
+        assert!(has_multi_selection(&state));
+        let ids: Vec<_> = visual_tracks(&state).into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, vec!["1", "3"]);
+
+        toggle_picked_row(&mut state, 1);
+        assert_eq!(selected_rows(&state), vec![3]);
+
+        set_visual_anchor(&mut state, 0);
+        assert!(state.ui.picked_rows.is_empty());
+        state.ui.selected_track_index = 2;
+        assert_eq!(selected_rows(&state), vec![0, 1, 2]);
+        toggle_picked_row(&mut state, 4);
+        assert!(state.get_visual_selection_range().is_none());
+        assert_eq!(selected_rows(&state), vec![2, 4]);
+
+        exit_visual(&mut state);
+        assert!(!has_multi_selection(&state));
+        assert_eq!(selected_rows(&state), vec![4]);
+
+        state.ui.active_view = ActiveView::Home;
+        assert!(selected_rows(&state).is_empty());
+        toggle_picked_row(&mut state, 0);
+        assert!(state.ui.picked_rows.is_empty());
     }
 }

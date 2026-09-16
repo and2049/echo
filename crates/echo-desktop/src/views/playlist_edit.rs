@@ -264,6 +264,7 @@ pub fn playlist_page_menu(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElemen
                                 PlaylistPageAction::Edit => "desktop.edit_details",
                                 PlaylistPageAction::Rename => "desktop.menu.rename",
                                 PlaylistPageAction::Queue => "desktop.add_to_queue",
+                                PlaylistPageAction::Refresh => "desktop.menu.refresh",
                                 PlaylistPageAction::CopyLink => "desktop.copy_link",
                                 PlaylistPageAction::Delete => "desktop.menu.delete_playlist",
                                 PlaylistPageAction::ToggleSaved => {

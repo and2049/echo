@@ -222,6 +222,10 @@ pub(crate) struct EchoApp {
     pub(crate) home_section_indices:
         std::collections::HashMap<echo_core::home::HomeShelfKind, usize>,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
+    /// The list a drag is scrolling and its pixels per frame; `None` while the pointer is away
+    /// from a list edge. The ticking task ends itself when this clears or the drag ends.
+    pub(crate) drag_scroll: Option<(DragList, f32)>,
+    pub(crate) drag_scroll_ticking: bool,
     pub(crate) playlist_modal_scroll: ScrollHandle,
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
@@ -308,6 +312,18 @@ fn mac_menus() -> Vec<gpui::Menu> {
 fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
     modifiers.secondary() || modifiers.control
 }
+
+/// The lists a drag can scroll by hovering near their edges.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DragList {
+    Tracks,
+    Library,
+}
+
+/// How close to a list edge, in pixels, a drag starts scrolling it.
+const DRAG_EDGE: f32 = 48.0;
+/// Pixels per frame at the very edge.
+const DRAG_SCROLL_MAX: f32 = 14.0;
 
 /// Byte index of the char boundary one character before `cursor` (or `cursor` at the start).
 fn prev_char_boundary(value: &str, cursor: usize) -> usize {
@@ -542,6 +558,8 @@ impl EchoApp {
             home_shelf_scrolls: std::collections::HashMap::new(),
             home_section_indices: std::collections::HashMap::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
+            drag_scroll: None,
+            drag_scroll_ticking: false,
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
@@ -748,6 +766,7 @@ impl EchoApp {
         // An armed `d` belongs to the row it was pressed on; moving off that row disarms it so
         // the second `d` can't delete something the user never pointed at.
         self.state.ui.pending_d_press = false;
+        echo_core::intent::clear_picks(&mut self.state);
         if self.state.ui.playlist_add_modal_open {
             self.state.ui.selected_playlist_modal_index = index;
             self.playlist_modal_scroll.scroll_to_item(index);
@@ -1102,7 +1121,7 @@ impl EchoApp {
         self.state.ui.pending_d_press = false;
         if echo_core::intent::prompt_active(&self.state) {
             echo_core::intent::cancel_prompt(&mut self.state);
-        } else if self.in_visual() {
+        } else if self.multi_selected() {
             // Escape drops the range before it starts walking the view history.
             echo_core::intent::exit_visual(&mut self.state);
         } else if self.context_menu.is_some() {
@@ -1537,6 +1556,70 @@ impl EchoApp {
         self.state.ui.mode == AppMode::Visual
     }
 
+    /// Whether a range action covers more than the focused row: a visual range or picked rows.
+    pub(crate) fn multi_selected(&self) -> bool {
+        echo_core::intent::has_multi_selection(&self.state)
+    }
+
+    /// Called on every drag move over a list: within [`DRAG_EDGE`] of its top or bottom edge
+    /// the list scrolls toward that edge, faster the closer the pointer gets, on a frame tick
+    /// that runs only while a drag is alive and the pointer stays near an edge.
+    pub(crate) fn drag_autoscroll(
+        &mut self,
+        list: DragList,
+        pointer_y: Pixels,
+        bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let top = f32::from(pointer_y - bounds.origin.y);
+        let bottom = f32::from(bounds.origin.y + bounds.size.height - pointer_y);
+        let speed = if top < DRAG_EDGE {
+            -((DRAG_EDGE - top.max(0.0)) / DRAG_EDGE) * DRAG_SCROLL_MAX
+        } else if bottom < DRAG_EDGE {
+            ((DRAG_EDGE - bottom.max(0.0)) / DRAG_EDGE) * DRAG_SCROLL_MAX
+        } else {
+            self.drag_scroll = None;
+            return;
+        };
+        self.drag_scroll = Some((list, speed));
+        if self.drag_scroll_ticking {
+            return;
+        }
+        self.drag_scroll_ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let keep_going = this.update(cx, |app, cx| {
+                    let Some((list, speed)) = app.drag_scroll else {
+                        return false;
+                    };
+                    if !cx.has_active_drag() {
+                        app.drag_scroll = None;
+                        return false;
+                    }
+                    let handle = match list {
+                        DragList::Tracks => &app.tracks_scroll,
+                        DragList::Library => &app.library_scroll,
+                    };
+                    let base = handle.0.borrow().base_handle.clone();
+                    let mut offset = base.offset();
+                    let lowest = -base.max_offset().y;
+                    offset.y = (offset.y - px(speed)).clamp(lowest.min(px(0.0)), px(0.0));
+                    base.set_offset(offset);
+                    cx.notify();
+                    true
+                });
+                if !matches!(keep_going, Ok(true)) {
+                    let _ = this.update(cx, |app, _| app.drag_scroll_ticking = false);
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     /// Shift-click on row `ix`: anchor at the row that was focused (unless a range is already
     /// open, which keeps its anchor) and extend the selection to `ix`.
     pub(crate) fn extend_selection_to(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -1570,7 +1653,7 @@ impl EchoApp {
     /// tracks from the current selection.
     fn add_to_playlist(&mut self, cx: &mut Context<Self>) {
         self.pending_count = None;
-        if self.in_visual() {
+        if self.multi_selected() {
             echo_core::intent::add_visual_selection_to_playlist(&mut self.state);
             cx.notify();
             return;
@@ -2113,7 +2196,7 @@ impl EchoApp {
 
     fn add_to_queue(&mut self, cx: &mut Context<Self>) {
         // In visual mode `q` queues the whole range, matching the TUI.
-        if self.in_visual() {
+        if self.multi_selected() {
             if let Some(event) = echo_core::intent::queue_visual_selection(&mut self.state) {
                 self.dispatch(event);
             }
@@ -3530,7 +3613,7 @@ impl Render for EchoApp {
             }))
             .on_action(cx.listener(|this, _: &MarkDelete, _window, cx| {
                 this.pending_count = None;
-                if this.in_visual() {
+                if this.multi_selected() {
                     echo_core::intent::delete_visual_selection(&mut this.state);
                 } else {
                     echo_core::intent::mark_selected_for_delete(&mut this.state);

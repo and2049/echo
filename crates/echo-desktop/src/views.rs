@@ -79,6 +79,15 @@ fn row_selected(ix: usize, selected: usize, visual: Option<(usize, usize)>) -> b
     ix == selected || visual.is_some_and(|(start, end)| ix >= start && ix <= end)
 }
 
+fn row_marked(
+    ix: usize,
+    selected: usize,
+    visual: Option<(usize, usize)>,
+    picked: &std::collections::BTreeSet<usize>,
+) -> bool {
+    row_selected(ix, selected, visual) || picked.contains(&ix)
+}
+
 /// Resolves a translation in the configured language. Every user-facing desktop string goes
 /// through this so `:lang` applies on the next frame, like the TUI. Missing keys fall back to
 /// English inside [`echo_core::i18n::t`].
@@ -151,10 +160,67 @@ pub(crate) struct DraggedPlaylist {
     pub name: SharedString,
 }
 
-/// Drag payload for a track row being reordered within an owned playlist.
-pub(crate) struct DraggedTrack {
-    pub from: usize,
+/// Drag payload for track rows: the whole selection when the dragged row is part of it, else
+/// that one row. `source_context` names the tracklist the rows came from, so a drop back into
+/// the same list reorders instead of copying.
+pub(crate) struct DraggedTracks {
+    pub tracks: Vec<echo_core::models::Track>,
+    pub from_row: usize,
+    pub source_context: Option<String>,
     pub name: SharedString,
+}
+
+/// The payload for dragging row `ix` of `view`: every selected track in display order when the
+/// row is one of them, otherwise just `track`.
+fn drag_payload(
+    state: &echo_core::app::AppState,
+    view: ActiveView,
+    ix: usize,
+    track: &echo_core::models::Track,
+) -> DraggedTracks {
+    let rows = if state.ui.active_view == view {
+        echo_core::intent::selected_rows(state)
+    } else {
+        Vec::new()
+    };
+    let (tracks, name) = if rows.len() > 1 && rows.contains(&ix) {
+        let tracks = echo_core::intent::selected_tracks(state);
+        let name = tr(state, "desktop.drag_songs").replace("{}", &tracks.len().to_string());
+        (tracks, SharedString::from(name))
+    } else {
+        (vec![track.clone()], SharedString::from(track.name.clone()))
+    };
+    DraggedTracks {
+        tracks,
+        from_row: ix,
+        source_context: (view == ActiveView::TrackList)
+            .then(|| {
+                state
+                    .data
+                    .active_tracklist_context
+                    .as_ref()
+                    .map(|c| c.id.clone())
+            })
+            .flatten(),
+        name,
+    }
+}
+
+/// The picked rows of `view`, when it is the one on screen.
+fn picked_in(
+    state: &echo_core::app::AppState,
+    view: ActiveView,
+) -> std::collections::BTreeSet<usize> {
+    if state.ui.active_view == view {
+        state.ui.picked_rows.clone()
+    } else {
+        std::collections::BTreeSet::new()
+    }
+}
+
+fn is_pick_click(event: &gpui::ClickEvent) -> bool {
+    let modifiers = event.modifiers();
+    modifiers.secondary() || modifiers.control
 }
 
 /// The chip that follows the cursor while a playlist is dragged.
@@ -1007,6 +1073,21 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             }
                                         },
                                     ))
+                                    .drag_over::<DraggedTracks>(move |style, _, _, _| {
+                                        style.bg(palette.drag_target)
+                                    })
+                                    .on_drop(cx.listener(
+                                        move |this: &mut EchoApp, drag: &DraggedTracks, _window, cx| {
+                                            for event in echo_core::intent::drop_tracks_on_library_row(
+                                                &mut this.state,
+                                                ix,
+                                                drag.tracks.clone(),
+                                            ) {
+                                                this.dispatch(event);
+                                            }
+                                            cx.notify();
+                                        },
+                                    ))
                                 })
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     this.state.ui.selected_playlist_index = ix;
@@ -1099,6 +1180,16 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 }),
             )
             .track_scroll(&app.library_scroll)
+            .on_drag_move(cx.listener(
+                |this: &mut EchoApp, event: &gpui::DragMoveEvent<DraggedTracks>, _window, cx| {
+                    this.drag_autoscroll(crate::DragList::Library, event.event.position.y, event.bounds, cx);
+                },
+            ))
+            .on_drag_move(cx.listener(
+                |this: &mut EchoApp, event: &gpui::DragMoveEvent<DraggedPlaylist>, _window, cx| {
+                    this.drag_autoscroll(crate::DragList::Library, event.event.position.y, event.bounds, cx);
+                },
+            ))
             .flex_grow(1.0),
         )
         .child(
@@ -2066,6 +2157,13 @@ fn track_list(
                     };
                     let selected = this.state.ui.selected_track_index;
                     let visual = visual_range_in(&this.state, ActiveView::TrackList);
+                    let picked = picked_in(&this.state, ActiveView::TrackList);
+                    let context_id = this
+                        .state
+                        .data
+                        .active_tracklist_context
+                        .as_ref()
+                        .map(|context| context.id.clone());
                     let playing_id = this.state.playback.playing_track_id.clone();
                     let secondary = theme.secondary.gpui(WINDOW_FG());
                     // On an album page every row shares the album in the header, so the
@@ -2105,34 +2203,45 @@ fn track_list(
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
-                            let drag_name = SharedString::from(track.name.clone());
+                            let payload = drag_payload(&this.state, ActiveView::TrackList, ix, &track);
+                            let border = palette.menu_border;
+                            let over_context = context_id.clone();
+                            let drop_context = context_id.clone();
 
-                            pill_row(ix, TRACK_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover, |row| {
+                            pill_row(ix, TRACK_PILL, row_marked(ix, selected, visual, &picked), selected_bg, palette.row_hover, |row| {
                                 row.gap_3().group("track-row")
+                                .on_drag(
+                                    payload,
+                                    move |drag, _offset, _window, cx| {
+                                        let name = drag.name.clone();
+                                        cx.new(|_| DragPreview {
+                                            name,
+                                            fg,
+                                            bg: panel_bg,
+                                            border,
+                                        })
+                                    },
+                                )
                                 .when(reorderable, |row| {
-                                    let border = palette.menu_border;
-                                    row.on_drag(
-                                        DraggedTrack { from: ix, name: drag_name },
-                                        move |drag, _offset, _window, cx| {
-                                            let name = drag.name.clone();
-                                            cx.new(|_| DragPreview {
-                                                name,
-                                                fg,
-                                                bg: panel_bg,
-                                                border,
-                                            })
-                                        },
-                                    )
-                                    .drag_over::<DraggedTrack>(move |style, _, _, _| {
-                                        style.bg(palette.drag_target)
+                                    row.drag_over::<DraggedTracks>(move |style, drag, _, _| {
+                                        if drag.source_context == over_context {
+                                            style.bg(palette.drag_target)
+                                        } else {
+                                            style.border_t_2().border_color(accent)
+                                        }
                                     })
                                     .on_drop(cx.listener(
-                                        move |this: &mut EchoApp, drag: &DraggedTrack, _window, cx| {
+                                        move |this: &mut EchoApp, drag: &DraggedTracks, _window, cx| {
+                                            let same_list = drag.source_context == drop_context;
+                                            if same_list && drag.tracks.len() > 1 {
+                                                return;
+                                            }
                                             if let Some(event) =
-                                                echo_core::intent::move_track_in_playlist(
+                                                echo_core::intent::drop_tracks_in_tracklist(
                                                     &mut this.state,
-                                                    drag.from,
-                                                    ix,
+                                                    drag.tracks.clone(),
+                                                    same_list.then_some(drag.from_row),
+                                                    Some(ix),
                                                 )
                                             {
                                                 this.dispatch(event);
@@ -2148,8 +2257,13 @@ fn track_list(
                                         this.extend_selection_to(ix, cx);
                                         return;
                                     }
-                                    this.state.ui.selected_track_index = ix;
                                     this.state.ui.active_view = ActiveView::TrackList;
+                                    if is_pick_click(event) {
+                                        echo_core::intent::toggle_picked_row(&mut this.state, ix);
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.state.ui.selected_track_index = ix;
                                     if event.click_count() >= 2
                                         && let Some(event) =
                                             echo_core::intent::play_track_at(&mut this.state, ix)
@@ -2289,6 +2403,31 @@ fn track_list(
                 }),
             )
             .track_scroll(&app.tracks_scroll)
+            .on_drag_move(cx.listener(
+                |this: &mut EchoApp, event: &gpui::DragMoveEvent<DraggedTracks>, _window, cx| {
+                    this.drag_autoscroll(crate::DragList::Tracks, event.event.position.y, event.bounds, cx);
+                },
+            ))
+            .on_drop(cx.listener(
+                |this: &mut EchoApp, drag: &DraggedTracks, _window, cx| {
+                    // A drop past the last row appends; drops on rows never reach here.
+                    let same_list = drag.source_context.is_some()
+                        && drag.source_context
+                            == this.state.data.active_tracklist_context.as_ref().map(|c| c.id.clone());
+                    if same_list && drag.tracks.len() > 1 {
+                        return;
+                    }
+                    if let Some(event) = echo_core::intent::drop_tracks_in_tracklist(
+                        &mut this.state,
+                        drag.tracks.clone(),
+                        same_list.then_some(drag.from_row),
+                        None,
+                    ) {
+                        this.dispatch(event);
+                    }
+                    cx.notify();
+                },
+            ))
             .flex_grow(1.0)
             .into_any_element()
         })
@@ -2353,7 +2492,10 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let secondary = theme.secondary.gpui(WINDOW_FG());
                     let selected = this.state.ui.selected_queue_index;
                     let visual = visual_range_in(&this.state, ActiveView::Queue);
+                    let picked = picked_in(&this.state, ActiveView::Queue);
                     let has_manual = !this.state.data.manual_queue.is_empty();
+                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
+                    let border = palette.menu_border;
                     let rows = this.state.queue_rows();
 
                     range
@@ -2368,12 +2510,22 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             QueueRow::Track(ix, track) => {
                             let (ix, track) = (*ix, *track);
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
+                            let payload = drag_payload(&this.state, ActiveView::Queue, ix, track);
 
-                            pill_row(ix, COMPACT_PILL, row_selected(ix, selected, visual), selected_bg, palette.row_hover, |row| {
+                            pill_row(ix, COMPACT_PILL, row_marked(ix, selected, visual, &picked), selected_bg, palette.row_hover, |row| {
                                 row.gap_3()
+                                .on_drag(payload, move |drag, _offset, _window, cx| {
+                                    let name = drag.name.clone();
+                                    cx.new(|_| DragPreview { name, fg, bg: panel_bg, border })
+                                })
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     if event.modifiers().shift {
                                         this.extend_selection_to(ix, cx);
+                                        return;
+                                    }
+                                    if is_pick_click(event) {
+                                        echo_core::intent::toggle_picked_row(&mut this.state, ix);
+                                        cx.notify();
                                         return;
                                     }
                                     this.state.ui.selected_queue_index = ix;
@@ -2532,6 +2684,9 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 let secondary = theme.secondary.gpui(WINDOW_FG());
                 let selected = this.state.ui.selected_queue_index;
                 let visual = visual_range_in(&this.state, ActiveView::Queue);
+                let picked = picked_in(&this.state, ActiveView::Queue);
+                let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
+                let border = palette.menu_border;
                 let ago = |played_at: &str| {
                     echo_core::context_details::format_added_at_with(
                         std::time::SystemTime::now().into(),
@@ -2552,15 +2707,25 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                         let track = &record.track;
                         let is_liked = this.state.data.liked_tracks.contains(&track.id);
                         let played = ago(&record.played_at);
+                        let payload = drag_payload(&this.state, ActiveView::Queue, ix, track);
 
                         pill_row(
                             ix,
                             COMPACT_PILL,
-                            row_selected(ix, selected, visual),
+                            row_marked(ix, selected, visual, &picked),
                             palette.row_selected,
                             palette.row_hover,
                             |row| {
                                 row.gap_3()
+                                    .on_drag(payload, move |drag, _offset, _window, cx| {
+                                        let name = drag.name.clone();
+                                        cx.new(|_| DragPreview {
+                                            name,
+                                            fg,
+                                            bg: panel_bg,
+                                            border,
+                                        })
+                                    })
                                     .on_click(cx.listener(
                                         move |this: &mut EchoApp,
                                               event: &gpui::ClickEvent,
@@ -2568,6 +2733,14 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                               cx| {
                                             if event.modifiers().shift {
                                                 this.extend_selection_to(ix, cx);
+                                                return;
+                                            }
+                                            if is_pick_click(event) {
+                                                echo_core::intent::toggle_picked_row(
+                                                    &mut this.state,
+                                                    ix,
+                                                );
+                                                cx.notify();
                                                 return;
                                             }
                                             this.state.ui.selected_queue_index = ix;
