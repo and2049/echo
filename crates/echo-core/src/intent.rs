@@ -870,6 +870,20 @@ pub fn play_artist_top_track(state: &mut AppState, index: usize) -> Option<AppEv
     play_event_with_target(&track, target)
 }
 
+/// The Popular row under the artist page cursor, `None` once the cursor has moved down into
+/// the albums section (the two share one index space, Popular rows first).
+pub fn selected_artist_top_track(state: &AppState) -> Option<&Track> {
+    if state.ui.active_view != ActiveView::ArtistPage {
+        return None;
+    }
+    state
+        .data
+        .artist_page_data
+        .as_ref()?
+        .top_tracks
+        .get(state.ui.artist_page_album_index)
+}
+
 /// Backs out of an artist page to the artist list, cancelling any in-flight page load.
 pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
     state.ui.active_view = ActiveView::ArtistList;
@@ -1016,7 +1030,8 @@ pub fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
     None
 }
 
-/// `q`: append the selected track (track list or search tracks tab) to the playback queue.
+/// `q`: append the selected track (track list, search tracks tab or artist Popular row) to
+/// the playback queue.
 pub fn queue_selected_track(state: &AppState) -> Option<AppEvent> {
     let track_id = match state.ui.active_view {
         ActiveView::TrackList => state
@@ -1024,6 +1039,7 @@ pub fn queue_selected_track(state: &AppState) -> Option<AppEvent> {
             .tracks
             .get(state.ui.selected_track_index)
             .map(|t| t.id.clone()),
+        ActiveView::ArtistPage => selected_artist_top_track(state).map(|t| t.id.clone()),
         ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => state
             .data
             .search_results
@@ -2265,6 +2281,19 @@ mod tests {
             artist_id: None,
             artists: Vec::new(),
         }
+    }
+
+    #[test]
+    fn queueing_on_the_artist_page_takes_the_popular_row_under_the_cursor() {
+        let mut state = artist_page_with(&["t0", "t1"], 2);
+        state.ui.artist_page_album_index = 1;
+        assert!(
+            matches!(queue_selected_track(&state), Some(AppEvent::AddToQueue(ids)) if ids == ["t1"])
+        );
+        state.ui.artist_page_album_index = 2;
+        assert!(queue_selected_track(&state).is_none());
+        state.ui.active_view = ActiveView::ArtistList;
+        assert!(selected_artist_top_track(&state).is_none());
     }
 
     fn artist_page_with(top_ids: &[&str], album_count: usize) -> AppState {

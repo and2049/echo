@@ -1447,6 +1447,7 @@ impl EchoApp {
         let row = match ui.active_view {
             ActiveView::TrackList => data.tracks.get(ui.selected_track_index),
             ActiveView::Queue => self.state.queue_view_track(ui.selected_queue_index),
+            ActiveView::ArtistPage => echo_core::intent::selected_artist_top_track(&self.state),
             ActiveView::SearchResults
                 if ui.active_search_tab == echo_core::app::SearchTab::Tracks =>
             {

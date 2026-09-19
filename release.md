@@ -6,7 +6,9 @@
  - Ctrl-click (cmd-click on macOS) picks several rows, and the whole selection can be dragged to a sidebar playlist, dropped on Liked Songs, or dropped between the rows of an editable playlist to insert it there; lists scroll while a drag hovers near their edge
  - Add Refresh to the playlist and album page menu
  - Add `:clearhistory` to forget the local play history
+ - Right-click and `q` / `shift-a` now work on the Popular rows of an artist page
 
 ### Terminal client
  - The last session is restored paused on launch and starts again from its position
  - The queue view gains a Recent tab (`tab` switches) with the local play history
+ - `q` and `A` act on the Popular rows of an artist page

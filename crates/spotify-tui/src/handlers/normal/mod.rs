@@ -286,6 +286,8 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
                 && let Some(t) = state.queue_view_track(state.ui.selected_queue_index)
             {
                 Some(echo_core::models::ActionMenuContext::from(t))
+            } else if let Some(t) = echo_core::intent::selected_artist_top_track(state) {
+                Some(echo_core::models::ActionMenuContext::from(t))
             } else if state.ui.active_view == ActiveView::SearchResults
                 && state.ui.active_search_tab == echo_core::app::SearchTab::Tracks
                 && state.ui.selected_search_index < state.data.search_results.tracks.len()

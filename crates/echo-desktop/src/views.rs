@@ -3926,6 +3926,22 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                 cx.notify();
                                             },
                                         ))
+                                        .on_mouse_down(
+                                            MouseButton::Right,
+                                            cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                                this.state.ui.artist_page_album_index = ix;
+                                                this.context_menu = None;
+                                                if let Some(ctx) = this.action_target() {
+                                                    this.track_menu = Some(crate::TrackMenuState {
+                                                        ctx,
+                                                        position: Some(event.position),
+                                                        selected: 0,
+                                                        submenu: None,
+                                                    });
+                                                }
+                                                cx.notify();
+                                            }),
+                                        )
                                         .when_some(
                                             row_number(&this.state, ix, selected),
                                             |row, number| {
