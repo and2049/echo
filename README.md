@@ -186,7 +186,7 @@ echo is heavily keyboard-driven.
 - `=` / `-`: Volume Up / Down (by 1%)
 - `+` / `_`: Volume Up / Down (by 5%)
 - `D` (Shift + d): Open Device Selection menu
-- `L` (Shift + l): Toggle full-screen Synced Lyrics modal
+- `L` (Shift + l): Toggle synced lyrics (a panel docked on the right in the desktop app, a full-screen modal in the terminal)
 - `Ctrl + Shift + L`: Toggle condensed Synced Lyrics view
 
 ### Track & Library Actions
@@ -195,7 +195,7 @@ echo is heavily keyboard-driven.
 - `p`: paste a cut playlist into a folder
 - `a`: Add selected track to playlist / Add selected album to library
 - `q`: Add currently hovered track to Queue
-- `Q` (Shift + q): Open Queue view
+- `Q` (Shift + q): Open Queue view (the desktop app's playback-bar queue button docks the queue on the right instead)
 - `m`: Pin / Unpin a playlist
 - `T` (Shift + t): Toggle library thumbnails (cover art next to playlist / album names)
 - `c`: Quick shortcut to create a new playlist

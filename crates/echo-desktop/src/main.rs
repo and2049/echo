@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab, SearchTab};
 use echo_core::apply_worker_event::apply_worker_event;
+use echo_core::config::RightPanel;
 use echo_core::events::AppEvent;
 use gpui::{
     App, Bounds, Context, Div, Entity, FocusHandle, Hsla, KeyBinding, Pixels, QuitMode,
@@ -222,6 +223,10 @@ pub(crate) struct EchoApp {
     pub(crate) home_section_indices:
         std::collections::HashMap<echo_core::home::HomeShelfKind, usize>,
     pub(crate) lyrics_scroll: UniformListScrollHandle,
+    pub(crate) queue_panel_scroll: UniformListScrollHandle,
+    /// The docked queue or lyrics column beside the main area; mirrored into the core's
+    /// `queue_panel_open` so the queue keeps refreshing, and saved with the library config.
+    pub(crate) right_panel: Option<RightPanel>,
     /// The list a drag is scrolling and its pixels per frame; `None` while the pointer is away
     /// from a list edge. The ticking task ends itself when this clears or the drag ends.
     pub(crate) drag_scroll: Option<(DragList, f32)>,
@@ -533,6 +538,11 @@ impl EchoApp {
             .sidebar_width
             .unwrap_or(views::SIDEBAR_WIDTH);
         let sidebar_collapsed = state.ui.library_config.sidebar_collapsed.unwrap_or(false);
+        let right_panel = state.ui.library_config.right_panel;
+        state.ui.queue_panel_open = right_panel == Some(RightPanel::Queue);
+        if state.ui.queue_panel_open {
+            let _ = app_tx.send(AppEvent::FetchQueue);
+        }
 
         Self {
             state,
@@ -561,6 +571,8 @@ impl EchoApp {
             home_shelf_scrolls: std::collections::HashMap::new(),
             home_section_indices: std::collections::HashMap::new(),
             lyrics_scroll: UniformListScrollHandle::new(),
+            queue_panel_scroll: UniformListScrollHandle::new(),
+            right_panel,
             drag_scroll: None,
             drag_scroll_ticking: false,
             playlist_modal_scroll: ScrollHandle::new(),
@@ -1072,7 +1084,8 @@ impl EchoApp {
     }
 
     /// Opening the queue leaves the immersive view, which has nowhere to show it.
-    pub(crate) fn toggle_queue(&mut self, cx: &mut Context<Self>) {
+    /// `shift-Q`: the full-page, keyboard-navigable queue view (the TUI's `Q`).
+    pub(crate) fn toggle_queue_view(&mut self, cx: &mut Context<Self>) {
         if self.state.ui.active_view == ActiveView::Queue {
             // Mirrors the TUI's `q` from the queue view.
             self.state.ui.active_view = ActiveView::Library;
@@ -1084,6 +1097,25 @@ impl EchoApp {
         cx.notify();
     }
 
+    /// Opens, closes or swaps the docked panel. Opening the queue fetches it once; the core's
+    /// `queue_visible` keeps it fresh from there.
+    pub(crate) fn set_right_panel(&mut self, panel: Option<RightPanel>, cx: &mut Context<Self>) {
+        self.right_panel = panel;
+        self.state.ui.library_config.right_panel = panel;
+        self.state.save_library_config();
+        let queue_open = panel == Some(RightPanel::Queue);
+        if queue_open && !self.state.ui.queue_panel_open {
+            self.dispatch(AppEvent::FetchQueue);
+        }
+        self.state.ui.queue_panel_open = queue_open;
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_right_panel(&mut self, panel: RightPanel, cx: &mut Context<Self>) {
+        let next = (self.right_panel != Some(panel)).then_some(panel);
+        self.set_right_panel(next, cx);
+    }
+
     fn open_devices(&mut self, cx: &mut Context<Self>) {
         let event = echo_core::intent::open_device_picker(&mut self.state);
         self.dispatch(event);
@@ -1091,8 +1123,7 @@ impl EchoApp {
     }
 
     fn toggle_lyrics(&mut self, cx: &mut Context<Self>) {
-        self.state.ui.lyrics_modal_open = !self.state.ui.lyrics_modal_open;
-        cx.notify();
+        self.toggle_right_panel(RightPanel::Lyrics, cx);
     }
 
     pub(crate) fn toggle_immersive(&mut self, cx: &mut Context<Self>) {
@@ -1161,8 +1192,6 @@ impl EchoApp {
             self.settings_open = false;
         } else if self.help_open {
             self.help_open = false;
-        } else if self.state.ui.lyrics_modal_open {
-            self.state.ui.lyrics_modal_open = false;
         } else if self.immersive {
             self.immersive = false;
         } else if self.history_back(cx) {
@@ -2029,7 +2058,6 @@ impl EchoApp {
             || self.sort_menu_open
             || self.settings_open
             || self.help_open
-            || self.state.ui.lyrics_modal_open
     }
 
     /// Backspace: close the topmost overlay if one is open, else hand keyboard focus back to
@@ -2787,16 +2815,38 @@ impl EchoApp {
         } else {
             "icons/volume-high.svg"
         };
-        let queue_color = if self.state.ui.active_view == ActiveView::Queue {
+        let queue_color = if self.right_panel == Some(RightPanel::Queue) {
             accent
         } else {
             muted
         };
-        let lyrics_color = if self.state.ui.lyrics_modal_open {
+        let lyrics_color = if self.right_panel == Some(RightPanel::Lyrics) {
             accent
         } else {
             muted
         };
+        let secondary = theme.secondary.gpui(WINDOW_FG());
+        let liked_button = playback
+            .playing_track_id
+            .clone()
+            .filter(|_| {
+                playback.playing_track_source == Some(echo_core::models::TrackSource::Spotify)
+            })
+            .map(|track_id| {
+                let liked = self.state.data.liked_tracks.contains(&track_id);
+                playing_like_button(track_id, liked, secondary, palette.like_dim, cx)
+            });
+        // Playback on another Connect device (a phone, a speaker) gets a pill naming it;
+        // echo's own device and local files are the norm and stay unlabelled.
+        let playing_on: Option<SharedString> = (has_track
+            && playback.device_name != echo_core::worker::audio::DEVICE_NAME
+            && playback.device_name != "Local"
+            && !playback.device_name.is_empty())
+        .then(|| {
+            views::tr(&self.state, "desktop.playing_on")
+                .replace("{}", &playback.device_name)
+                .into()
+        });
         let visualizer_bands = (self.state.ui.library_config.enable_visualizer
             && self.state.playback.is_playing)
             .then(|| self.state.playback.audio_visualization.clone())
@@ -2937,7 +2987,8 @@ impl EchoApp {
                                         )
                                         .text_xs(),
                                     ),
-                            ),
+                            )
+                            .children(liked_button),
                     )
                     .child(
                         div()
@@ -2990,6 +3041,44 @@ impl EchoApp {
                             .flex_row()
                             .items_center()
                             .justify_end()
+                            .gap_3()
+                            .when_some(playing_on, |el, label| {
+                                el.child(
+                                    div()
+                                        .id("playing-on")
+                                        .flex_none()
+                                        .max_w(px(160.0))
+                                        .px_2()
+                                        .py_1()
+                                        .rounded_full()
+                                        .border_1()
+                                        .border_color(accent)
+                                        .flex()
+                                        .flex_row()
+                                        .items_center()
+                                        .gap_1()
+                                        .cursor_pointer()
+                                        .hover(move |style| style.bg(palette.wash))
+                                        .on_click(cx.listener(|this, _event, _window, cx| {
+                                            this.open_devices(cx)
+                                        }))
+                                        .child(
+                                            svg()
+                                                .path("icons/computer.svg")
+                                                .size(px(12.0))
+                                                .text_color(accent),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(accent)
+                                                .whitespace_nowrap()
+                                                .text_ellipsis()
+                                                .overflow_hidden()
+                                                .child(label),
+                                        ),
+                                )
+                            })
                             .when_some(visualizer_bands, |el, bands| {
                                 // The engine always fills 32 bands, 0–100; they are averaged down
                                 // to the configured bin count (`:visbins`, same math as the TUI)
@@ -3073,7 +3162,7 @@ impl EchoApp {
                                 queue_color,
                                 palette.wash,
                                 cx,
-                                |this, cx| this.toggle_queue(cx),
+                                |this, cx| this.toggle_right_panel(RightPanel::Queue, cx),
                             ))
                             .child(icon_button(
                                 "devices",
@@ -3169,6 +3258,43 @@ pub(crate) fn sort_arg(sort: echo_core::app::TrackSort) -> &'static str {
         TrackSort::Added => "added",
         TrackSort::AddedBy => "addedby",
     }
+}
+
+/// The playback bar's heart for the playing track: the list rows' liked cell at bar size.
+fn playing_like_button(
+    track_id: String,
+    liked: bool,
+    color: Hsla,
+    dim: Hsla,
+    cx: &mut Context<EchoApp>,
+) -> gpui::Stateful<Div> {
+    div()
+        .id("playing-like")
+        .group("playing-like")
+        .flex_none()
+        .w(px(24.0))
+        .h(px(24.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _event, _window, cx| {
+            if let Some(event) =
+                echo_core::intent::toggle_like_track(&mut this.state, track_id.clone())
+            {
+                this.dispatch(event);
+            }
+            cx.notify();
+        }))
+        .child(
+            svg()
+                .path("icons/heart.svg")
+                .size(px(14.0))
+                .text_color(if liked { color } else { dim })
+                .when(!liked, |el| {
+                    el.group_hover("playing-like", move |style| style.text_color(color))
+                }),
+        )
 }
 
 /// The playing track's title or artist as a link: clicking jumps to the album or artist page
@@ -3479,11 +3605,6 @@ impl Render for EchoApp {
             }
             _ => None,
         };
-        let lyrics_modal = self
-            .state
-            .ui
-            .lyrics_modal_open
-            .then(|| views::lyrics_modal(self, cx).into_any_element());
         let theme_modal = self
             .theme_modal_open
             .then(|| views::theme_modal(self, cx).into_any_element());
@@ -3696,7 +3817,7 @@ impl Render for EchoApp {
             .on_action(
                 cx.listener(|this, _: &SeekBackward, _window, cx| this.seek_relative(-5, cx)),
             )
-            .on_action(cx.listener(|this, _: &ToggleQueue, _window, cx| this.toggle_queue(cx)))
+            .on_action(cx.listener(|this, _: &ToggleQueue, _window, cx| this.toggle_queue_view(cx)))
             .on_action(cx.listener(|this, _: &OpenDevices, _window, cx| this.open_devices(cx)))
             .on_action(cx.listener(|this, _: &Dismiss, _window, cx| this.dismiss(cx)))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
@@ -3819,7 +3940,10 @@ impl Render for EchoApp {
                             .when(!self.sidebar_collapsed, |el| {
                                 el.child(views::sidebar(self, cx))
                             })
-                            .child(views::main_area(self, window, cx)),
+                            .child(views::main_area(self, window, cx))
+                            .when_some(self.right_panel, |el, panel| {
+                                el.child(views::right_panel(self, panel, cx))
+                            }),
                     )
                     .when_some(status_line, |el, line| el.child(line))
                 }
@@ -3828,7 +3952,6 @@ impl Render for EchoApp {
             .when_some(audio_banner, |el, banner| el.child(banner))
             .when_some(update_banner, |el, banner| el.child(banner))
             .when(!self.immersive, |el| el.child(self.render_playback_bar(cx)))
-            .when_some(lyrics_modal, |el, modal| el.child(modal))
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
             .when_some(playlist_add_modal, |el, modal| el.child(modal))

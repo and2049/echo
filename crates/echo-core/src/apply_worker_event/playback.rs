@@ -183,7 +183,7 @@ fn apply_synced_playback_item(
 
     if track_changed {
         state.playback.previous_track_image = state.playback.playing_track_image.take();
-        if state.ui.active_view == crate::app::ActiveView::Queue {
+        if state.queue_visible() {
             let _ = app_tx.send(AppEvent::FetchQueue);
         }
 

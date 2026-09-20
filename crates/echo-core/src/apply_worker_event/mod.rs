@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 
 use crate::{
-    app::{self, AppState},
+    app::AppState,
     events::{AppEvent, WorkerEvent},
 };
 
@@ -153,7 +153,7 @@ pub fn apply_worker_event(
         WorkerEvent::DevicesLoaded(devices) => data::handle_devices_loaded(state, devices),
         WorkerEvent::TracksQueued(ids) => {
             data::handle_tracks_queued(state, ids);
-            if state.ui.active_view == app::ActiveView::Queue {
+            if state.queue_visible() {
                 let _ = app_tx.send(AppEvent::FetchQueue);
             }
         }
@@ -218,7 +218,7 @@ mod tests {
             "owner".to_string(),
             None,
         );
-        state.ui.active_view = app::ActiveView::TrackList;
+        state.ui.active_view = crate::app::ActiveView::TrackList;
         state.data.active_tracklist_context = Some(context.clone());
 
         apply_worker_event(

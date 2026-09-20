@@ -12,6 +12,8 @@
  - The followed-artists list is no longer cut off at 50 artists
  - Artist portraits that are not square are cropped to a circle instead of being squeezed into an oval; album art fills its box the same way
  - The scrollbars under the Home shelves use the seek bar's colors so they are visible, and dragging one keeps scrolling wherever the pointer wanders while the button is held
+ - The queue and the lyrics now dock in a panel on the right instead of the lyrics popover: the playback bar's queue and microphone buttons (and `shift-L`) open them, the panel remembers itself across launches, and `shift-Q` still opens the full-page queue for keyboard use
+ - The playback bar gets a like button for the playing track and a "Playing on {device}" pill when playback is on another Connect device (click it to pick a device)
 
 ### Terminal client
  - The last session is restored paused on launch and starts again from its position

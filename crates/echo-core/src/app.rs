@@ -52,6 +52,9 @@ pub struct UIState {
     pub duplicate_prompt: Option<crate::intent::DuplicatePrompt>,
     pub device_modal_open: bool,
     pub lyrics_modal_open: bool,
+    /// The desktop's docked queue panel is showing, so the queue is kept fresh the way the
+    /// full queue view is.
+    pub queue_panel_open: bool,
     pub action_menu_open: bool,
     pub action_menu_context: Option<ActionMenuContext>,
     pub visual_selection_start: Option<usize>,
@@ -136,6 +139,7 @@ impl UIState {
             duplicate_prompt: None,
             device_modal_open: false,
             lyrics_modal_open: false,
+            queue_panel_open: false,
             action_menu_open: false,
             action_menu_context: None,
             visual_selection_start: None,
@@ -411,6 +415,12 @@ impl AppState {
         self.queue_rows()
             .iter()
             .position(|row| matches!(row, QueueRow::Track(ix, _) if *ix == track_index))
+    }
+
+    /// Whether the queue is on screen somewhere that should follow playback: the full queue
+    /// view or the desktop's docked panel.
+    pub fn queue_visible(&self) -> bool {
+        self.ui.active_view == ActiveView::Queue || self.ui.queue_panel_open
     }
 
     /// The rows of whichever queue tab is showing: the live queue, or the recent plays.

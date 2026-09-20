@@ -436,6 +436,9 @@ pub struct LibraryConfig {
     pub sidebar_width: Option<f32>,
     #[serde(default)]
     pub sidebar_collapsed: Option<bool>,
+    /// The desktop app's docked right-hand panel, if one was open when it last closed.
+    #[serde(default)]
+    pub right_panel: Option<RightPanel>,
     #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
     /// The desktop close button hides the window to the tray and keeps playing. Ignored by
@@ -532,6 +535,7 @@ impl Default for LibraryConfig {
             immersive_backdrop: BackdropMode::default(),
             sidebar_width: None,
             sidebar_collapsed: None,
+            right_panel: None,
             window_bounds: None,
             close_to_tray: true,
             top_items_range: crate::models::TopItemsRange::default(),
@@ -553,6 +557,14 @@ pub enum SortMode {
     Default,
     Alphabetical,
     Creator,
+}
+
+/// What the desktop app docks to the right of the main area. Ignored by the TUI.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RightPanel {
+    Queue,
+    Lyrics,
 }
 
 /// The backdrop modes the desktop app's immersive view can paint; the desktop crate owns the

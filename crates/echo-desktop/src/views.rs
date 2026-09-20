@@ -11,6 +11,7 @@
 //! which applies here.
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, QueueTab, SearchTab};
+use echo_core::config::RightPanel;
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
 mod playlist_edit;
@@ -4278,7 +4279,7 @@ fn lyric_status(app: &EchoApp, muted: Hsla) -> Option<AnyElement> {
     )
 }
 
-/// The modal's lyric list: every line, scrolled so the current one (by playback position) sits
+/// The panel's lyric list: every line, scrolled so the current one (by playback position) sits
 /// at the center whenever the list is long enough to allow it.
 fn lyric_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
     let lines = app
@@ -4316,7 +4317,7 @@ fn lyric_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         lyric_row(
                             text.into(),
                             colors.line(ix, current),
-                            MODAL_LYRIC_ROW,
+                            PANEL_LYRIC_ROW,
                             false,
                         )
                         .id(ix)
@@ -4377,55 +4378,293 @@ fn lyric_window(app: &EchoApp, colors: LyricColors, rows: usize, row_height: f32
         .into_any_element()
 }
 
-const MODAL_LYRIC_ROW: f32 = 26.0;
+const PANEL_LYRIC_ROW: f32 = 26.0;
 const LYRIC_GLIDE: std::time::Duration = std::time::Duration::from_millis(240);
+pub(crate) const RIGHT_PANEL_WIDTH: f32 = 320.0;
 
-/// The lyrics overlay: [`lyric_list`] in a centered panel titled with the track.
-pub fn lyrics_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+/// The docked column to the right of the main area: the queue or the lyrics, whichever the
+/// playback bar's buttons (or `shift-L`) opened. Persistent UI rather than an overlay, so
+/// escape leaves it alone and it comes back on the next launch.
+pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoApp>) -> AnyElement {
     let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
-    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
-    let body = lyric_status(app, muted).unwrap_or_else(|| lyric_list(app, cx));
+    let title = match panel {
+        RightPanel::Queue => tr(&app.state, "ui.queue"),
+        RightPanel::Lyrics => tr(&app.state, "desktop.lyrics_panel"),
+    };
+    let subtitle: Option<SharedString> = match panel {
+        RightPanel::Queue => None,
+        RightPanel::Lyrics => (!app.state.playback.playing_track_title.is_empty())
+            .then(|| app.state.playback.playing_track_title.clone().into()),
+    };
+    let body = match panel {
+        RightPanel::Queue => queue_panel_body(app, cx),
+        RightPanel::Lyrics => lyric_status(app, muted).unwrap_or_else(|| lyric_list(app, cx)),
+    };
 
     div()
-        .id("lyrics-backdrop")
-        .absolute()
-        .inset_0()
-        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .id("right-panel")
+        .flex_none()
+        .w(px(RIGHT_PANEL_WIDTH))
+        .h_full()
         .flex()
-        .items_center()
-        .justify_center()
-        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-            this.state.ui.lyrics_modal_open = false;
-            cx.notify();
-        }))
+        .flex_col()
+        .overflow_hidden()
+        .border_l_1()
+        .border_color(palette.border)
         .child(
             div()
-                .id("lyrics-panel")
-                .w(px(520.0))
-                .h(px(480.0))
-                .rounded_lg()
-                .border_1()
-                .border_color(DesktopPalette::resolve(&app.state.ui.active_theme).menu_border)
-                .bg(surface)
-                .p_3()
+                .flex_none()
+                .pl_4()
+                .pr_2()
+                .py_2()
                 .flex()
-                .flex_col()
-                .overflow_hidden()
-                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .flex_row()
+                .items_center()
+                .gap_2()
                 .child(
                     div()
-                        .pb_2()
-                        .text_sm()
-                        .text_color(fg)
-                        .child(SharedString::from(
-                            tr(&app.state, "desktop.lyrics_title")
-                                .replace("{}", &app.state.playback.playing_track_title),
-                        )),
+                        .flex_grow(1.0)
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(gpui::FontWeight::BOLD)
+                                .text_color(fg)
+                                .child(title),
+                        )
+                        .when_some(subtitle, |el, subtitle| {
+                            el.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .overflow_hidden()
+                                    .child(subtitle),
+                            )
+                        }),
                 )
-                .child(body),
+                .child(crate::icon_button(
+                    "right-panel-close",
+                    "icons/win-close.svg",
+                    muted,
+                    palette.wash,
+                    cx,
+                    |this, cx| this.set_right_panel(None, cx),
+                )),
         )
+        .child(body)
+        .into_any_element()
+}
+
+/// The queue panel: the playing track on top, then the same rows as the full queue view in a
+/// narrower two-line layout. Double-click plays a row, right-click opens its track menu; the
+/// keyboard-driven selection stays with the full view.
+fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
+    let theme = &app.state.ui.active_theme;
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let palette = DesktopPalette::resolve(theme);
+    let playback = &app.state.playback;
+    let now_playing = playback.playing_track_id.is_some().then(|| {
+        (
+            SharedString::from(playback.playing_track_title.clone()),
+            SharedString::from(playback.playing_track_artist.clone()),
+            playback
+                .playing_track_image
+                .as_ref()
+                .or(playback.previous_track_image.as_ref())
+                .cloned()
+                .and_then(|artwork| app.images.get(&artwork)),
+        )
+    });
+    let row_count = app.state.queue_rows().len();
+
+    div()
+        .flex_grow(1.0)
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .when_some(now_playing, |el, (title, artist, cover)| {
+            el.child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(tr(&app.state, "desktop.now_playing")),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .mx_2()
+                    .px_2()
+                    .h(px(TRACK_PILL.pill_height))
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .child(match cover {
+                        Some(image) => img(image)
+                            .object_fit(gpui::ObjectFit::Cover)
+                            .flex_none()
+                            .size(px(32.0))
+                            .rounded_sm()
+                            .into_any_element(),
+                        None => div()
+                            .flex_none()
+                            .size(px(32.0))
+                            .rounded_sm()
+                            .bg(palette.wash)
+                            .into_any_element(),
+                    })
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_grow(1.0)
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(accent)
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .overflow_hidden()
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(muted)
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .overflow_hidden()
+                                    .child(artist),
+                            ),
+                    ),
+            )
+        })
+        .child(if row_count == 0 {
+            div()
+                .flex_grow(1.0)
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(muted)
+                .child(tr(&app.state, "desktop.queue_empty"))
+                .into_any_element()
+        } else {
+            uniform_list(
+                "queue-panel-rows",
+                row_count,
+                cx.processor(move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                    let theme = &this.state.ui.active_theme;
+                    let fg = theme.text.gpui(WINDOW_FG());
+                    let muted = theme.text_muted.gpui(WINDOW_FG());
+                    let palette = DesktopPalette::resolve(theme);
+                    let has_manual = !this.state.data.manual_queue.is_empty();
+                    // Cloned out first: the rows borrow the state the thumbnails below mutate.
+                    let rows: Vec<(usize, Option<String>, Option<echo_core::models::Track>)> = {
+                        let rows = this.state.queue_rows();
+                        range
+                            .map(|row_ix| match &rows[row_ix] {
+                                QueueRow::Header(text) => (row_ix, Some(text.clone()), None),
+                                QueueRow::Track(ix, track) => (*ix, None, Some((*track).clone())),
+                            })
+                            .collect()
+                    };
+
+                    rows.into_iter()
+                        .map(|(ix, header, track)| {
+                            if let Some(text) = header {
+                                return queue_header(
+                                    text,
+                                    (ix == 0 && has_manual).then(|| tr(&this.state, "actions.clear_queue")),
+                                    fg,
+                                    muted,
+                                    cx,
+                                );
+                            }
+                            let Some(track) = track else {
+                                return div().into_any_element();
+                            };
+                            let thumb = thumb_element(this, track.image_url.as_deref(), 32.0, false, muted);
+                            let ctx = ActionMenuContext::from(&track);
+                            pill_row(ix, TRACK_PILL, false, palette.row_selected, palette.row_hover, |row| {
+                                row.gap_3()
+                                    .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
+                                        if event.click_count() >= 2
+                                            && let Some(event) =
+                                                echo_core::intent::play_queue_track_at(&mut this.state, ix)
+                                        {
+                                            this.dispatch(event);
+                                        }
+                                        cx.notify();
+                                    }))
+                                    .on_mouse_down(
+                                        MouseButton::Right,
+                                        cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                            this.context_menu = None;
+                                            this.track_menu = Some(crate::TrackMenuState {
+                                                ctx: ctx.clone(),
+                                                position: Some(event.position),
+                                                selected: 0,
+                                                submenu: None,
+                                            });
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child(thumb)
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_grow(1.0)
+                                            .flex()
+                                            .flex_col()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(fg)
+                                                    .whitespace_nowrap()
+                                                    .text_ellipsis()
+                                                    .overflow_hidden()
+                                                    .child(SharedString::from(track.name.clone())),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .whitespace_nowrap()
+                                                    .text_ellipsis()
+                                                    .overflow_hidden()
+                                                    .child(SharedString::from(track.artist.clone())),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .child(SharedString::from(format_time(track.duration_ms))),
+                                    )
+                            })
+                            .into_any_element()
+                        })
+                        .collect()
+                }),
+            )
+            .track_scroll(&app.queue_panel_scroll)
+            .flex_grow(1.0)
+            .into_any_element()
+        })
+        .into_any_element()
 }
 
 /// The backdrop's picture over the whole window, under everything else: the keyframe before
@@ -4702,7 +4941,7 @@ pub fn immersive_view(
                     muted,
                     colors.wash,
                     cx,
-                    |this, cx| this.toggle_queue(cx),
+                    |this, cx| this.toggle_queue_view(cx),
                 ))
                 .child(crate::icon_button(
                     "settings",

@@ -2585,6 +2585,17 @@ mod tests {
     }
 
     #[test]
+    fn docked_queue_panel_counts_as_a_visible_queue() {
+        let mut state = AppState::new();
+        assert!(!state.queue_visible());
+        state.ui.queue_panel_open = true;
+        assert!(state.queue_visible());
+        state.ui.queue_panel_open = false;
+        state.ui.active_view = ActiveView::Queue;
+        assert!(state.queue_visible());
+    }
+
+    #[test]
     fn queueing_a_range_emits_one_event_and_leaves_visual_mode() {
         let mut state = tracklist_with(&["a", "b", "c"]);
         enter_visual(&mut state);
