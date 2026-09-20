@@ -99,6 +99,21 @@ impl SpotifyWorker {
 
         match spotify.refresh_token().await {
             Ok(()) => {
+                let covers_scopes = spotify
+                    .get_token()
+                    .lock()
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(token_covers_required_scopes);
+                if !covers_scopes {
+                    AppConfig::clear_auth_tokens().map_err(|error| {
+                        SpotifyAuthError::TemporaryFailure(format!(
+                            "Failed to discard Spotify credentials missing new scopes: {error}"
+                        ))
+                    })?;
+                    return Ok(false);
+                }
                 Self::persist_tokens(spotify).await?;
                 Ok(true)
             }
@@ -253,10 +268,18 @@ fn spotify_scopes() -> HashSet<String> {
         "user-top-read",
         "user-read-recently-played",
         "user-follow-read",
+        "user-follow-modify",
     ]
     .into_iter()
     .map(str::to_string)
     .collect()
+}
+
+/// Whether a refreshed token was granted everything [`spotify_scopes`] asks for. A stored
+/// session from before a scope was added refreshes fine but cannot use the new endpoint, so
+/// it has to go back through the browser once.
+fn token_covers_required_scopes(token: &Token) -> bool {
+    spotify_scopes().is_subset(&token.scopes)
 }
 
 fn callback_parameter(request: &str, name: &str) -> Option<String> {
@@ -307,6 +330,17 @@ fn temporary_auth_error(error: ClientError) -> SpotifyAuthError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_tokens_missing_a_required_scope_are_not_restored() {
+        let mut token = Token {
+            scopes: spotify_scopes(),
+            ..Token::default()
+        };
+        assert!(token_covers_required_scopes(&token));
+        token.scopes.remove("user-follow-modify");
+        assert!(!token_covers_required_scopes(&token));
+    }
 
     #[test]
     fn parses_oauth_error_code() {

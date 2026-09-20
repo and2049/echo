@@ -526,9 +526,14 @@ pub fn handle_key(state: &mut AppState, key: &KeyEvent) -> Option<AppEvent> {
         KeyCode::Char('_') => {
             return Some(echo_core::intent::adjust_volume(state, -5));
         }
+        KeyCode::Char('F') if state.ui.active_view == ActiveView::ArtistPage => {
+            return echo_core::intent::toggle_follow_artist(state);
+        }
         KeyCode::Tab => {
             if state.ui.active_view == ActiveView::Queue {
                 echo_core::intent::cycle_queue_tab(state);
+            } else if state.ui.active_view == ActiveView::ArtistPage {
+                echo_core::intent::cycle_discography_filter(state);
             } else if state.ui.active_view == ActiveView::Library {
                 state.ui.active_library_tab = match state.ui.active_library_tab {
                     echo_core::app::LibraryTab::Playlists => echo_core::app::LibraryTab::Albums,

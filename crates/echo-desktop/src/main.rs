@@ -740,6 +740,15 @@ impl EchoApp {
         }
     }
 
+    /// Switches the discography chip and lands the cursor on the first album row, past the
+    /// Popular rows the combined index space puts first.
+    pub(crate) fn set_discography_filter(&mut self, filter: echo_core::models::DiscographyFilter) {
+        echo_core::intent::set_discography_filter(&mut self.state, filter);
+        self.state.ui.artist_page_album_index = self.artist_page_top_len();
+        self.artist_albums_scroll
+            .scroll_to_item(0, ScrollStrategy::Top);
+    }
+
     /// Rows the artist page's Popular section occupies at the head of its combined index space.
     pub(crate) fn artist_page_top_len(&self) -> usize {
         self.state
@@ -2276,6 +2285,9 @@ impl EchoApp {
                 }
             }
             ActiveView::Queue => echo_core::intent::cycle_queue_tab(&mut self.state),
+            ActiveView::ArtistPage => {
+                self.set_discography_filter(self.state.ui.artist_discography_filter.next())
+            }
             _ => {}
         }
         cx.notify();

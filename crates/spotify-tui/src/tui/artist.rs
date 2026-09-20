@@ -7,6 +7,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
+    text::{Line, Span},
     widgets::{
         Block, Borders, Cell, HighlightSpacing, ListItem, ListState, Row, Table, TableState,
     },
@@ -70,7 +71,22 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
         .unwrap_or_default();
 
     let is_active = state.ui.active_view == ActiveView::ArtistPage;
-    let title = format!("  {}  ", artist_name);
+    let following = state.data.artist_page_data.as_ref().is_some_and(|data| {
+        state
+            .data
+            .followed_artists
+            .iter()
+            .any(|artist| artist.id == data.artist_id)
+    });
+    let title = if following {
+        format!(
+            "  {} · {}  ",
+            artist_name,
+            echo_core::i18n::t("desktop.following", &state.ui.library_config.language)
+        )
+    } else {
+        format!("  {}  ", artist_name)
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -116,6 +132,13 @@ pub fn render_artist_page(frame: &mut Frame, state: &mut AppState, area: Rect) {
     if let Some(header_area) = header_area {
         render_artist_header(frame, state, header_area, &artist_name);
     }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(albums_area);
+    render_discography_chips(frame, state, chunks[0]);
+    let albums_area = chunks[1];
 
     if albums.is_empty() {
         let message = if state.data.artist_albums_loading {
@@ -306,6 +329,30 @@ pub fn render_whats_new(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut table_state = TableState::default();
     table_state.select(Some(state.ui.selected_whats_new_index));
     frame.render_stateful_widget(table, inner_area, &mut table_state);
+}
+
+/// One line of discography chips above the album table; `Tab` moves the highlight.
+fn render_discography_chips(frame: &mut Frame, state: &AppState, area: Rect) {
+    let lang = &state.ui.library_config.language;
+    let active = state.ui.artist_discography_filter;
+    let mut spans = vec![Span::raw(" ")];
+    for filter in echo_core::models::DiscographyFilter::ALL {
+        let style = if filter == active {
+            state
+                .ui
+                .active_theme
+                .secondary_style()
+                .add_modifier(Modifier::BOLD)
+        } else {
+            state.ui.active_theme.muted_style()
+        };
+        spans.push(Span::styled(
+            format!(" {} ", echo_core::i18n::t(filter.label_key(), lang)),
+            style,
+        ));
+        spans.push(Span::raw(" "));
+    }
+    frame.render_widget(ratatui::widgets::Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_artist_header(frame: &mut Frame, state: &mut AppState, area: Rect, artist_name: &str) {

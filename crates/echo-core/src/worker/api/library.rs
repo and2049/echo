@@ -53,6 +53,16 @@ impl SpotifyWorker {
                         release_date: (!album.release_date.is_empty())
                             .then(|| album.release_date.clone()),
                         track_count: None,
+                        group: Some(match album.album_type {
+                            rspotify::model::AlbumType::Album => crate::models::AlbumGroup::Album,
+                            rspotify::model::AlbumType::Single => crate::models::AlbumGroup::Single,
+                            rspotify::model::AlbumType::Compilation => {
+                                crate::models::AlbumGroup::Compilation
+                            }
+                            rspotify::model::AlbumType::AppearsOn => {
+                                crate::models::AlbumGroup::AppearsOn
+                            }
+                        }),
                     });
                 }
                 Err(e) => {
@@ -251,19 +261,23 @@ impl SpotifyWorker {
     }
 
     pub async fn fetch_followed_artists(&self) -> Result<Vec<crate::models::Artist>> {
-        let page = self
-            .client
-            .current_user_followed_artists(None, Some(50))
-            .await?;
-        Ok(page
-            .items
-            .into_iter()
-            .map(|artist| crate::models::Artist {
+        let mut artists = Vec::new();
+        let mut after: Option<String> = None;
+        loop {
+            let page = self
+                .client
+                .current_user_followed_artists(after.as_deref(), Some(50))
+                .await?;
+            artists.extend(page.items.into_iter().map(|artist| crate::models::Artist {
                 id: artist.id.id().to_string(),
                 name: artist.name,
                 image_url: artist.images.first().map(|img| img.url.clone()),
-            })
-            .collect())
+            }));
+            after = page.next.and(page.cursors.and_then(|cursor| cursor.after));
+            if after.is_none() {
+                return Ok(artists);
+            }
+        }
     }
 }
 

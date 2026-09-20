@@ -9,8 +9,8 @@ use crate::app::{ActiveView, AppMode, AppState, SearchTab};
 use crate::events::AppEvent;
 mod playlist;
 use crate::models::{
-    Artist, LibraryNode, PlaybackTarget, PlayingContext, SearchTrack, Track, TrackListContext,
-    TrackSource,
+    Artist, DiscographyFilter, LibraryNode, PlaybackTarget, PlayingContext, SearchTrack, Track,
+    TrackListContext, TrackSource,
 };
 pub use playlist::*;
 
@@ -882,6 +882,43 @@ pub fn selected_artist_top_track(state: &AppState) -> Option<&Track> {
         .as_ref()?
         .top_tracks
         .get(state.ui.artist_page_album_index)
+}
+
+/// Switches the artist page's discography chip and puts the cursor back on the first row of
+/// the caller's index space (desktop callers move it past the Popular rows themselves).
+pub fn set_discography_filter(state: &mut AppState, filter: DiscographyFilter) {
+    if state.ui.artist_discography_filter == filter {
+        return;
+    }
+    state.ui.artist_discography_filter = filter;
+    state.ui.artist_page_album_index = 0;
+    crate::apply_worker_event::artist::apply_discography_filter(state);
+}
+
+/// Tab on the artist page: the next discography chip, wrapping.
+pub fn cycle_discography_filter(state: &mut AppState) {
+    set_discography_filter(state, state.ui.artist_discography_filter.next());
+}
+
+/// Follows or unfollows the artist of the open artist page, flipping the followed list at
+/// once; the worker reloads that list after the write, which also undoes a failed flip.
+pub fn toggle_follow_artist(state: &mut AppState) -> Option<AppEvent> {
+    let data = state.data.artist_page_data.as_ref()?;
+    let artist_id = data.artist_id.clone();
+    let followed = &mut state.data.followed_artists;
+    if let Some(position) = followed.iter().position(|artist| artist.id == artist_id) {
+        followed.remove(position);
+        return Some(AppEvent::UnfollowArtist(artist_id));
+    }
+    followed.insert(
+        0,
+        Artist {
+            id: artist_id.clone(),
+            name: data.artist_name.clone(),
+            image_url: data.image_url.clone(),
+        },
+    );
+    Some(AppEvent::FollowArtist(artist_id))
 }
 
 /// Backs out of an artist page to the artist list, cancelling any in-flight page load.
@@ -2284,6 +2321,61 @@ mod tests {
     }
 
     #[test]
+    fn discography_filter_narrows_the_visible_albums_and_resets_the_cursor() {
+        use crate::models::AlbumGroup;
+        let mut state = artist_page_with(&["t0"], 4);
+        if let Some(data) = state.data.artist_page_data.as_mut() {
+            data.discography = data.albums.clone();
+            for (album, group) in data.discography.iter_mut().zip([
+                AlbumGroup::Album,
+                AlbumGroup::Single,
+                AlbumGroup::Compilation,
+                AlbumGroup::AppearsOn,
+            ]) {
+                album.group = Some(group);
+            }
+        }
+        state.ui.artist_page_album_index = 3;
+        let names = |state: &AppState| -> Vec<String> {
+            state
+                .data
+                .artist_page_data
+                .as_ref()
+                .map_or_else(Vec::new, |data| {
+                    data.albums.iter().map(|album| album.id.clone()).collect()
+                })
+        };
+
+        set_discography_filter(&mut state, DiscographyFilter::Singles);
+        assert_eq!(names(&state), ["album-1"]);
+        assert_eq!(state.ui.artist_page_album_index, 0);
+        set_discography_filter(&mut state, DiscographyFilter::Albums);
+        assert_eq!(names(&state), ["album-0", "album-2"]);
+        set_discography_filter(&mut state, DiscographyFilter::AppearsOn);
+        assert_eq!(names(&state), ["album-3"]);
+        cycle_discography_filter(&mut state);
+        assert_eq!(state.ui.artist_discography_filter, DiscographyFilter::All);
+        assert_eq!(names(&state), ["album-0", "album-1", "album-2"]);
+    }
+
+    #[test]
+    fn follow_toggle_flips_the_followed_list_before_the_write() {
+        let mut state = artist_page_with(&[], 0);
+        assert!(matches!(
+            toggle_follow_artist(&mut state),
+            Some(AppEvent::FollowArtist(id)) if id == "artist"
+        ));
+        assert_eq!(state.data.followed_artists[0].name, "Artist");
+        assert!(matches!(
+            toggle_follow_artist(&mut state),
+            Some(AppEvent::UnfollowArtist(id)) if id == "artist"
+        ));
+        assert!(state.data.followed_artists.is_empty());
+        state.data.artist_page_data = None;
+        assert!(toggle_follow_artist(&mut state).is_none());
+    }
+
+    #[test]
     fn queueing_on_the_artist_page_takes_the_popular_row_under_the_cursor() {
         let mut state = artist_page_with(&["t0", "t1"], 2);
         state.ui.artist_page_album_index = 1;
@@ -2311,6 +2403,7 @@ mod tests {
                     release_year: "2024".to_string(),
                     release_date: None,
                     track_count: None,
+                    group: None,
                 })
                 .collect();
         }
@@ -3155,6 +3248,7 @@ mod tests {
             release_year: "2024".to_string(),
             release_date: None,
             track_count: None,
+            group: None,
         }];
         assert!(matches!(
             play_album_at(&mut state, 0),

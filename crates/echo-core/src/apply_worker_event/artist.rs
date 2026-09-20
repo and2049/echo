@@ -31,6 +31,7 @@ pub fn handle_page_opened(
             image_url: artist_image_url.clone(),
             albums: Vec::new(),
             top_tracks: Vec::new(),
+            discography: Vec::new(),
         });
     } else if let Some(data) = state.data.artist_page_data.as_mut()
         && data.image_url.is_none()
@@ -55,19 +56,29 @@ pub fn handle_albums_loaded(state: &mut AppState, artist_id: String, albums: Vec
     if let Some(data) = state.data.artist_page_data.as_mut()
         && data.artist_id == artist_id
     {
-        let selected_album_index = if !albums.is_empty() {
-            state
-                .ui
-                .artist_page_album_index
-                .min(albums.len().saturating_sub(1))
-        } else {
-            0
-        };
-        data.albums = albums;
-        state.ui.artist_page_album_index = selected_album_index;
+        data.discography = albums;
+        apply_discography_filter(state);
         state.data.artist_albums_loading = false;
         state.data.artist_page_loading = false;
     }
+}
+
+/// Rebuilds the visible album rows from the discography under the active filter and keeps
+/// the cursor on a row. The TUI cursor is album-relative; the desktop's counts the Popular
+/// rows first, so both clamp against the same combined length.
+pub fn apply_discography_filter(state: &mut AppState) {
+    let Some(data) = state.data.artist_page_data.as_mut() else {
+        return;
+    };
+    let filter = state.ui.artist_discography_filter;
+    data.albums = data
+        .discography
+        .iter()
+        .filter(|album| filter.matches(album))
+        .cloned()
+        .collect();
+    let rows = data.top_tracks.len() + data.albums.len();
+    state.ui.artist_page_album_index = state.ui.artist_page_album_index.min(rows.saturating_sub(1));
 }
 
 pub fn handle_albums_load_failed(state: &mut AppState, artist_id: String, message: String) {
@@ -174,6 +185,7 @@ mod tests {
                 release_year: "2024".to_string(),
                 release_date: None,
                 track_count: None,
+                group: None,
             }],
         );
 
@@ -259,6 +271,7 @@ mod tests {
                 release_year: "2024".to_string(),
                 release_date: None,
                 track_count: None,
+                group: None,
             }],
         );
 

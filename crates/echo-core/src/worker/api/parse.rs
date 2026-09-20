@@ -1,4 +1,4 @@
-use crate::models::{Album, Artist, Track, TrackArtist, TrackSource};
+use crate::models::{Album, AlbumGroup, Artist, Track, TrackArtist, TrackSource};
 
 pub(crate) fn recent_history(value: &serde_json::Value) -> crate::home::RecentHistory {
     use crate::home::{HomeItemKind, RecentContext, RecentHistory};
@@ -261,6 +261,11 @@ pub(crate) fn album(album: &serde_json::Value) -> Option<Album> {
             .get("total_tracks")
             .and_then(|v| v.as_u64())
             .map(|value| value as u32),
+        group: album
+            .get("album_group")
+            .or_else(|| album.get("album_type"))
+            .and_then(|v| v.as_str())
+            .and_then(AlbumGroup::parse),
     })
 }
 
@@ -355,5 +360,28 @@ mod tests {
         let album = album(&value).unwrap();
         assert_eq!(album.release_year, "2024");
         assert_eq!(album.track_count, Some(12));
+        assert_eq!(album.group, None);
+    }
+
+    #[test]
+    fn album_group_prefers_the_listing_group_over_the_album_type() {
+        let value = serde_json::json!({
+            "id": "album",
+            "name": "Album",
+            "album_type": "album",
+            "album_group": "appears_on",
+            "release_date": "2024",
+            "images": []
+        });
+        assert_eq!(album(&value).unwrap().group, Some(AlbumGroup::AppearsOn));
+
+        let value = serde_json::json!({
+            "id": "album",
+            "name": "Album",
+            "album_type": "single",
+            "release_date": "2024",
+            "images": []
+        });
+        assert_eq!(album(&value).unwrap().group, Some(AlbumGroup::Single));
     }
 }

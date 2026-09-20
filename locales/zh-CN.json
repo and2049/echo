@@ -1,6 +1,10 @@
 {
   "ui": {
     "library": "资料库",
+    "discography_all": "全部",
+    "discography_albums": "专辑",
+    "discography_singles": "单曲与EP",
+    "discography_appears_on": "参与作品",
     "search": "搜索",
     "queue": "播放队列",
     "queue_next_in": "队列中的歌曲",
@@ -120,6 +124,7 @@
     "range_short": "近4周",
     "range_medium": "近6个月",
     "range_long": "全部时间",
+    "follow": "关注",
     "following": "已关注",
     "search_placeholder": "想听点什么？",
     "search_all": "全部",

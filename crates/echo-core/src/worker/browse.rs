@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use crate::events::WorkerEvent;
 use crate::home::HomeFeed;
-use crate::models::Album;
+use crate::models::{Album, DiscographyFilter};
 
 struct HomeRequest {
     tx: mpsc::Sender<WorkerEvent>,
@@ -144,6 +144,35 @@ pub fn spawn_followed_artists(
     });
 }
 
+/// Writes the follow, then reloads the followed list whether or not it succeeded so a
+/// failed optimistic flip in the app is undone by the reload.
+pub fn spawn_set_artist_followed(
+    api_client: Option<EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    artist_id: String,
+    follow: bool,
+) {
+    let Some(api) = api_client else {
+        return;
+    };
+    tokio::spawn(async move {
+        let label = if follow {
+            "Follow artist"
+        } else {
+            "Unfollow artist"
+        };
+        if let Err(e) = api.set_artist_followed(&artist_id, follow).await {
+            send_api_error(tx.clone(), label, "set_artist_followed", e).await;
+        }
+        match api.refresh_followed_artists().await {
+            Ok(artists) => {
+                let _ = tx.send(WorkerEvent::FollowedArtistsLoaded(artists)).await;
+            }
+            Err(e) => send_api_error(tx, "Followed artists", "followed_artists", e).await,
+        }
+    });
+}
+
 /// Scans followed artists' discographies for recent releases. Serves the 6h persistent
 /// cache when fresh; otherwise walks artists sequentially through the shared artist-albums
 /// cache (warming artist pages as a side effect), emitting cumulative snapshots as it goes.
@@ -257,12 +286,14 @@ pub fn spawn_recent_contexts(api_client: Option<EchoSpotifyClient>, tx: mpsc::Se
     });
 }
 
-/// Filters to releases dated on or after `cutoff` (ISO string compare, so year-only
-/// precision entries drop out), dedupes by id, newest first, capped.
+/// Filters to the artist's own releases dated on or after `cutoff` (ISO string compare, so
+/// year-only precision entries drop out), dedupes by id, newest first, capped. Features on
+/// other artists' records are fetched for the artist page but are not news here.
 fn recent_releases(albums: &[Album], cutoff: &str) -> Vec<Album> {
     let mut seen = std::collections::HashSet::new();
     let mut out: Vec<Album> = albums
         .iter()
+        .filter(|album| DiscographyFilter::All.matches(album))
         .filter(|album| {
             album
                 .release_date
@@ -312,6 +343,7 @@ mod tests {
                 .unwrap_or_default(),
             release_date: release_date.map(str::to_string),
             track_count: None,
+            group: None,
         }
     }
 
@@ -324,6 +356,10 @@ mod tests {
             album("new", Some("2026-08-01")),
             album("year-only", Some("2026")),
             album("undated", None),
+            Album {
+                group: Some(crate::models::AlbumGroup::AppearsOn),
+                ..album("feature", Some("2026-08-06"))
+            },
         ];
         let out = recent_releases(&albums, "2026-05-10");
         let ids: Vec<&str> = out.iter().map(|a| a.id.as_str()).collect();

@@ -337,7 +337,9 @@ fn is_fresh(fetched_at: u64, ttl: Duration) -> bool {
 }
 
 pub fn artist_album_metadata_complete(albums: &[Album]) -> bool {
-    albums.iter().all(|album| album.track_count.is_some())
+    albums
+        .iter()
+        .all(|album| album.track_count.is_some() && album.group.is_some())
 }
 
 pub fn context_cache_key(context: &TrackListContext) -> Option<String> {
@@ -957,6 +959,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::models::AlbumGroup;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[allow(dead_code)]
@@ -1083,8 +1086,10 @@ mod tests {
                 release_year: "2024".to_string(),
                 release_date: None,
                 track_count,
+                group: track_count.map(|_| AlbumGroup::Album),
             }],
             top_tracks: Vec::new(),
+            discography: Vec::new(),
         });
         entry.fetched_at = now_epoch_secs().saturating_sub(age.as_secs());
         entry
@@ -1093,6 +1098,14 @@ mod tests {
     #[test]
     fn artist_album_cache_missing_track_counts_requires_refresh() {
         let entry = artist_page_entry(None, Duration::from_secs(60));
+
+        assert!(CacheData::artist_page_needs_album_refresh(&entry));
+    }
+
+    #[test]
+    fn artist_album_cache_missing_group_requires_refresh() {
+        let mut entry = artist_page_entry(Some(12), Duration::from_secs(60));
+        entry.value.albums[0].group = None;
 
         assert!(CacheData::artist_page_needs_album_refresh(&entry));
     }

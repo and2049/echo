@@ -1,7 +1,7 @@
 use crate::config::{LibraryConfig, Theme};
 use crate::models::{
-    ActionMenuContext, ArtistPageData, BrowseNode, LocalLibrary, LocalPlaylists, Playlist,
-    SearchResults, Track, TrackListContext, TrackSource,
+    ActionMenuContext, ArtistPageData, BrowseNode, DiscographyFilter, LocalLibrary, LocalPlaylists,
+    Playlist, SearchResults, Track, TrackListContext, TrackSource,
 };
 use crate::theme::ResolvedTheme;
 use std::collections::HashMap;
@@ -37,6 +37,7 @@ pub struct UIState {
     pub queue_tab: QueueTab,
     pub selected_device_index: usize,
     pub artist_page_album_index: usize,
+    pub artist_discography_filter: DiscographyFilter,
     pub selected_action_index: usize,
     pub selected_playlist_modal_index: usize,
     // Prompts / modals
@@ -121,6 +122,7 @@ impl UIState {
             queue_tab: QueueTab::Queue,
             selected_device_index: 0,
             artist_page_album_index: 0,
+            artist_discography_filter: DiscographyFilter::All,
             selected_action_index: 0,
             selected_playlist_modal_index: 0,
             folder_delete_prompt: None,
@@ -467,6 +469,7 @@ pub struct NavigationSnapshot {
     selected_artist_index: usize,
     selected_whats_new_index: usize,
     artist_page_album_index: usize,
+    artist_discography_filter: DiscographyFilter,
     artist_list_source: ArtistListSource,
     active_library_tab: LibraryTab,
     active_search_tab: SearchTab,
@@ -673,6 +676,7 @@ impl AppState {
             selected_artist_index: self.ui.selected_artist_index,
             selected_whats_new_index: self.ui.selected_whats_new_index,
             artist_page_album_index: self.ui.artist_page_album_index,
+            artist_discography_filter: self.ui.artist_discography_filter,
             artist_list_source: self.ui.artist_list_source,
             active_library_tab: self.ui.active_library_tab,
             active_search_tab: self.ui.active_search_tab,
@@ -698,6 +702,7 @@ impl AppState {
         self.ui.selected_artist_index = snapshot.selected_artist_index;
         self.ui.selected_whats_new_index = snapshot.selected_whats_new_index;
         self.ui.artist_page_album_index = snapshot.artist_page_album_index;
+        self.ui.artist_discography_filter = snapshot.artist_discography_filter;
         self.ui.artist_list_source = snapshot.artist_list_source;
         self.ui.active_library_tab = snapshot.active_library_tab;
         self.ui.active_search_tab = snapshot.active_search_tab;
@@ -1041,9 +1046,11 @@ impl AppState {
             image_url,
             albums: Vec::new(),
             top_tracks: Vec::new(),
+            discography: Vec::new(),
         });
         self.data.pending_artist_page_id = Some(artist_id);
         self.ui.artist_page_album_index = 0;
+        self.ui.artist_discography_filter = DiscographyFilter::All;
         self.data.artist_page_loading = true;
         self.data.artist_albums_loading = true;
         self.data.artist_top_tracks_loading = true;

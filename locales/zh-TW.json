@@ -1,6 +1,10 @@
 {
   "ui": {
     "library": "資料庫",
+    "discography_all": "全部",
+    "discography_albums": "專輯",
+    "discography_singles": "單曲與EP",
+    "discography_appears_on": "參與作品",
     "search": "搜尋",
     "queue": "播放佇列",
     "queue_next_in": "佇列中的歌曲",
@@ -120,6 +124,7 @@
     "range_short": "近4週",
     "range_medium": "近6個月",
     "range_long": "全部時間",
+    "follow": "追蹤",
     "following": "追蹤中",
     "search_placeholder": "想聽點什麼？",
     "search_all": "全部",

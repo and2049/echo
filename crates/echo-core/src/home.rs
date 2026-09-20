@@ -550,7 +550,8 @@ mod tests {
                 thumb_url: None,
                 release_year: "2026".into(),
                 release_date: None,
-                track_count: None
+                track_count: None,
+                group: None
             };
             20
         ];

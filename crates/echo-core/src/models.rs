@@ -83,6 +83,78 @@ pub struct Album {
     pub release_date: Option<String>,
     #[serde(default)]
     pub track_count: Option<u32>,
+    /// Spotify's `album_group` (how the release relates to the artist it was listed under),
+    /// falling back to `album_type` where a listing carries no group. `None` only on entries
+    /// cached before the field existed; the artist-albums cache treats those as stale.
+    #[serde(default)]
+    pub group: Option<AlbumGroup>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlbumGroup {
+    Album,
+    Single,
+    Compilation,
+    AppearsOn,
+}
+
+impl AlbumGroup {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "album" => Some(Self::Album),
+            "single" => Some(Self::Single),
+            "compilation" => Some(Self::Compilation),
+            "appears_on" => Some(Self::AppearsOn),
+            _ => None,
+        }
+    }
+}
+
+/// The artist page's discography chips. `All` is the artist's own releases; features and
+/// compilations by others sit behind `AppearsOn` alone.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscographyFilter {
+    #[default]
+    All,
+    Albums,
+    Singles,
+    AppearsOn,
+}
+
+impl DiscographyFilter {
+    pub const ALL: [Self; 4] = [Self::All, Self::Albums, Self::Singles, Self::AppearsOn];
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Albums,
+            Self::Albums => Self::Singles,
+            Self::Singles => Self::AppearsOn,
+            Self::AppearsOn => Self::All,
+        }
+    }
+
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::All => "ui.discography_all",
+            Self::Albums => "ui.discography_albums",
+            Self::Singles => "ui.discography_singles",
+            Self::AppearsOn => "ui.discography_appears_on",
+        }
+    }
+
+    pub fn matches(self, album: &Album) -> bool {
+        match self {
+            Self::All => album.group != Some(AlbumGroup::AppearsOn),
+            Self::Albums => matches!(
+                album.group,
+                Some(AlbumGroup::Album | AlbumGroup::Compilation)
+            ),
+            Self::Singles => album.group == Some(AlbumGroup::Single),
+            Self::AppearsOn => album.group == Some(AlbumGroup::AppearsOn),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -987,11 +1059,16 @@ pub struct ArtistPageData {
     pub artist_name: String,
     #[serde(default)]
     pub image_url: Option<String>,
+    /// In the persistent cache: every release fetched for the artist. In app state: the rows
+    /// the active [`DiscographyFilter`] leaves visible, which every cursor and row index
+    /// addresses; the full list lives in `discography`.
     pub albums: Vec<Album>,
     /// Session-only: never written to the persistent artist-page cache (whose single
     /// `fetched_at` tracks album freshness), so persisted entries deserialize it empty.
     #[serde(default, skip_serializing)]
     pub top_tracks: Vec<Track>,
+    #[serde(default, skip_serializing)]
+    pub discography: Vec<Album>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

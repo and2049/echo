@@ -7,8 +7,12 @@
  - Add Refresh to the playlist and album page menu
  - Add `:clearhistory` to forget the local play history
  - Right-click and `q` / `shift-a` now work on the Popular rows of an artist page
+ - Artist pages get a Follow / Following button and discography chips (All, Albums, Singles & EPs, Appears On); `tab` cycles the chips
+ - Following now needs one more Spotify permission, so the first launch after this update asks you to sign in again once
+ - The followed-artists list is no longer cut off at 50 artists
 
 ### Terminal client
  - The last session is restored paused on launch and starts again from its position
  - The queue view gains a Recent tab (`tab` switches) with the local play history
  - `q` and `A` act on the Popular rows of an artist page
+ - `F` follows or unfollows the artist whose page is open and `tab` cycles its discography chips; the page title shows Following

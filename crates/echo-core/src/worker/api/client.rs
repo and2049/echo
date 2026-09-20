@@ -615,6 +615,34 @@ impl EchoSpotifyClient {
         Ok(response)
     }
 
+    /// Follows or unfollows an artist, then reloads the followed list past both caches so
+    /// the app's copy (and its 24h persistent entry) reflect the write.
+    pub async fn set_artist_followed(&self, artist_id: &str, follow: bool) -> Result<()> {
+        let id = rspotify::model::LibraryId::Artist(rspotify::model::ArtistId::from_id(artist_id)?);
+        let write = if follow {
+            self.third_party.library_add([id]).await
+        } else {
+            self.third_party.library_remove([id]).await
+        };
+        log_api(&format!(
+            "set_artist_followed route=third_party artist={artist_id} follow={follow} ok={}",
+            write.is_ok()
+        ));
+        write?;
+        Ok(())
+    }
+
+    pub async fn refresh_followed_artists(&self) -> Result<Vec<Artist>> {
+        let artists = self.third_party_worker().fetch_followed_artists().await?;
+        log_api("followed_artists route=third_party refresh");
+        self.cache
+            .lock()
+            .await
+            .set_followed_artists(artists.clone());
+        AppConfig::update_cache(|cache| cache.set_followed_artists(artists.clone()));
+        Ok(artists)
+    }
+
     fn third_party_worker(&self) -> SpotifyWorker {
         SpotifyWorker::from_client(self.third_party.clone())
     }
@@ -808,6 +836,7 @@ impl EchoSpotifyClient {
                     image_url: None,
                     albums: Vec::new(),
                     top_tracks: Vec::new(),
+                    discography: Vec::new(),
                 });
             page.albums = albums.clone();
             cache.set_artist_page(artist_id.to_string(), page);
@@ -935,7 +964,7 @@ fn recent_playlist_url(id: &str) -> String {
 
 fn artist_albums_url(artist_id: &str, offset: usize) -> String {
     format!(
-        "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
+        "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single,compilation,appears_on&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
     )
 }
 
@@ -1015,6 +1044,7 @@ mod tests {
         assert!(url.contains("/artists/artist/albums"));
         assert!(url.contains("limit=10"));
         assert!(url.contains("offset=20"));
+        assert!(url.contains("include_groups=album,single,compilation,appears_on"));
     }
 
     #[test]

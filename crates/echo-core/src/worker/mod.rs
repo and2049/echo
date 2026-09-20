@@ -1892,6 +1892,12 @@ impl Worker {
                             AppEvent::FetchFollowedArtists => {
                                 browse::spawn_followed_artists(api_client.clone(), self.tx.clone());
                             }
+                            AppEvent::FollowArtist(artist_id) => {
+                                browse::spawn_set_artist_followed(api_client.clone(), self.tx.clone(), artist_id, true);
+                            }
+                            AppEvent::UnfollowArtist(artist_id) => {
+                                browse::spawn_set_artist_followed(api_client.clone(), self.tx.clone(), artist_id, false);
+                            }
                             AppEvent::FetchWhatsNew => {
                                 browse::spawn_whats_new(api_client.clone(), self.tx.clone());
                             }

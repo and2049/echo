@@ -3438,6 +3438,81 @@ fn range_switcher(app: &EchoApp, cx: &mut Context<EchoApp>) -> Div {
     row
 }
 
+/// The artist page's discography chips, styled like [`range_switcher`].
+fn discography_switcher(app: &EchoApp, cx: &mut Context<EchoApp>) -> Div {
+    use echo_core::models::DiscographyFilter;
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let active = app.state.ui.artist_discography_filter;
+
+    let mut row = div().flex().flex_row().items_center().gap_1();
+    for filter in DiscographyFilter::ALL {
+        let is_active = filter == active;
+        row = row.child(
+            div()
+                .id(SharedString::from(format!("discography-{:?}", filter)))
+                .px_2()
+                .py_1()
+                .rounded_full()
+                .border_1()
+                .text_xs()
+                .when(is_active, |el| el.border_color(accent).text_color(accent))
+                .when(!is_active, |el| {
+                    el.border_color(palette.border).text_color(muted)
+                })
+                .hover(move |style| style.bg(palette.row_hover))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    this.set_discography_filter(filter);
+                    cx.notify();
+                }))
+                .child(tr(&app.state, filter.label_key())),
+        );
+    }
+    row
+}
+
+/// Follow / Following toggle in the artist header: filled while the artist is in the
+/// followed list, outlined otherwise.
+fn follow_button(app: &EchoApp, artist_id: &str, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let following = app
+        .state
+        .data
+        .followed_artists
+        .iter()
+        .any(|artist| artist.id == artist_id);
+    let label = if following {
+        tr(&app.state, "desktop.following")
+    } else {
+        tr(&app.state, "desktop.follow")
+    };
+    div()
+        .id("artist-follow")
+        .flex_none()
+        .px_3()
+        .py_1()
+        .rounded_full()
+        .border_1()
+        .text_xs()
+        .border_color(accent)
+        .text_color(accent)
+        .when(following, |el| el.bg(palette.wash))
+        .hover(move |style| style.bg(palette.row_hover))
+        .cursor_pointer()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            if let Some(event) = echo_core::intent::toggle_follow_artist(&mut this.state) {
+                this.dispatch(event);
+            }
+            cx.notify();
+        }))
+        .child(label)
+}
+
 /// Full-page artist list: reached through the "Top Artists" browse link (the sidebar's
 /// Artists tab still covers followed artists) and by back-navigation.
 fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
@@ -3737,7 +3812,6 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
             .into_any_element();
     };
 
-    let accent = theme.primary.gpui(WINDOW_FG());
     let header_image = app
         .state
         .ui
@@ -3814,29 +3888,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .child(SharedString::from(format!("{count} albums"))),
                         ),
                 )
-                // Passive badge: there is no reliable write route for follow/unfollow,
-                // so this only mirrors the (24h-cached) followed-artists list.
-                .when(
-                    app.state
-                        .data
-                        .followed_artists
-                        .iter()
-                        .any(|artist| artist.id == data.artist_id),
-                    |el| {
-                        el.child(
-                            div()
-                                .flex_none()
-                                .px_3()
-                                .py_1()
-                                .rounded_full()
-                                .border_1()
-                                .text_xs()
-                                .border_color(accent)
-                                .text_color(accent)
-                                .child(tr(&app.state, "desktop.following")),
-                        )
-                    },
-                ),
+                .child(follow_button(app, &data.artist_id, cx)),
         )
         .when(top_len > 0 || top_loading, |el| {
             el.child(
@@ -4000,17 +4052,25 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 .max_h(relative(0.4))
                 .into_any_element()
             })
-            .child(
-                div()
-                    .flex_none()
-                    .px_4()
-                    .pt_2()
-                    .pb_1()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(tr(&app.state, "desktop.albums_section")),
-            )
         })
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .pt_2()
+                .pb_1()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(&app.state, "desktop.albums_section")),
+                )
+                .child(discography_switcher(app, cx)),
+        )
         .child(if loading {
             div()
                 .flex_grow(1.0)

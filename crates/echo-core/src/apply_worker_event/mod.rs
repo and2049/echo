@@ -5,7 +5,7 @@ use crate::{
     events::{AppEvent, WorkerEvent},
 };
 
-mod artist;
+pub(crate) mod artist;
 mod auth;
 mod data;
 mod images;

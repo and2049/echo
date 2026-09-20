@@ -81,6 +81,8 @@ pub enum AppEvent {
         description: String,
         public: bool,
     },
+    FollowArtist(String),
+    UnfollowArtist(String),
     FollowPlaylist(String),
     UnfollowPlaylist(String),
     CreateLocalPlaylist(String),

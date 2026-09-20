@@ -168,7 +168,7 @@ echo is heavily keyboard-driven.
 - `gc`: Jump to the currently playing track or its available context
 - `Enter` or `z`: Select item / Open playlist / Play track
 - `h` / `q` / `Esc` / `Backspace`: Go back / Close modal / Clear search
-- `Tab`: Switch tabs (e.g., Playlists ↔ Albums, Search Tracks ↔ Search Albums)
+- `Tab`: Switch tabs (e.g., Playlists ↔ Albums, Search Tracks ↔ Search Albums, artist discography All ↔ Albums ↔ Singles & EPs ↔ Appears On)
 - `:`: Enter Command Mode
 - `/`: Search within tracklist
 - `f`: Global search
@@ -205,6 +205,7 @@ echo is heavily keyboard-driven.
 - `x`: Cut playlist (to move into a folder)
 - `J` / `K` (Shift + j / k, desktop): Move the selected track down / up within one of your own playlists (drag-and-drop works too); requires the original sort order
 - `R` (Shift + r): Force refresh
+- `F` (Shift + f, terminal): Follow / unfollow the artist whose page is open (the desktop app has a Follow button in the header)
 
 The track action menu adapts to the source. Spotify tracks support link copying, liking, and album library actions. Local tracks support copying their absolute path and revealing the file in the platform file manager. Both sources retain album/artist navigation, playlist insertion, and queue actions where applicable.
 
