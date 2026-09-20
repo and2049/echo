@@ -963,7 +963,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 });
                                 match artwork.and_then(|artwork| this.images.get(&artwork)) {
                                     Some(image) => {
-                                        let el = img(image)
+                                        let el = img(image).object_fit(gpui::ObjectFit::Cover)
                                             .flex_none()
                                             .w(px(THUMB_EDGE))
                                             .h(px(THUMB_EDGE));
@@ -1758,6 +1758,7 @@ fn context_hero(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElemen
     let image_url = context.image_url.clone();
     let cover = match cover {
         Some(image) => img(image)
+            .object_fit(gpui::ObjectFit::Cover)
             .size(px(160.0))
             .rounded_md()
             .flex_none()
@@ -2097,7 +2098,7 @@ fn track_list(
                 .gap_3()
                 .when_some(header_image.filter(|_| wide), |el, image| {
                     el.child(
-                        img(image)
+                        img(image).object_fit(gpui::ObjectFit::Cover)
                             .flex_none()
                             .w(px(72.0))
                             .h(px(72.0))
@@ -3024,7 +3025,11 @@ fn thumb_element(
     });
     match artwork.and_then(|artwork| this.images.get(&artwork)) {
         Some(image) => {
-            let el = img(image).flex_none().w(px(edge)).h(px(edge));
+            let el = img(image)
+                .object_fit(gpui::ObjectFit::Cover)
+                .flex_none()
+                .w(px(edge))
+                .h(px(edge));
             if round {
                 el.rounded_full()
             } else if edge >= 56.0 {
@@ -3862,7 +3867,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 )
                 .when_some(header_image, |el, image| {
                     el.child(
-                        img(image)
+                        img(image).object_fit(gpui::ObjectFit::Cover)
                             .flex_none()
                             .w(px(72.0))
                             .h(px(72.0))
@@ -4568,6 +4573,7 @@ pub fn immersive_view(
         .and_then(|artwork| app.images.get(&artwork));
     let cover = match cover {
         Some(image) => img(image)
+            .object_fit(gpui::ObjectFit::Cover)
             .flex_none()
             .w(px(edge))
             .h(px(edge))

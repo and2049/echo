@@ -10,6 +10,7 @@
  - Artist pages get a Follow / Following button and discography chips (All, Albums, Singles & EPs, Appears On); `tab` cycles the chips
  - Following now needs one more Spotify permission, so the first launch after this update asks you to sign in again once
  - The followed-artists list is no longer cut off at 50 artists
+ - Artist portraits that are not square are cropped to a circle instead of being squeezed into an oval; album art fills its box the same way
 
 ### Terminal client
  - The last session is restored paused on launch and starts again from its position

@@ -2866,6 +2866,7 @@ impl EchoApp {
                             .gap_2()
                             .child(match cover {
                                 Some(image) => img(image)
+                                    .object_fit(gpui::ObjectFit::Cover)
                                     .flex_none()
                                     .w(px(36.0))
                                     .h(px(36.0))
