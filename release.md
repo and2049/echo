@@ -11,7 +11,7 @@
  - Following now needs one more Spotify permission, so the first launch after this update asks you to sign in again once
  - The followed-artists list is no longer cut off at 50 artists
  - Artist portraits that are not square are cropped to a circle instead of being squeezed into an oval; album art fills its box the same way
- - The scrollbars under the Home shelves use the seek bar's colors so they are visible
+ - The scrollbars under the Home shelves use the seek bar's colors so they are visible, and dragging one keeps scrolling wherever the pointer wanders while the button is held
 
 ### Terminal client
  - The last session is restored paused on launch and starts again from its position

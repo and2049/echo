@@ -264,6 +264,9 @@ pub(crate) struct EchoApp {
     seek_bounds: Rc<Cell<Bounds<Pixels>>>,
     volume_bounds: Rc<Cell<Bounds<Pixels>>>,
     scrubbing: Option<Scrub>,
+    /// The Home shelf whose scrollbar is being dragged; tracked at the window level like a
+    /// scrub so the drag survives the pointer leaving the bar.
+    shelf_scrub: Option<gpui::ScrollHandle>,
     sidebar_resizing: Option<SidebarResize>,
     titlebar_should_move: bool,
     mono_font: SharedString,
@@ -598,6 +601,7 @@ impl EchoApp {
             seek_bounds: Rc::default(),
             volume_bounds: Rc::default(),
             scrubbing: None,
+            shelf_scrub: None,
             sidebar_resizing: None,
             titlebar_should_move: false,
             mono_font: resolve_mono_font(cx),
@@ -2630,6 +2634,22 @@ impl EchoApp {
         }
     }
 
+    pub(crate) fn begin_shelf_scrub(&mut self, scroll: gpui::ScrollHandle, x: Pixels) {
+        self.shelf_scrub = Some(scroll);
+        self.update_shelf_scrub(x);
+    }
+
+    /// Scrolls the dragged shelf so the thumb follows the pointer's fraction of the bar (the
+    /// bar spans the shelf row's width).
+    fn update_shelf_scrub(&mut self, x: Pixels) {
+        let Some(scroll) = self.shelf_scrub.as_ref() else {
+            return;
+        };
+        let bounds = scroll.bounds();
+        let fraction = ((x - bounds.left()) / bounds.size.width.max(px(1.0))).clamp(0.0, 1.0);
+        scroll.set_offset(gpui::point(-scroll.max_offset().x * fraction, px(0.0)));
+    }
+
     // Drag-to-resize of the library sidebar: mouse-down on its right edge starts it, window-level
     // mouse moves update the width optimistically, and release settles and saves it.
 
@@ -3566,6 +3586,14 @@ impl Render for EchoApp {
                             this.finish_scrub(event.position.x, cx);
                         }
                     }
+                    if this.shelf_scrub.is_some() {
+                        if event.pressed_button == Some(gpui::MouseButton::Left) {
+                            this.update_shelf_scrub(event.position.x);
+                        } else {
+                            this.shelf_scrub = None;
+                        }
+                        cx.notify();
+                    }
                 }),
             )
             .on_mouse_up(
@@ -3573,6 +3601,7 @@ impl Render for EchoApp {
                 cx.listener(|this, event: &gpui::MouseUpEvent, _window, cx| {
                     this.finish_sidebar_resize(cx);
                     this.finish_scrub(event.position.x, cx);
+                    this.shelf_scrub = None;
                 }),
             )
             .on_action(

@@ -6207,7 +6207,6 @@ fn home_scrollbar(
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let paint_scroll = scroll.clone();
-    let drag_scroll = scroll.clone();
     div()
         .id("home-scrollbar")
         .h(px(12.0))
@@ -6215,29 +6214,12 @@ fn home_scrollbar(
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |_: &mut EchoApp, event: &MouseDownEvent, _, cx| {
-                let bounds = scroll.bounds();
-                let fraction = (f32::from(event.position.x - bounds.left())
-                    / f32::from(bounds.size.width).max(1.0))
-                .clamp(0.0, 1.0);
-                scroll.set_offset(gpui::point(-scroll.max_offset().x * fraction, px(0.0)));
+            cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _, cx| {
+                this.begin_shelf_scrub(scroll.clone(), event.position.x);
                 cx.stop_propagation();
                 cx.notify();
             }),
         )
-        .on_mouse_move(cx.listener(
-            move |_: &mut EchoApp, event: &gpui::MouseMoveEvent, _, cx| {
-                if event.pressed_button == Some(MouseButton::Left) {
-                    let bounds = drag_scroll.bounds();
-                    let fraction = (f32::from(event.position.x - bounds.left())
-                        / f32::from(bounds.size.width).max(1.0))
-                    .clamp(0.0, 1.0);
-                    drag_scroll
-                        .set_offset(gpui::point(-drag_scroll.max_offset().x * fraction, px(0.0)));
-                    cx.notify();
-                }
-            },
-        ))
         .child(
             canvas(
                 |_, _, _| (),
