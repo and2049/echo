@@ -6198,9 +6198,12 @@ fn home_card(
     }
 }
 
+/// Horizontal scrollbar under a Home shelf, colored like the seek bar: `border` track,
+/// `accent` thumb.
 fn home_scrollbar(
     scroll: gpui::ScrollHandle,
     palette: DesktopPalette,
+    accent: Hsla,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
     let paint_scroll = scroll.clone();
@@ -6251,14 +6254,14 @@ fn home_scrollbar(
                             bounds.origin + gpui::point(px(0.0), px(4.0)),
                             gpui::size(bounds.size.width, px(4.0)),
                         ),
-                        palette.wash,
+                        palette.border,
                     ));
                     window.paint_quad(gpui::fill(
                         gpui::Bounds::new(
                             bounds.origin + gpui::point(px(left), px(4.0)),
                             gpui::size(px(thumb), px(4.0)),
                         ),
-                        palette.border,
+                        accent,
                     ));
                 },
             )
@@ -6275,6 +6278,7 @@ fn home_view(
     let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
     let fg = app.state.ui.active_theme.text.gpui(WINDOW_FG());
     let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
+    let accent = app.state.ui.active_theme.primary.gpui(WINDOW_FG());
     let mut shelves = home_shelves(&app.state);
     let width = f32::from(window.viewport_size().width)
         - if app.sidebar_collapsed {
@@ -6423,7 +6427,7 @@ fn home_view(
                         .child(tr(&app.state, shelf.kind.title_key())),
                 )
                 .child(row)
-                .child(home_scrollbar(scroll, palette, cx)),
+                .child(home_scrollbar(scroll, palette, accent, cx)),
         );
     }
     echo_core::thumbnails::drain_pending(&mut app.state, &app.worker_tx);
