@@ -1067,8 +1067,27 @@ pub fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
     None
 }
 
-/// `q`: append the selected track (track list, search tracks tab or artist Popular row) to
-/// the playback queue.
+/// The search track under the cursor: the row itself on the Tracks tab, or the song row the
+/// flat All-tab index lands on (`None` when it is the top result or a card).
+pub fn selected_search_track(state: &AppState) -> Option<&SearchTrack> {
+    if state.ui.active_view != ActiveView::SearchResults {
+        return None;
+    }
+    let results = &state.data.search_results;
+    let index = match state.ui.active_search_tab {
+        SearchTab::Tracks => state.ui.selected_search_index,
+        SearchTab::All => {
+            let row = *crate::search::all_tab_rows(results, &state.ui.search_context_query)
+                .get(state.ui.selected_search_index)?;
+            (!row.top && row.tab == SearchTab::Tracks).then_some(row.index)?
+        }
+        _ => return None,
+    };
+    results.tracks.get(index)
+}
+
+/// `q`: append the selected track (track list, search song row or artist Popular row) to the
+/// playback queue.
 pub fn queue_selected_track(state: &AppState) -> Option<AppEvent> {
     let track_id = match state.ui.active_view {
         ActiveView::TrackList => state
@@ -1077,12 +1096,7 @@ pub fn queue_selected_track(state: &AppState) -> Option<AppEvent> {
             .get(state.ui.selected_track_index)
             .map(|t| t.id.clone()),
         ActiveView::ArtistPage => selected_artist_top_track(state).map(|t| t.id.clone()),
-        ActiveView::SearchResults if state.ui.active_search_tab == SearchTab::Tracks => state
-            .data
-            .search_results
-            .tracks
-            .get(state.ui.selected_search_index)
-            .map(|t| t.id.clone()),
+        ActiveView::SearchResults => selected_search_track(state).map(|t| t.id.clone()),
         _ => None,
     };
     track_id.map(|id| AppEvent::AddToQueue(vec![id]))
@@ -2386,6 +2400,32 @@ mod tests {
         assert!(queue_selected_track(&state).is_none());
         state.ui.active_view = ActiveView::ArtistList;
         assert!(selected_artist_top_track(&state).is_none());
+    }
+
+    #[test]
+    fn queueing_on_the_all_search_tab_takes_the_song_row_under_the_flat_index() {
+        let mut state = AppState::new();
+        state.ui.active_view = ActiveView::SearchResults;
+        state.ui.active_search_tab = SearchTab::All;
+        state.ui.search_context_query = "Song".into();
+        state.data.search_results.tracks = ["t0", "t1"]
+            .iter()
+            .map(|id| serde_json::from_value(serde_json::json!({"id":id,"name":"Song","artist":"Artist","album":"Album","duration_ms":1000,"image_url":null,"album_id":null})).unwrap())
+            .collect();
+        state.ui.selected_search_index = 0;
+        assert!(queue_selected_track(&state).is_none());
+        state.ui.selected_search_index = 2;
+        assert!(
+            matches!(queue_selected_track(&state), Some(AppEvent::AddToQueue(ids)) if ids == ["t1"])
+        );
+        state.ui.active_search_tab = SearchTab::Tracks;
+        assert!(queue_selected_track(&state).is_none());
+        state.ui.selected_search_index = 1;
+        assert!(
+            matches!(queue_selected_track(&state), Some(AppEvent::AddToQueue(ids)) if ids == ["t1"])
+        );
+        state.ui.active_search_tab = SearchTab::Albums;
+        assert!(selected_search_track(&state).is_none());
     }
 
     fn artist_page_with(top_ids: &[&str], album_count: usize) -> AppState {

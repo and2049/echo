@@ -1490,13 +1490,8 @@ impl EchoApp {
             ActiveView::TrackList => data.tracks.get(ui.selected_track_index),
             ActiveView::Queue => self.state.queue_view_track(ui.selected_queue_index),
             ActiveView::ArtistPage => echo_core::intent::selected_artist_top_track(&self.state),
-            ActiveView::SearchResults
-                if ui.active_search_tab == echo_core::app::SearchTab::Tracks =>
-            {
-                return data
-                    .search_results
-                    .tracks
-                    .get(ui.selected_search_index)
+            ActiveView::SearchResults => {
+                return echo_core::intent::selected_search_track(&self.state)
                     .map(ActionMenuContext::from);
             }
             _ => None,

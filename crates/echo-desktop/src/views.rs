@@ -3234,7 +3234,23 @@ fn search_results(
                                                     .active_theme
                                                     .secondary
                                                     .gpui(WINDOW_FG());
-                                                row.child(
+                                                row.on_mouse_down(
+                                                    MouseButton::Right,
+                                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                                        this.state.ui.selected_search_index = ix;
+                                                        this.context_menu = None;
+                                                        if let Some(ctx) = this.action_target() {
+                                                            this.track_menu = Some(crate::TrackMenuState {
+                                                                ctx,
+                                                                position: Some(event.position),
+                                                                selected: 0,
+                                                                submenu: None,
+                                                            });
+                                                        }
+                                                        cx.notify();
+                                                    }),
+                                                )
+                                                .child(
                                                     div()
                                                         .flex_grow(2.0)
                                                         .flex_basis(px(0.0))

@@ -303,6 +303,24 @@ fn song_row(
             window.focus(&this.focus_handle, cx);
             cx.notify();
         }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(
+                move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                    this.state.ui.selected_search_index = flat;
+                    this.context_menu = None;
+                    if let Some(ctx) = this.action_target() {
+                        this.track_menu = Some(crate::TrackMenuState {
+                            ctx,
+                            position: Some(event.position),
+                            selected: 0,
+                            submenu: None,
+                        });
+                    }
+                    cx.notify();
+                },
+            ),
+        )
         .child(cover)
         .child(
             div()
