@@ -33,6 +33,9 @@ pub fn empty_results(app: &EchoApp) -> AnyElement {
         .into_any_element()
 }
 
+/// The list shown while the search box is focused and empty. Its rows act on mouse down, not
+/// click: the window's own focus handle takes focus on any mouse down in the main area, the
+/// search box loses it and this list is gone before the button comes back up.
 pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
     let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
     let fg = app.state.ui.active_theme.text.gpui(WINDOW_FG());
@@ -73,13 +76,17 @@ pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         .text_color(fg)
                         .cursor_pointer()
                         .hover(move |s| s.bg(palette.row_hover))
-                        .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
-                            if let Some(event) = intent::global_search(&mut this.state, &query) {
-                                this.dispatch(event);
-                            }
-                            window.focus(&this.focus_handle, cx);
-                            cx.notify();
-                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this: &mut EchoApp, _, window, cx| {
+                                if let Some(event) = intent::global_search(&mut this.state, &query)
+                                {
+                                    this.dispatch(event);
+                                }
+                                window.focus(&this.focus_handle, cx);
+                                cx.notify();
+                            }),
+                        )
                         .child(
                             svg()
                                 .path("icons/clock.svg")
@@ -99,11 +106,15 @@ pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                 .p_1()
                                 .rounded_full()
                                 .hover(move |s| s.bg(palette.wash))
-                                .on_click(cx.listener(move |this: &mut EchoApp, _, _, cx| {
-                                    intent::remove_recent_search(&mut this.state, index);
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                }))
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this: &mut EchoApp, _, window, cx| {
+                                        intent::remove_recent_search(&mut this.state, index);
+                                        cx.stop_propagation();
+                                        window.prevent_default();
+                                        cx.notify();
+                                    }),
+                                )
                                 .child(
                                     svg()
                                         .path("icons/win-close.svg")
@@ -120,10 +131,15 @@ pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 .text_sm()
                 .text_color(muted)
                 .cursor_pointer()
-                .on_click(cx.listener(|this: &mut EchoApp, _, _, cx| {
-                    intent::clear_recent_searches(&mut this.state);
-                    cx.notify();
-                }))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this: &mut EchoApp, _, window, cx| {
+                        intent::clear_recent_searches(&mut this.state);
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        cx.notify();
+                    }),
+                )
                 .child(tr(&app.state, "desktop.clear_recent_searches")),
         )
         .into_any_element()
