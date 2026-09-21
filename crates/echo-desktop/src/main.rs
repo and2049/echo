@@ -30,7 +30,7 @@ use echo_core::events::AppEvent;
 use gpui::{
     App, Bounds, Context, Div, Entity, FocusHandle, Hsla, KeyBinding, Pixels, QuitMode,
     ScrollHandle, ScrollStrategy, SharedString, UniformListScrollHandle, Window, WindowBounds,
-    WindowOptions, actions, canvas, div, img, prelude::*, px, size, svg,
+    WindowOptions, actions, canvas, div, prelude::*, px, size, svg,
 };
 use gpui_platform::application;
 use theme::{DesktopPalette, ToGpui, WINDOW_BG, WINDOW_FG};
@@ -2930,13 +2930,9 @@ impl EchoApp {
                             .items_center()
                             .gap_2()
                             .child(match cover {
-                                Some(image) => img(image)
-                                    .object_fit(gpui::ObjectFit::Cover)
-                                    .flex_none()
-                                    .w(px(36.0))
-                                    .h(px(36.0))
-                                    .rounded_md()
-                                    .into_any_element(),
+                                Some(image) => {
+                                    views::cover_image(image, 36.0, 6.0).into_any_element()
+                                }
                                 None => div()
                                     .flex_none()
                                     .w(px(36.0))

@@ -18,8 +18,8 @@ mod playlist_edit;
 mod search;
 use gpui::{
     Animation, AnimationExt, AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent,
-    SharedString, Stateful, Window, canvas, div, ease_out_quint, img, prelude::*, px, relative,
-    svg, uniform_list,
+    SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, relative, svg,
+    uniform_list,
 };
 pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
 
@@ -964,12 +964,8 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 });
                                 match artwork.and_then(|artwork| this.images.get(&artwork)) {
                                     Some(image) => {
-                                        let el = img(image).object_fit(gpui::ObjectFit::Cover)
-                                            .flex_none()
-                                            .w(px(THUMB_EDGE))
-                                            .h(px(THUMB_EDGE));
-                                        if round_thumb { el.rounded_full() } else { el.rounded_sm() }
-                                            .into_any_element()
+                                        let radius = if round_thumb { THUMB_EDGE / 2.0 } else { 4.0 };
+                                        cover_image(image, THUMB_EDGE, radius).into_any_element()
                                     }
                                     None => {
                                         let el = div()
@@ -1758,12 +1754,7 @@ fn context_hero(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElemen
         .and_then(|artwork| app.images.get(&artwork));
     let image_url = context.image_url.clone();
     let cover = match cover {
-        Some(image) => img(image)
-            .object_fit(gpui::ObjectFit::Cover)
-            .size(px(160.0))
-            .rounded_md()
-            .flex_none()
-            .into_any_element(),
+        Some(image) => cover_image(image, 160.0, 6.0).into_any_element(),
         None => thumb_element(app, image_url.as_deref(), 160.0, false, muted),
     };
     div()
@@ -2099,11 +2090,7 @@ fn track_list(
                 .gap_3()
                 .when_some(header_image.filter(|_| wide), |el, image| {
                     el.child(
-                        img(image).object_fit(gpui::ObjectFit::Cover)
-                            .flex_none()
-                            .w(px(72.0))
-                            .h(px(72.0))
-                            .rounded_md(),
+                        cover_image(image, 72.0, 6.0),
                     )
                 })
                 .child(
@@ -3009,6 +2996,29 @@ fn liked_cell(
 }
 
 /// A cover thumbnail box riding the core thumbnail cache, or a music-note placeholder.
+/// A square, centre-cropped picture with `radius` corners. Painted on a canvas rather than
+/// through `img`: gpui stamps the picture's aspect ratio onto the box and taffy then lets a
+/// portrait picture grow taller than the height it was given, which turned artist portraits
+/// into ovals that ran into the row below.
+pub(crate) fn cover_image(
+    image: std::sync::Arc<gpui::RenderImage>,
+    edge: f32,
+    radius: f32,
+) -> impl IntoElement {
+    let radii = gpui::Corners::all(px(radius));
+    canvas(
+        |_, _, _| (),
+        move |bounds, _, window, _| {
+            let image_bounds = gpui::ObjectFit::Cover.get_bounds(bounds, image.size(0));
+            window
+                .paint_image(bounds, image_bounds, radii, image, 0, false)
+                .ok();
+        },
+    )
+    .flex_none()
+    .size(px(edge))
+}
+
 fn thumb_element(
     this: &mut EchoApp,
     url: Option<&str>,
@@ -3026,19 +3036,14 @@ fn thumb_element(
     });
     match artwork.and_then(|artwork| this.images.get(&artwork)) {
         Some(image) => {
-            let el = img(image)
-                .object_fit(gpui::ObjectFit::Cover)
-                .flex_none()
-                .w(px(edge))
-                .h(px(edge));
-            if round {
-                el.rounded_full()
+            let radius = if round {
+                edge / 2.0
             } else if edge >= 56.0 {
-                el.rounded(px(8.0))
+                8.0
             } else {
-                el.rounded_sm()
-            }
-            .into_any_element()
+                4.0
+            };
+            cover_image(image, edge, radius).into_any_element()
         }
         None => {
             let el = div()
@@ -3884,11 +3889,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                 )
                 .when_some(header_image, |el, image| {
                     el.child(
-                        img(image).object_fit(gpui::ObjectFit::Cover)
-                            .flex_none()
-                            .w(px(72.0))
-                            .h(px(72.0))
-                            .rounded_full(),
+                        cover_image(image, 72.0, 36.0),
                     )
                 })
                 .child(
@@ -4527,12 +4528,7 @@ fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement 
                     .items_center()
                     .gap_3()
                     .child(match cover {
-                        Some(image) => img(image)
-                            .object_fit(gpui::ObjectFit::Cover)
-                            .flex_none()
-                            .size(px(32.0))
-                            .rounded_sm()
-                            .into_any_element(),
+                        Some(image) => cover_image(image, 32.0, 4.0).into_any_element(),
                         None => div()
                             .flex_none()
                             .size(px(32.0))
@@ -4827,13 +4823,7 @@ pub fn immersive_view(
         .cloned()
         .and_then(|artwork| app.images.get(&artwork));
     let cover = match cover {
-        Some(image) => img(image)
-            .object_fit(gpui::ObjectFit::Cover)
-            .flex_none()
-            .w(px(edge))
-            .h(px(edge))
-            .rounded_lg()
-            .into_any_element(),
+        Some(image) => cover_image(image, edge, 8.0).into_any_element(),
         None => div()
             .flex_none()
             .w(px(edge))
