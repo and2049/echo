@@ -33,116 +33,136 @@ pub fn empty_results(app: &EchoApp) -> AnyElement {
         .into_any_element()
 }
 
-/// The list shown while the search box is focused and empty. Its rows act on mouse down, not
-/// click: the window's own focus handle takes focus on any mouse down in the main area, the
-/// search box loses it and this list is gone before the button comes back up.
-pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
-    let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
-    let fg = app.state.ui.active_theme.text.gpui(WINDOW_FG());
-    let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
-    div()
-        .id("recent-searches")
-        .flex_1()
-        .p_4()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .overflow_y_scroll()
-        .child(
+/// Recent searches under the search box while it has focus, narrowed to the entries that
+/// contain what has been typed; `None` once nothing matches. Painted deferred so it lies over
+/// the page. Rows act on mouse down, not click: the window's own focus handle takes focus on any
+/// mouse down outside the box, so a click would have closed the dropdown before the button came
+/// back up.
+pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> Option<AnyElement> {
+    let matches = echo_core::search::matching_recent_searches(
+        &app.state.ui.library_config.recent_searches,
+        &app.search_input,
+    );
+    if matches.is_empty() {
+        return None;
+    }
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
+    let rows: Vec<_> = matches
+        .into_iter()
+        .map(|(index, query)| {
+            let query = query.to_string();
+            let run = query.clone();
             div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::BOLD)
+                .id(("recent-search", index))
+                .mx_1()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_sm()
                 .text_color(fg)
-                .child(tr(&app.state, "desktop.recent_searches")),
-        )
-        .children(
-            app.state
-                .ui
-                .library_config
-                .recent_searches
-                .iter()
-                .enumerate()
-                .map(|(index, query)| {
-                    let query = query.clone();
-                    div()
-                        .id(index)
+                .cursor_pointer()
+                .hover(move |s| s.bg(palette.menu_hover))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this: &mut EchoApp, _, window, cx| {
+                        if let Some(event) = intent::global_search(&mut this.state, &run) {
+                            this.dispatch(event);
+                        }
+                        window.focus(&this.focus_handle, cx);
+                        cx.notify();
+                    }),
+                )
+                .child(
+                    svg()
+                        .path("icons/clock.svg")
                         .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .px_3()
-                        .py_2()
-                        .rounded_md()
-                        .text_color(fg)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(palette.row_hover))
+                        .size(px(14.0))
+                        .text_color(muted),
+                )
+                .child(div().flex_1().min_w_0().truncate().child(query))
+                .child(
+                    div()
+                        .id("remove-recent")
+                        .flex_none()
+                        .p_1()
+                        .rounded_full()
+                        .hover(move |s| s.bg(palette.wash))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this: &mut EchoApp, _, window, cx| {
-                                if let Some(event) = intent::global_search(&mut this.state, &query)
-                                {
-                                    this.dispatch(event);
-                                }
-                                window.focus(&this.focus_handle, cx);
+                                intent::remove_recent_search(&mut this.state, index);
+                                cx.stop_propagation();
+                                window.prevent_default();
                                 cx.notify();
                             }),
                         )
                         .child(
                             svg()
-                                .path("icons/clock.svg")
-                                .size(px(18.0))
+                                .path("icons/win-close.svg")
+                                .size(px(12.0))
                                 .text_color(muted),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .child(app.state.ui.library_config.recent_searches[index].clone()),
-                        )
-                        .child(
-                            div()
-                                .id("remove-recent")
-                                .p_1()
-                                .rounded_full()
-                                .hover(move |s| s.bg(palette.wash))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this: &mut EchoApp, _, window, cx| {
-                                        intent::remove_recent_search(&mut this.state, index);
-                                        cx.stop_propagation();
-                                        window.prevent_default();
-                                        cx.notify();
-                                    }),
-                                )
-                                .child(
-                                    svg()
-                                        .path("icons/win-close.svg")
-                                        .size(px(16.0))
-                                        .text_color(muted),
-                                ),
-                        )
-                }),
-        )
-        .child(
-            div()
-                .id("clear-recent")
-                .py_2()
-                .text_sm()
-                .text_color(muted)
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this: &mut EchoApp, _, window, cx| {
-                        intent::clear_recent_searches(&mut this.state);
-                        cx.stop_propagation();
-                        window.prevent_default();
-                        cx.notify();
-                    }),
+                        ),
                 )
-                .child(tr(&app.state, "desktop.clear_recent_searches")),
+        })
+        .collect();
+    Some(
+        gpui::deferred(
+            div()
+                .id("recent-searches")
+                .absolute()
+                .top(relative(1.0))
+                .left_0()
+                .right_0()
+                .mt_1()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.menu_border)
+                .bg(surface)
+                .py_1()
+                .flex()
+                .flex_col()
+                .overflow_hidden()
+                .child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(tr(&app.state, "desktop.recent_searches")),
+                )
+                .children(rows)
+                .child(
+                    div()
+                        .id("clear-recent")
+                        .mx_1()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .text_xs()
+                        .text_color(muted)
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(palette.menu_hover))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this: &mut EchoApp, _, window, cx| {
+                                intent::clear_recent_searches(&mut this.state);
+                                cx.stop_propagation();
+                                window.prevent_default();
+                                cx.notify();
+                            }),
+                        )
+                        .child(tr(&app.state, "desktop.clear_recent_searches")),
+                ),
         )
-        .into_any_element()
+        .into_any_element(),
+    )
 }
 
 fn section_title(

@@ -1216,11 +1216,6 @@ pub fn main_area(
     let search = search_bar(app, window, cx).into_any_element();
     let body = if app.state.ui.mode == AppMode::Setup {
         setup_view(app, window, cx).into_any_element()
-    } else if app.search_focus.is_focused(window)
-        && app.search_input.is_empty()
-        && !app.state.ui.library_config.recent_searches.is_empty()
-    {
-        search::recent_searches(app, cx)
     } else {
         match app.state.ui.active_view {
             ActiveView::Home => home_view(app, window, cx).into_any_element(),
@@ -1466,6 +1461,7 @@ fn search_bar(
     let query = app.search_input.clone();
     let collapsed = app.sidebar_collapsed;
     let nav_cluster = collapsed.then(|| nav_button_cluster(app, cx).into_any_element());
+    let recent = focused.then(|| search::recent_searches(app, cx)).flatten();
 
     div()
         .flex_none()
@@ -1490,6 +1486,8 @@ fn search_bar(
                 .id("search-box")
                 .key_context(crate::SEARCH_CONTEXT)
                 .track_focus(&app.search_focus)
+                .relative()
+                .children(recent)
                 .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                     this.handle_search_key(event, window, cx)
                 }))

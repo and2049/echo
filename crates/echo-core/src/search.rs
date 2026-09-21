@@ -151,6 +151,18 @@ pub fn all_tab_rows(results: &SearchResults, query: &str) -> Vec<SearchRow> {
     rows
 }
 
+/// The history entries that contain `typed` (case-insensitive, trimmed), with their history
+/// index so a row can still be removed; everything while nothing has been typed.
+pub fn matching_recent_searches<'a>(history: &'a [String], typed: &str) -> Vec<(usize, &'a str)> {
+    let typed = typed.trim().to_lowercase();
+    history
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| entry.to_lowercase().contains(&typed))
+        .map(|(index, entry)| (index, entry.as_str()))
+        .collect()
+}
+
 pub fn remember_search(history: &mut Vec<String>, query: &str) {
     let query = query.trim();
     if query.is_empty() {
@@ -286,5 +298,19 @@ mod tests {
         assert_eq!(history.len(), 10);
         remember_search(&mut history, " ");
         assert_eq!(history.len(), 10);
+    }
+
+    #[test]
+    fn recent_searches_narrow_to_the_typed_text_and_keep_their_history_index() {
+        let history = vec!["big bang".to_string(), "trade L wyd".to_string()];
+        assert_eq!(
+            matching_recent_searches(&history, ""),
+            [(0, "big bang"), (1, "trade L wyd")]
+        );
+        assert_eq!(
+            matching_recent_searches(&history, " WYD"),
+            [(1, "trade L wyd")]
+        );
+        assert!(matching_recent_searches(&history, "x").is_empty());
     }
 }
