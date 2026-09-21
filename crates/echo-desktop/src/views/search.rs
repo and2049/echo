@@ -296,13 +296,18 @@ fn song_row(
         })
         .hover(move |s| s.bg(palette.row_hover))
         .cursor_pointer()
-        .on_click(cx.listener(move |this: &mut EchoApp, _, window, cx| {
-            if let Some(event) = intent::activate_search_result(&mut this.state, flat) {
-                this.dispatch(event);
-            }
-            window.focus(&this.focus_handle, cx);
-            cx.notify();
-        }))
+        .on_click(cx.listener(
+            move |this: &mut EchoApp, event: &gpui::ClickEvent, window, cx| {
+                this.state.ui.selected_search_index = flat;
+                if event.click_count() >= 2
+                    && let Some(event) = intent::activate_search_result(&mut this.state, flat)
+                {
+                    this.dispatch(event);
+                }
+                window.focus(&this.focus_handle, cx);
+                cx.notify();
+            },
+        ))
         .on_mouse_down(
             MouseButton::Right,
             cx.listener(

@@ -3209,12 +3209,18 @@ fn search_results(
                                     palette.row_hover,
                                     |row| {
                                         let row = row.gap_3().on_click(cx.listener(
-                                            move |this: &mut EchoApp, _event, _window, cx| {
-                                                if let Some(event) =
-                                                    echo_core::intent::activate_search_result(
-                                                        &mut this.state,
-                                                        ix,
-                                                    )
+                                            move |this: &mut EchoApp,
+                                                  event: &gpui::ClickEvent,
+                                                  _window,
+                                                  cx| {
+                                                this.state.ui.selected_search_index = ix;
+                                                if (tab != SearchTab::Tracks
+                                                    || event.click_count() >= 2)
+                                                    && let Some(event) =
+                                                        echo_core::intent::activate_search_result(
+                                                            &mut this.state,
+                                                            ix,
+                                                        )
                                                 {
                                                     this.dispatch(event);
                                                 }
