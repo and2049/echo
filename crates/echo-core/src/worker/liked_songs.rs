@@ -33,8 +33,14 @@ impl Drop for SyncGuard {
 }
 
 /// Starts a sync unless one is already running. `force_head` asks for a head check even
-/// when the last one is recent, as an explicit refresh does.
-pub fn spawn_sync(api: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>, force_head: bool) {
+/// when the last one is recent, as an explicit refresh does; `report_errors` turns a failed
+/// sync, a rate-limit cooldown included, into a status message.
+pub fn spawn_sync(
+    api: Option<EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    force_head: bool,
+    report_errors: bool,
+) {
     let Some(api) = api else {
         return;
     };
@@ -46,6 +52,19 @@ pub fn spawn_sync(api: Option<EchoSpotifyClient>, tx: mpsc::Sender<WorkerEvent>,
         let _guard = guard;
         if let Err(error) = sync(&api, &tx, force_head).await {
             log(&format!("liked_songs sync stopped err={error:#}"));
+            if report_errors {
+                // The gate's cooldown message already carries the remaining time.
+                let message = match error.to_string() {
+                    message if message.starts_with("rate limited") => message,
+                    _ => super::errors::api_request_error_message(&error),
+                };
+                let _ = tx
+                    .send(WorkerEvent::ApiRequestFailed {
+                        label: "Liked Songs".to_string(),
+                        message,
+                    })
+                    .await;
+            }
         }
     });
 }
@@ -66,6 +85,9 @@ async fn sync(
             match LikedSongs::update(|liked| liked.apply_head(page, now)) {
                 HeadOutcome::Added(ids) => {
                     log(&format!("liked_songs head_check added={}", ids.len()));
+                    if !ids.is_empty() {
+                        publish_list(tx).await;
+                    }
                     publish_likes(tx, ids).await;
                     return Ok(());
                 }
@@ -97,7 +119,14 @@ async fn sync(
         pages += 1;
         let persist = pages.is_multiple_of(WALK_CHECKPOINT_PAGES);
         match LikedSongs::update_and_persist(persist, |liked| liked.apply_walk_page(page, now)) {
-            WalkOutcome::Continue { offset: next } => offset = next,
+            WalkOutcome::Continue { offset: next } => {
+                offset = next;
+                // A first walk grows the open list as it goes; a re-walk keeps showing the
+                // committed one, so there is nothing new to send until it is done.
+                if (pages == 1 || persist) && LikedSongs::inspect(|liked| liked.total.is_none()) {
+                    publish_list(tx).await;
+                }
+            }
             WalkOutcome::Restarted { offset: next } => {
                 restarts += 1;
                 if restarts > MAX_WALK_RESTARTS {
@@ -115,6 +144,7 @@ async fn sync(
             WalkOutcome::Done => {
                 checkpoint();
                 log(&format!("liked_songs walk done pages={pages}"));
+                publish_list(tx).await;
                 publish_walk(tx).await;
                 return Ok(());
             }
@@ -124,6 +154,14 @@ async fn sync(
 
 fn checkpoint() {
     LikedSongs::update(|_| ());
+}
+
+pub async fn publish_list(tx: &mpsc::Sender<WorkerEvent>) {
+    let (tracks, total) =
+        LikedSongs::inspect(|liked| (liked.visible().unwrap_or_default().to_vec(), liked.count()));
+    let _ = tx
+        .send(WorkerEvent::LikedSongsUpdated { tracks, total })
+        .await;
 }
 
 /// Hearts for rows a head check found.
@@ -141,6 +179,8 @@ async fn publish_likes(tx: &mpsc::Sender<WorkerEvent>, ids: Vec<String>) {
 async fn publish_walk(tx: &mpsc::Sender<WorkerEvent>) {
     let ids = LikedSongs::inspect(LikedSongs::ids);
     let update: HashMap<String, bool> = AppConfig::update_cache(|cache| {
+        // Where the view kept its first 100 rows before liked_songs.json existed.
+        cache.context_tracks.remove("playlist:LIKED_SONGS");
         let mut update = HashMap::new();
         cache.liked_tracks.retain(|id| {
             let keep = id.starts_with("local:") || ids.contains(id);

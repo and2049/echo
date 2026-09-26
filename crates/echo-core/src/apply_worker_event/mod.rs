@@ -87,6 +87,9 @@ pub fn apply_worker_event(
         WorkerEvent::LikedStatusUpdate(results) => {
             library::handle_liked_status_update(state, results)
         }
+        WorkerEvent::LikedSongsUpdated { tracks, total } => {
+            data::handle_liked_songs_updated(state, worker_tx, tracks, total)
+        }
         WorkerEvent::Tick => playback::handle_tick(state, app_tx),
         WorkerEvent::PlaybackStarted { item } => {
             playback::handle_playback_started(state, app_tx, worker_tx, item)

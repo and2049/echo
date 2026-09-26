@@ -817,7 +817,7 @@ impl Worker {
                                         spotify_opt = Some(client);
                                         let _ = self.tx.send(WorkerEvent::AuthenticationComplete).await;
 
-                                        liked_songs::spawn_sync(api_client.clone(), self.tx.clone(), false);
+                                        liked_songs::spawn_sync(api_client.clone(), self.tx.clone(), false, false);
 
                                         audio::spawn_librespot_daemon(
                                             String::new(),
@@ -1789,13 +1789,17 @@ impl Worker {
                                             sp.client.library_remove([lib_id]).await
                                         };
                                         if written.is_ok() {
-                                            crate::liked_songs::LikedSongs::update(|liked| {
+                                            let removed = crate::liked_songs::LikedSongs::update(|liked| {
                                                 if like {
                                                     liked.liked(&track_id);
+                                                    false
                                                 } else {
-                                                    liked.unliked(&track_id);
+                                                    liked.unliked(&track_id)
                                                 }
                                             });
+                                            if removed {
+                                                liked_songs::publish_list(&self.tx).await;
+                                            }
                                         }
                                         AppConfig::update_cache(|cache| {
                                             if like {

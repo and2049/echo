@@ -160,11 +160,7 @@ impl EchoSpotifyClient {
             ..Default::default()
         };
         if context.id == "LIKED_SONGS" {
-            let page = self
-                .third_party
-                .current_user_saved_tracks_manual(None, Some(1), Some(0))
-                .await?;
-            details.track_count = Some(page.total);
+            details.track_count = crate::liked_songs::LikedSongs::inspect(|liked| liked.count());
             return Ok(details);
         }
         let resource = if context.is_album() {
