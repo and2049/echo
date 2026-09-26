@@ -35,14 +35,9 @@ pub struct AppConfig {
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct CacheData {
     #[serde(default)]
+    /// Liked-state hearts: Spotify ids, kept in step by the Liked Songs sync, plus `local:`
+    /// ids, which only echo knows about.
     pub liked_tracks: HashSet<String>,
-    #[serde(default)]
-    pub last_liked_sync_time: Option<u64>,
-    /// When the whole Liked Songs library was last walked. The hourly sync only tops up with
-    /// the most recent page, which cannot observe an unlike; the full walk rebuilds the set so
-    /// tracks unliked on another device stop showing a heart.
-    #[serde(default)]
-    pub last_liked_full_sync_time: Option<u64>,
     #[serde(default)]
     pub playlists: Option<CachedEntry<Vec<Playlist>>>,
     #[serde(default)]

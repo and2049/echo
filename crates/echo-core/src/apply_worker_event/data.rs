@@ -95,6 +95,27 @@ pub fn handle_tracks_loaded(
     state.sort_tracks(state.ui.track_sort);
 }
 
+/// Refreshes Liked Songs in place when it is the open list; otherwise the stored copy is
+/// what the next open shows.
+pub fn handle_liked_songs_updated(
+    state: &mut AppState,
+    worker_tx: &mpsc::Sender<WorkerEvent>,
+    tracks: Vec<Track>,
+    total: Option<u32>,
+) {
+    let Some(context) = state
+        .data
+        .active_tracklist_context
+        .clone()
+        .filter(|context| context.id == "LIKED_SONGS")
+    else {
+        return;
+    };
+    let details = crate::context_details::liked_songs(&context, &tracks, total);
+    handle_tracks_loaded(state, worker_tx, tracks, context);
+    state.data.active_context_details = Some(details);
+}
+
 pub fn handle_tracks_load_failed(state: &mut AppState, message: String) {
     set_timed_status(state, format!("Unable to load tracks: {message}"), 5);
 }
@@ -323,6 +344,43 @@ mod tests {
             TrackListContext::album("old".into(), "Old".into(), "Artist".into(), None),
         );
         assert_eq!(state.data.tracks.len(), 2);
+    }
+
+    #[test]
+    fn liked_songs_updates_refresh_only_the_open_liked_list() {
+        let (tx, _) = mpsc::channel(1);
+        let mut state = AppState::new();
+        let album = TrackListContext::album("a".into(), "A".into(), "Artist".into(), None);
+        state.begin_tracklist_load(album);
+        handle_liked_songs_updated(&mut state, &tx, vec![sample_track("x")], Some(1));
+        assert!(state.data.tracks.is_empty());
+
+        let liked = TrackListContext::playlist(
+            "LIKED_SONGS".into(),
+            "Liked Songs".into(),
+            String::new(),
+            "spotify".into(),
+            None,
+        );
+        state.begin_tracklist_load(liked);
+        handle_liked_songs_updated(
+            &mut state,
+            &tx,
+            vec![sample_track("x"), sample_track("y")],
+            Some(3),
+        );
+        state.ui.selected_track_index = 1;
+        handle_liked_songs_updated(
+            &mut state,
+            &tx,
+            vec![sample_track("new"), sample_track("x"), sample_track("y")],
+            Some(4),
+        );
+        assert_eq!(state.data.tracks.len(), 3);
+        assert_eq!(state.data.tracks[state.ui.selected_track_index].id, "y");
+        let details = state.data.active_context_details.as_ref().unwrap();
+        assert_eq!(details.track_count, Some(4));
+        assert_eq!(details.duration_ms, 3000);
     }
 
     use super::*;

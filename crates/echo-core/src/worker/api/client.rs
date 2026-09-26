@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::{AppConfig, CacheData},
+    liked_songs::SavedPage,
     models::{Album, Artist, ArtistPageData, Track},
 };
 
@@ -159,11 +160,7 @@ impl EchoSpotifyClient {
             ..Default::default()
         };
         if context.id == "LIKED_SONGS" {
-            let page = self
-                .third_party
-                .current_user_saved_tracks_manual(None, Some(1), Some(0))
-                .await?;
-            details.track_count = Some(page.total);
+            details.track_count = crate::liked_songs::LikedSongs::inspect(|liked| liked.count());
             return Ok(details);
         }
         let resource = if context.is_album() {
@@ -643,6 +640,18 @@ impl EchoSpotifyClient {
         Ok(artists)
     }
 
+    /// One page of Liked Songs through the rate-limit gate: `Ok(None)` when another page
+    /// request is already in flight, an error while a cooldown from an earlier 429 runs.
+    pub async fn saved_tracks_page(&self, offset: u32) -> Result<Option<SavedPage>> {
+        let key = CacheKey::LikedSongs;
+        if !self.begin_fetch(key.clone(), "Liked Songs").await? {
+            return Ok(None);
+        }
+        let result = self.third_party_json(&saved_tracks_url(offset)).await;
+        self.finish_fetch(&key, &result).await;
+        Ok(Some(parse_saved_tracks_page(&result?, offset)))
+    }
+
     fn third_party_worker(&self) -> SpotifyWorker {
         SpotifyWorker::from_client(self.third_party.clone())
     }
@@ -978,6 +987,47 @@ fn parse_artist_albums_page(json: &serde_json::Value) -> (Vec<Album>, bool) {
     (albums, has_next)
 }
 
+fn saved_tracks_url(offset: u32) -> String {
+    format!(
+        "https://api.spotify.com/v1/me/tracks?limit={}&offset={offset}",
+        crate::liked_songs::PAGE_LIMIT
+    )
+}
+
+fn parse_saved_tracks_page(json: &serde_json::Value, offset: u32) -> SavedPage {
+    let items = json
+        .get("items")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let mut track = item.get("track").and_then(parse::track)?;
+                    // The same form rspotify gives playlist rows, so date-added sorts alike.
+                    track.added_at = item
+                        .get("added_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+                        .map(|v| v.with_timezone(&chrono::Utc).to_rfc3339());
+                    Some(track)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    SavedPage {
+        offset: json
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .map_or(offset, |v| v as u32),
+        total: json
+            .get("total")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default() as u32,
+        items,
+        has_next: json.get("next").is_some_and(|v| !v.is_null()),
+    }
+}
+
 fn record_rate_limit_cooldown(key: &str, retry_after: Duration) -> Duration {
     AppConfig::update_cache(|cache| cache.record_rate_limit_cooldown(key.to_string(), retry_after))
 }
@@ -989,6 +1039,7 @@ fn persistent_cooldown_key(key: &CacheKey) -> String {
         CacheKey::TopArtists(_) => "top_artists".to_string(),
         CacheKey::RecentlyPlayed => "recently_played".to_string(),
         CacheKey::FollowedArtists => "followed_artists".to_string(),
+        CacheKey::LikedSongs => "liked_songs".to_string(),
         CacheKey::ArtistAlbums(artist_id) => format!("artist_albums:{artist_id}"),
         CacheKey::ArtistTopTracks(artist_id) => format!("artist_top_tracks:{artist_id}"),
     }
@@ -1089,5 +1140,37 @@ mod tests {
 
         assert!(albums.is_empty());
         assert!(!has_next);
+    }
+
+    #[test]
+    fn saved_tracks_page_keeps_a_slot_for_every_item() {
+        let json = serde_json::json!({
+            "offset": 50,
+            "total": 103,
+            "next": "https://api.spotify.com/v1/me/tracks?offset=100&limit=50",
+            "items": [
+                {
+                    "added_at": "2024-05-01T10:00:00Z",
+                    "track": {
+                        "id": "a", "name": "A", "duration_ms": 1000,
+                        "artists": [{"id": "ar", "name": "Artist"}],
+                        "album": {"id": "al", "name": "Album", "images": []}
+                    }
+                },
+                {"added_at": "2024-04-01T10:00:00Z", "track": {"is_local": true, "id": null, "name": "Local"}},
+                {"added_at": "2024-03-01T10:00:00Z", "track": null}
+            ]
+        });
+
+        let page = parse_saved_tracks_page(&json, 50);
+
+        assert_eq!((page.offset, page.total, page.has_next), (50, 103, true));
+        assert_eq!(page.items.len(), 3);
+        let first = page.items[0].as_ref().unwrap();
+        assert_eq!(first.id, "a");
+        assert_eq!(first.added_at.as_deref(), Some("2024-05-01T10:00:00+00:00"));
+        assert!(page.items[1].is_none());
+        assert!(page.items[2].is_none());
+        assert!(saved_tracks_url(50).ends_with("/v1/me/tracks?limit=50&offset=50"));
     }
 }

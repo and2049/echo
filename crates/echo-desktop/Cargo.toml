@@ -40,7 +40,10 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd
 tray-icon = "0.24"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ksni = "0.3"
+# Not ksni's default "tokio" feature: it switches zbus to tokio for the whole build, and
+# GPUI's own zbus users (accessibility, portals, notifications) then panic with "no reactor
+# running" because they call into zbus from threads outside any tokio runtime.
+ksni = { version = "0.3", default-features = false, features = ["async-io"] }
 
 [build-dependencies]
 embed-resource = "3"

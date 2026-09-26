@@ -3,6 +3,7 @@ pub mod artist_page;
 pub mod audio;
 pub mod browse;
 pub mod errors;
+mod liked_songs;
 pub mod local_files;
 pub mod local_playback;
 pub mod media;
@@ -816,79 +817,7 @@ impl Worker {
                                         spotify_opt = Some(client);
                                         let _ = self.tx.send(WorkerEvent::AuthenticationComplete).await;
 
-                                        if let Some(ref sp) = spotify_opt {
-                                            use rspotify::prelude::OAuthClient;
-                                            use rspotify::prelude::Id;
-
-                                            // Eagerly fetch and cache Liked Songs in background
-                                            let client = sp.client.clone();
-                                            let tx = self.tx.clone();
-                                            tokio::spawn(async move {
-                                                use futures_util::stream::StreamExt;
-                                                let cache = crate::config::AppConfig::load_cache();
-                                                let mut tracks = cache.liked_tracks;
-                                                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                                                // A full walk rebuilds the set, so unlikes made elsewhere disappear; it is
-                                                // the expensive path, so it runs daily. In between, top up hourly with the
-                                                // most recent page to pick up new likes cheaply.
-                                                let full_sync = cache.last_liked_full_sync_time.map(|t| now > t + 86400).unwrap_or(true);
-                                                let top_up = cache.last_liked_sync_time.map(|t| now > t + 3600).unwrap_or(true);
-
-                                                if full_sync {
-                                                    let mut stream = client.current_user_saved_tracks(None);
-                                                    let mut rebuilt = std::collections::HashSet::new();
-                                                    let mut seen = 0u32;
-
-                                                    while let Some(item) = stream.next().await {
-                                                        if let Ok(saved_track) = item
-                                                            && let Some(id) = saved_track.track.id {
-                                                                rebuilt.insert(id.id().to_string());
-                                                            }
-                                                        seen += 1;
-                                                        // rspotify pages this 50 at a time. A large library is a lot of
-                                                        // requests back to back, so pause briefly between pages; this runs
-                                                        // in the background and nothing waits on it.
-                                                        if seen.is_multiple_of(50) {
-                                                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                                                        }
-                                                    }
-
-                                                    // Replace rather than union: the point of the walk is to drop ids that
-                                                    // are no longer saved.
-                                                    tracks = rebuilt;
-                                                    crate::config::AppConfig::update_cache(|cache| {
-                                                        cache.last_liked_full_sync_time = Some(now);
-                                                        cache.last_liked_sync_time = Some(now);
-                                                        cache.liked_tracks = tracks.clone();
-                                                    });
-                                                } else if top_up {
-                                                    let mut stream = client.current_user_saved_tracks(None);
-                                                    let mut fetched_count = 0;
-
-                                                    while let Some(item) = stream.next().await {
-                                                        if let Ok(saved_track) = item
-                                                            && let Some(id) = saved_track.track.id {
-                                                                tracks.insert(id.id().to_string());
-                                                            }
-                                                        fetched_count += 1;
-                                                        if fetched_count >= 100 {
-                                                            break; // One page is enough to catch recent likes between full walks.
-                                                        }
-                                                    }
-
-                                                    crate::config::AppConfig::update_cache(|cache| {
-                                                        cache.last_liked_sync_time = Some(now);
-                                                        cache.liked_tracks = tracks.clone();
-                                                    });
-                                                }
-
-                                                    let mut results = std::collections::HashMap::new();
-                                                    for tid in tracks {
-                                                        results.insert(tid, true);
-                                                    }
-                                                    let _ = tx.send(WorkerEvent::LikedStatusUpdate(results)).await;
-                                            });
-                                        }
+                                        liked_songs::spawn_sync(api_client.clone(), self.tx.clone(), false, false);
 
                                         audio::spawn_librespot_daemon(
                                             String::new(),
@@ -1854,10 +1783,23 @@ impl Worker {
                                     use rspotify::model::{TrackId, LibraryId};
                                     if let Ok(tid) = TrackId::from_id(&track_id) {
                                         let lib_id = LibraryId::Track(tid);
-                                        if like {
-                                            let _ = sp.client.library_add([lib_id]).await;
+                                        let written = if like {
+                                            sp.client.library_add([lib_id]).await
                                         } else {
-                                            let _ = sp.client.library_remove([lib_id]).await;
+                                            sp.client.library_remove([lib_id]).await
+                                        };
+                                        if written.is_ok() {
+                                            let removed = crate::liked_songs::LikedSongs::update(|liked| {
+                                                if like {
+                                                    liked.liked(&track_id);
+                                                    false
+                                                } else {
+                                                    liked.unliked(&track_id)
+                                                }
+                                            });
+                                            if removed {
+                                                liked_songs::publish_list(&self.tx).await;
+                                            }
                                         }
                                         AppConfig::update_cache(|cache| {
                                             if like {
