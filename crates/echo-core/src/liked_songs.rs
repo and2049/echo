@@ -242,6 +242,11 @@ impl LikedSongs {
             .clone()
     }
 
+    /// Reads the process-wide state in place, for callers that need a little of a large list.
+    pub fn inspect<R>(read: impl FnOnce(&Self) -> R) -> R {
+        read(&cell().lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
     /// Changes the process-wide state under its lock and writes it out.
     pub fn update<R>(change: impl FnOnce(&mut Self) -> R) -> R {
         Self::update_and_persist(true, change)
