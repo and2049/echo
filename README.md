@@ -23,7 +23,7 @@ echo is a native desktop music player and Spotify client written in Rust. echo b
 - **Full playback control**: Play/pause, next/previous, seek, shuffle, repeat, volume, queue, and device switching from the now-playing bar.
 - **Synced lyrics**: Time-synced lyrics inline in the player bar or as a full-screen view.
 - **What's New**: A feed of recent albums and singles from the artists you follow, refreshed at most every 6 hours.
-- **Blazing fast Liked Songs**: Your entire Liked Songs library is cached locally (`~/.config/echo/cache.json`) for zero-latency, rate-limit-free scrolling, even with thousands of saved tracks.
+- **Blazing fast Liked Songs**: Your entire Liked Songs library is cached locally (`~/.config/echo/liked_songs.json`) for zero-latency scrolling, even with thousands of saved tracks. Keeping it current usually takes a single request; a full re-read is paced, resumable, and backs off when Spotify rate-limits.
 - **Library management**: Create, rename, delete, and organize playlists into folders; reorder tracks in your own playlists.
 - **Local music support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
 - **Search**: Fast global search (`ctrl-k`) across the Spotify catalog and your scanned local tracks.
@@ -296,7 +296,7 @@ Embedded artwork is used when available. If a track has no embedded artwork, ech
 ## Troubleshooting
 - **Theme color rendering issues (Windows)**: Disable "Adjust indistinguishable text" in the Appearance settings of the Defaults profile. 
 - **Images not rendering**: Cover art is drawn with half-block cells and needs nothing from the terminal beyond truecolor support, which every modern terminal has.
-- **Cache desync**: If your Liked Songs are out of sync with other devices, simply restart echo. It eagerly syncs your library in the background on startup.
+- **Cache desync**: Likes from other devices show up on startup or when you open Liked Songs (checked at most every 15 minutes). Songs unliked elsewhere are caught at the same point and trigger a background re-read of the library; a rate-limited re-read picks up where it stopped. Deleting `~/.config/echo/liked_songs.json` while echo is closed forces a full re-read.
 - **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
 - **Audio sounds mono or muffled (Bluetooth headsets)**: Windows exposes a Bluetooth headset as two output devices — a stereo "Headphones" (A2DP) endpoint, and a mono "Hands-Free" (HFP) endpoint capped at 16 kHz. Windows switches to Hands-Free whenever an application opens the microphone. Check `echo-debug-audio-spotify.log`: if it reports `channels=1`, quit whatever is holding the mic and select the stereo endpoint as your default output device.
-- **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences), `~/.config/echo/cache.json` (holds liked tracks), `~/.config/echo/local_library.json`, and `~/.config/echo/local_playlists.json`.
+- **Configuration Path**: `~/.config/echo/config.toml` (holds tokens and preferences), `~/.config/echo/cache.json` (holds library caches and liked-state hearts), `~/.config/echo/liked_songs.json` (holds the Liked Songs list), `~/.config/echo/local_library.json`, and `~/.config/echo/local_playlists.json`.
