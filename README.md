@@ -10,7 +10,7 @@
     <a href="README.zh.md">简体中文</a>
 </p>
 
-echo is a native desktop music player and Spotify client written in Rust. echo brings your entire Spotify library — liked songs, playlists, albums, and the artists you follow — plus your local music files into one fast, keyboard-friendly app, with full playback control, synced lyrics, and dynamic theming. A companion terminal client (`spotify`) ships in the same install for when you'd rather live in the terminal.
+echo is a native desktop music player and Spotify client written in Rust. echo brings your entire Spotify library — liked songs, playlists, albums, and the artists you follow — plus your local music files into one fast, keyboard-friendly app, with full playback control, synced lyrics, and dynamic theming.
 
 ![echo desktop app](assets/echo-desktop.png)
 
@@ -27,7 +27,6 @@ echo is a native desktop music player and Spotify client written in Rust. echo b
 - **Local music support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
 - **Search**: Fast global search (`ctrl-k`) across the Spotify catalog and your scanned local tracks.
 - **Dynamic theming**: Ship-with themes plus live theme editing — see [Themes](#themes).
-- **Terminal client**: The same install also puts a full-featured `spotify` TUI on your `PATH` — see [Terminal client (TUI)](#terminal-client-tui).
 
 ## Setup
 
@@ -39,8 +38,6 @@ echo is a native desktop music player and Spotify client written in Rust. echo b
    - echo also uses `http://127.0.0.1:8989/login` for its internal first-party Spotify session.
 
 ### Installation
-
-One command, one install: the desktop app **and** the `spotify` terminal command.
 
 **Linux and macOS**
 
@@ -54,13 +51,13 @@ curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh |
 irm https://github.com/and2049/echo/releases/latest/download/install.ps1 | iex
 ```
 
-Neither needs administrator rights. Both put `spotify` on your `PATH` — open a new terminal afterwards — and add the desktop app to your Start menu, Launchpad, or applications menu.
+Neither needs administrator rights. Both add echo to your Start menu, Launchpad, or applications menu.
 
 | Platform | Where it lands |
 | --- | --- |
 | Windows | `%LOCALAPPDATA%\Programs\echo` (installed from the release MSI, x64) |
-| macOS | `/Applications/echo.app`, with `spotify` linked into `~/.local/bin` (Apple Silicon) |
-| Linux | `~/.local/share/echo`, with both commands linked into `~/.local/bin` (x86_64) |
+| macOS | `/Applications/echo.app` (Apple Silicon) |
+| Linux | `~/.local/share/echo`, with `echo-desktop` linked into `~/.local/bin` (x86_64) |
 
 To pin a version or remove echo:
 
@@ -88,17 +85,9 @@ OpenGL, so `libvulkan1` plus your GPU's driver is worth having but is not requir
 
 #### Updating
 
-Desktop releases install automatically in the background; turn this off in Settings or with `:autoupdate off`.
+After the first install, echo updates itself — no reinstall, no administrator rights. New releases install automatically in the background; turn this off in Settings or with `:autoupdate off`, and check by hand from **Settings → Updates → Check for updates**. An update swaps the app and its bundled themes in place and asks you to restart.
 
-After the first install, echo updates itself — no reinstall, no administrator rights:
-
-```bash
-spotify upgrade          # upgrade to the latest release
-spotify upgrade --check  # only report whether one is available
-spotify upgrade 0.4.6    # move to a specific version
-```
-
-The desktop app does the same from **Settings → Updates → Check for updates**. Both swap the binaries and bundled themes in place and ask you to restart.
+> Earlier releases also shipped a `spotify` terminal client. It has been removed; updating from one of those releases deletes it along with its `~/.local/bin` link.
 
 ### Build from Source
 
@@ -115,101 +104,71 @@ sudo apt-get install -y --no-install-recommends \
 ```bash
 git clone https://github.com/and2049/echo.git
 cd echo
-cargo build --release -p echo-desktop -p spotify-tui
+cargo run --release
 ```
 
-Run the desktop app or the terminal client:
-
-```bash
-./target/release/echo-desktop   # desktop app
-./target/release/spotify        # terminal client
-```
-
-A bare `cargo build --release` (or `cargo run`) builds only the `spotify` terminal client — the workspace's default member — so name `-p echo-desktop` to build the desktop app.
-
-> The terminal command is `spotify` — the previous name collided with the shell builtin `echo`. Configuration and caches still live in `~/.config/echo/`, so existing setups keep working after the rename. On Windows, if the official Spotify client's directory happens to be on your `PATH`, make sure `%USERPROFILE%\.cargo\bin` (or wherever you installed this binary) comes first.
+The binary lands at `./target/release/echo-desktop`.
 
 On first run, echo will prompt you to enter your `Client ID` and `Client Secret`, then open your browser to authenticate with Spotify.
 
-## Desktop App
+## Usage
 
-The desktop app works with the mouse — click a playlist, artist, or track to open it, use the controls in the now-playing bar, and drag tracks to reorder your own playlists. It's also fully keyboard-driven. Press `?` at any time for the in-app shortcut overlay, `ctrl-,` for settings, and `t` to switch themes. The keybindings mirror the terminal client below.
-
-**Navigation**: `j` / `k` / `↓` / `↑` to move, `gg` / `G` to jump to first / last, `ctrl-b` / `ctrl-f` to page, `ctrl-u` / `ctrl-d` for half a page, `enter` / `z` to open, `h` / `esc` to go back, `←` / `→` to move focus between panes, `tab` to switch tabs, `gc` to jump to the playing track.
-
-**Playback**: `space` play/pause, `[` / `]` (or `ctrl-←` / `ctrl-→`) previous / next, `,` / `.` seek, `-` / `=` volume, `shift-M` mute, `s` / `r` shuffle / repeat, `shift-D` device menu, `shift-L` full-screen lyrics, `ctrl-shift-L` lyrics in the player bar, `shift-F` immersive view.
-
-**Library**: `l` like/unlike, `a` add to playlist, `shift-A` track actions, `q` / `shift-Q` queue, `shift-J` / `shift-K` move a track within your own playlist, `dd` delete, `v` select a range, `m` pin, `c` / `e` create / rename.
-
-**Finding things**: `ctrl-k` global search, `/` filter the current list, `n` / `shift-N` next / previous match, `:` command bar, `t` themes, `?` help, `ctrl-q` quit.
+echo works with the mouse — click a playlist, artist, or track to open it, use the controls in the now-playing bar, and drag tracks to reorder your own playlists. It's also fully keyboard-driven. Press `?` at any time for the in-app shortcut overlay, `ctrl-,` for settings, and `t` to switch themes.
 
 Closing the window keeps echo playing: on Windows and Linux it hides to a tray icon (click it to bring the window back, or pick Quit), on macOS it stays in the Dock. Turn that off with `:tray off` or Settings → Window; `ctrl-q` always quits. Launching echo again brings the running one forward instead of starting a second copy.
 
-The `:` command bar accepts the same commands as the terminal client — see [Commands](#commands).
-
-## Terminal client (TUI)
-
-The same install also ships `spotify`, a full-featured terminal client with native in-terminal image rendering. It shares echo's cache, config, playback engine, and commands with the desktop app.
-
-![echo terminal client](assets/echo-tui.png)
-
-- **Terminal image support**: Renders high-quality album art and playlist covers directly in your terminal (supports Kitty, Sixel, and half-block fallbacks).
-- **Everything the desktop app does**: the same library, search, local music, playback, and `:` commands, driven entirely from the keyboard.
-
-echo is heavily keyboard-driven. 
-
-### Global Navigation
-- `j` / `k` or `Down` / `Up`: Move down / up
+### Navigation
+- `j` / `k` or `↓` / `↑`: Move down / up
 - `gg` / `G`: Jump to the first / last item
-- `Ctrl-b` / `Ctrl-f` or `Page Up` / `Page Down`: Move one page
-- `Ctrl-u` / `Ctrl-d`: Move half a page
-- `Ctrl-l`: Clear and fully redraw the TUI
-- `gc`: Jump to the currently playing track or its available context
-- `Enter` or `z`: Select item / Open playlist / Play track
-- `h` / `q` / `Esc` / `Backspace`: Go back / Close modal / Clear search
-- `Tab`: Switch tabs (e.g., Playlists ↔ Albums, Search Tracks ↔ Search Albums, artist discography All ↔ Albums ↔ Singles & EPs ↔ Appears On)
-- `:`: Enter Command Mode
-- `/`: Search within tracklist
-- `f`: Global search
-- `n` / `N`: Jump to next / previous search match within a list
+- `ctrl-b` / `ctrl-f` or `Page Up` / `Page Down`: Move one page
+- `ctrl-u` / `ctrl-d`: Move half a page
+- `gc`: Jump to the currently playing track or its context
+- `enter` or `z`: Open the selected item / play the selected track
+- `h` / `esc`: Go back / close a panel
+- `←` / `→`: Move focus between the sidebar and the main pane; `backspace` also returns to the sidebar
+- `alt-←` / `alt-→`: History back / forward
+- `tab`: Switch tabs (e.g. search results, artist discography)
+- `ctrl-h` (`ctrl-shift-h` on macOS): Home
+- `ctrl-\`: Show / hide the sidebar
 
-### Playback Controls
-- `Space`: Play / Pause
-- `]` / `>`: Next Track
-- `[` / `<`: Previous Track
-- `,` / `.`: Seek backward / forward by 5 seconds
-- `0`: Seek to the start of the current track
-- `M` (Shift + m): Mute / restore the previous volume
-- `s`: Toggle Shuffle
-- `r`: Toggle Repeat Mode (Off → Track → Context)
-- `=` / `-`: Volume Up / Down (by 1%)
-- `+` / `_`: Volume Up / Down (by 5%)
-- `D` (Shift + d): Open Device Selection menu
-- `L` (Shift + l): Toggle synced lyrics (a panel docked on the right in the desktop app, a full-screen modal in the terminal)
-- `Ctrl + Shift + L`: Toggle condensed Synced Lyrics view
+### Playback
+- `space`: Play / pause
+- `]` / `[` (or `ctrl-→` / `ctrl-←`): Next / previous track
+- `.` / `,` (or `shift-→` / `shift-←`): Seek forward / backward 5 seconds
+- `0`: Seek to the start of the track
+- `=` / `-`: Volume up / down 1%; `+` / `_` for 5%
+- `shift-M`: Mute / restore the previous volume
+- `s`: Toggle shuffle
+- `r`: Cycle repeat (off → track → context)
+- `shift-D`: Device menu
+- `shift-L`: Synced lyrics panel
+- `ctrl-shift-L`: Condensed lyrics in the player bar
+- `shift-F`: Immersive view
 
-### Track & Library Actions
-- `l`: Like / Unlike the selected track
-- `A` (Shift + a): Open action menu for hovered track (or currently playing if not focused in track page)
-- `p`: paste a cut playlist into a folder
-- `a`: Add selected track to playlist / Add selected album to library
-- `q`: Add currently hovered track to Queue
-- `Q` (Shift + q): Open Queue view (the desktop app's playback-bar queue button docks the queue on the right instead)
-- `m`: Pin / Unpin a playlist
-- `T` (Shift + t): Toggle library thumbnails (cover art next to playlist / album names)
-- `c`: Quick shortcut to create a new playlist
-- `e`: Quick shortcut to rename a playlist or folder
-- `v`: Enter Visual mode for multi-selection
-- `d` (double press): Delete playlist/folder, or remove a track from your custom playlist
-- `x`: Cut playlist (to move into a folder)
-- `J` / `K` (Shift + j / k, desktop): Move the selected track down / up within one of your own playlists (drag-and-drop works too); requires the original sort order
-- `R` (Shift + r): Force refresh
-- `F` (Shift + f, terminal): Follow / unfollow the artist whose page is open (the desktop app has a Follow button in the header)
+### Library
+- `l`: Like / unlike the selected track
+- `a`: Add the selected track to a playlist, or the selected album to your library
+- `shift-A`: Action menu for the selected (or currently playing) track
+- `q`: Add the selected track to the queue
+- `shift-Q`: Open the queue
+- `m`: Pin / unpin a playlist
+- `c` / `e`: Create / rename a playlist or folder
+- `v`: Visual mode for selecting a range
+- `dd`: Delete a playlist or folder, or remove a track from your own playlist
+- `shift-J` / `shift-K`: Move the selected track down / up within your own playlist (drag-and-drop works too); requires the original sort order
+- `shift-R`: Force refresh
+
+### Finding things
+- `ctrl-k`: Global search
+- `f`: Search from the command bar
+- `/`: Filter the current list
+- `n` / `shift-N`: Next / previous match
+- `:`: Command bar — see [Commands](#commands)
 
 The track action menu adapts to the source. Spotify tracks support link copying, liking, and album library actions. Local tracks support copying their absolute path and revealing the file in the platform file manager. Both sources retain album/artist navigation, playlist insertion, and queue actions where applicable.
 
 ## Commands
-While in Command Mode (`:`), you can use the following:
+The `:` command bar accepts the following:
 - `:search <query>`: Search for tracks or albums.
 - `:newplaylist <name>`: Create a new playlist.
 - `:newlocalplaylist <name>`: Create a local playlist stored on this machine.
@@ -225,41 +184,28 @@ While in Command Mode (`:`), you can use the following:
 - `:mute`: Mute playback or restore the previous volume.
 - `:open [spotify-url-or-uri]`: Open a Spotify track, album, artist, or playlist. With no argument, read it from the clipboard.
 - `:relative <on|off|toggle>`: Configure Vim-style relative line numbers in track lists.
-- `:redraw`: Clear and fully redraw the TUI after unexpected terminal output.
 - `:theme <theme_name>`: Switch application theme.
 - `:lang <en|zh|zh-CN>`: Switch language.
 - `:album`: Jump to the album of the currently selected track.
 - `:queue`: Open the Queue view.
 - `:clearqueue`: Clear the manually queued tracks (only while playing on this device).
+- `:clearhistory`: Forget the local play history.
+- `:range <short|medium|long>`: Time range for Top Tracks and Top Artists.
+- `:spotifylogin`: Re-authenticate with Spotify.
 - `:vis`: Toggle the audio visualizer.
 - `:visbins <number>`: Set the number of audio visualizer frequency bins (5-32).
 - `:pixelate <pixels>`: Enable retro 8-bit aesthetic on album covers. Set to 0 to disable, or e.g., 16 for a pixelated look.
-- `:backdrop <lights|mesh|aurora|vinyl|nebula>`: Pick the moving picture behind the desktop app's immersive view (also in Settings).
-- `:tray [on|off]`: Whether the desktop app's close button hides it to the tray instead of quitting (also in Settings).
-- `:thumbs [on|off]`: Toggle cover-art thumbnails in the library sidebar. Covers are cached in `~/.config/echo/thumbs/` so they load instantly on later launches.
+- `:backdrop <lights|mesh|aurora|vinyl|nebula>`: Pick the moving picture behind the immersive view (also in Settings).
+- `:tray [on|off]`: Whether the close button hides echo to the tray instead of quitting (also in Settings).
+- `:autoupdate [on|off]`: Install new releases automatically (also in Settings).
 - `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
-
-## Custom Keybindings
-
-Add a `keybindings` table under `[library]` in `~/.config/echo/config.toml` to override or add semantic mappings. Single keys, modifier keys such as `ctrl-f`, and two-key sequences are supported. Unmapped keys keep echo's defaults.
-
-```toml
-[library.keybindings]
-"s d" = "sort_duration"
-"s a" = "sort_artist"
-"ctrl-j" = "half_page_down"
-"ctrl-k" = "half_page_up"
-";" = "seek_forward"
-```
-
-Available actions are `first`, `last`, `page_up`, `page_down`, `half_page_up`, `half_page_down`, `current_context`, `play_pause`, `next`, `previous`, `shuffle`, `repeat`, `seek_backward`, `seek_forward`, `seek_start`, `mute`, `sort_original`, `sort_title`, `sort_artist`, `sort_album`, `sort_duration`, `sort_added`, `reverse_tracks`, `redraw`, and `toggle_thumbnails`.
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.
 
 ## Themes
 
-Themes live in `themes/*.toml` as a flat list: nine base colors followed by the twelve derived colors the desktop app paints, every one explicit with a comment saying what it drives. Edit values freely, or change base colors and run `python themes/generate_desktop.py` to recompute the derived ones. Derived keys are optional — a missing key is computed with the formula named in its comment, and a `[desktop]` table is also accepted for overrides. To iterate visually, `python tools/theme-preview/serve.py` opens a live mock of the desktop window in the browser that repaints on every save — no rebuild needed. Colors can be edited in either direction: change the toml in your editor, or click any color in the preview's legend to adjust it with a picker that writes straight back to the file (its "recompute derived" button re-runs the generator for the current theme).
+Themes live in `themes/*.toml` as a flat list: nine base colors followed by the twelve derived colors the app paints, every one explicit with a comment saying what it drives. Edit values freely, or change base colors and run `python themes/generate_desktop.py` to recompute the derived ones. Derived keys are optional — a missing key is computed with the formula named in its comment, and a `[desktop]` table is also accepted for overrides. To iterate visually, `python tools/theme-preview/serve.py` opens a live mock of the desktop window in the browser that repaints on every save — no rebuild needed. Colors can be edited in either direction: change the toml in your editor, or click any color in the preview's legend to adjust it with a picker that writes straight back to the file (its "recompute derived" button re-runs the generator for the current theme).
 
 ## Audio Quality
 
@@ -293,8 +239,6 @@ Local playlists are stored locally and are not Spotify playlists. They can conta
 Embedded artwork is used when available. If a track has no embedded artwork, echo looks for folder artwork such as `cover.jpg`, `folder.jpg`, or `front.png`.
 
 ## Troubleshooting
-- **Theme color rendering issues (Windows)**: Disable "Adjust indistinguishable text" in the Appearance settings of the Defaults profile. 
-- **Images not rendering**: Cover art is drawn with half-block cells and needs nothing from the terminal beyond truecolor support, which every modern terminal has.
 - **Cache desync**: Likes from other devices show up on startup or when you open Liked Songs (checked at most every 15 minutes). Songs unliked elsewhere are caught at the same point and trigger a background re-read of the library; a rate-limited re-read picks up where it stopped. Deleting `~/.config/echo/liked_songs.json` while echo is closed forces a full re-read.
 - **Local file missing**: If a file was deleted or moved after scanning, run `:rescanlocal` to refresh the local library.
 - **Audio sounds mono or muffled (Bluetooth headsets)**: Windows exposes a Bluetooth headset as two output devices — a stereo "Headphones" (A2DP) endpoint, and a mono "Hands-Free" (HFP) endpoint capped at 16 kHz. Windows switches to Hands-Free whenever an application opens the microphone. Check `echo-debug-audio-spotify.log`: if it reports `channels=1`, quit whatever is holding the mic and select the stereo endpoint as your default output device.
