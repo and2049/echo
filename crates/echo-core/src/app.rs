@@ -1,7 +1,7 @@
 use crate::config::{LibraryConfig, Theme};
 use crate::models::{
-    ActionMenuContext, ArtistPageData, BrowseNode, DiscographyFilter, LocalLibrary, LocalPlaylists,
-    Playlist, SearchResults, Track, TrackListContext, TrackSource,
+    ArtistPageData, BrowseNode, DiscographyFilter, LocalLibrary, LocalPlaylists, Playlist,
+    SearchResults, Track, TrackListContext, TrackSource,
 };
 use crate::theme::ResolvedTheme;
 use std::collections::HashMap;
@@ -18,7 +18,6 @@ pub struct UIState {
     pub forward_history: Vec<NavigationSnapshot>,
     pub active_library_tab: LibraryTab,
     pub active_search_tab: SearchTab,
-    pub active_browse_node: BrowseNode,
     /// Which list the [`ActiveView::ArtistList`] view renders.
     pub artist_list_source: ArtistListSource,
     /// A generated-tracklist browse node (Top Tracks / Recently Played) the user opened
@@ -38,7 +37,6 @@ pub struct UIState {
     pub selected_device_index: usize,
     pub artist_page_album_index: usize,
     pub artist_discography_filter: DiscographyFilter,
-    pub selected_action_index: usize,
     pub selected_playlist_modal_index: usize,
     // Prompts / modals
     pub folder_delete_prompt: Option<String>,
@@ -51,12 +49,9 @@ pub struct UIState {
     pub playlist_edit: Option<crate::intent::PlaylistEditDraft>,
     pub duplicate_prompt: Option<crate::intent::DuplicatePrompt>,
     pub device_modal_open: bool,
-    pub lyrics_modal_open: bool,
     /// The desktop's docked queue panel is showing, so the queue is kept fresh the way the
     /// full queue view is.
     pub queue_panel_open: bool,
-    pub action_menu_open: bool,
-    pub action_menu_context: Option<ActionMenuContext>,
     pub visual_selection_start: Option<usize>,
     pub picked_rows: std::collections::BTreeSet<usize>,
     pub pending_d_press: bool,
@@ -72,17 +67,14 @@ pub struct UIState {
     pub status_message: Option<String>,
     pub status_message_expiry: Option<std::time::Instant>,
     pub audio_output_error: Option<String>,
-    pub recent_queue_count: usize,
     // Theme / display
     pub themes: HashMap<String, Theme>,
     pub active_theme: ResolvedTheme,
-    pub needs_terminal_clear: bool,
     pub vis_bins: usize,
     pub condensed_lyrics_enabled: bool,
     // Setup
     pub setup_client_id: String,
     pub setup_client_secret: String,
-    pub setup_focus_secret: bool,
     // Library config (mutable user settings)
     pub library_config: LibraryConfig,
     // Image rendering
@@ -92,7 +84,6 @@ pub struct UIState {
     pub operation_register: Vec<String>,
     pub track_sort: TrackSort,
     pub track_sort_ascending: bool,
-    pub pending_key_sequence: Option<(String, std::time::Instant)>,
 }
 
 impl UIState {
@@ -112,7 +103,6 @@ impl UIState {
             forward_history: Vec::new(),
             active_library_tab: LibraryTab::Playlists,
             active_search_tab: SearchTab::Tracks,
-            active_browse_node: BrowseNode::TopTracks,
             artist_list_source: ArtistListSource::Followed,
             pending_browse_open: None,
             selected_playlist_index: 0,
@@ -126,7 +116,6 @@ impl UIState {
             selected_device_index: 0,
             artist_page_album_index: 0,
             artist_discography_filter: DiscographyFilter::All,
-            selected_action_index: 0,
             selected_playlist_modal_index: 0,
             folder_delete_prompt: None,
             playlist_delete_prompt: None,
@@ -138,10 +127,7 @@ impl UIState {
             playlist_edit: None,
             duplicate_prompt: None,
             device_modal_open: false,
-            lyrics_modal_open: false,
             queue_panel_open: false,
-            action_menu_open: false,
-            action_menu_context: None,
             visual_selection_start: None,
             picked_rows: std::collections::BTreeSet::new(),
             pending_d_press: false,
@@ -155,22 +141,18 @@ impl UIState {
             status_message: None,
             status_message_expiry: None,
             audio_output_error: None,
-            recent_queue_count: 0,
             themes,
             active_theme: ResolvedTheme::from_theme(&active_theme_config),
-            needs_terminal_clear: false,
             vis_bins,
             condensed_lyrics_enabled,
             setup_client_id: String::new(),
             setup_client_secret: String::new(),
-            setup_focus_secret: false,
             library_config,
             active_library_header_image: None,
             thumbnails: crate::thumbnails::ThumbnailCache::default(),
             operation_register: vec![],
             track_sort: TrackSort::Original,
             track_sort_ascending: true,
-            pending_key_sequence: None,
         }
     }
 }
@@ -520,13 +502,11 @@ pub enum AppMode {
     Visual,
 }
 
-/// Sidebar tabs. `Browse` is TUI-only (the desktop shows browse links permanently);
-/// `Artists` is desktop-only (the TUI reaches followed artists through Browse).
+/// Library sidebar tabs.
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum LibraryTab {
     Playlists,
     Albums,
-    Browse,
     Artists,
 }
 
@@ -906,21 +886,6 @@ impl AppState {
         let _ = config.save();
     }
 
-    pub fn set_library_thumbnails(&mut self, enabled: bool) {
-        self.ui.library_config.library_thumbnails = enabled;
-        self.save_library_config();
-        // Half-block rendering needs nothing from the terminal beyond colour, so there is no
-        // longer a "no image support" case to warn about.
-        let message = if enabled {
-            "Library thumbnails on".to_string()
-        } else {
-            "Library thumbnails off".to_string()
-        };
-        self.ui.status_message = Some(message);
-        self.ui.status_message_expiry =
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-    }
-
     pub fn save_volume(&self) {
         let mut config = crate::config::AppConfig::load();
         config.library.volume = self.playback.volume;
@@ -1080,9 +1045,8 @@ impl AppState {
     }
 }
 
-/// The number shown in a list's index column, shared by both frontends: `base` shifts the
-/// count (0- or 1-based), `relative` shows vim-style distances from the selected row (which
-/// keeps its absolute number).
+/// The number shown in a list's index column: `base` shifts the count (0- or 1-based), while
+/// `relative` shows vim-style distances from the selected row (which keeps its absolute number).
 pub fn displayed_track_number(index: usize, selected: usize, base: isize, relative: bool) -> isize {
     if relative && index != selected {
         index.abs_diff(selected) as isize

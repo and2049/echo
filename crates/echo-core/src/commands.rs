@@ -1,9 +1,8 @@
-//! The `:` command registry shared by both frontends.
+//! The `:` command registry used by the desktop command bar.
 //!
-//! The TUI's command mode and the desktop's command bar both edit
-//! `state.ui.command_buffer` and call [`submit`] on Enter; Tab completion goes through
-//! [`cycle_suggestion`]. Frontends own only the key handling — everything the commands *do*
-//! lives here so `:sort`, `:open`, `:theme` and friends behave identically everywhere.
+//! The command bar edits `state.ui.command_buffer` and calls [`submit`] on Enter; Tab completion
+//! goes through [`cycle_suggestion`]. The UI owns only the key handling — everything the commands
+//! *do* lives here.
 
 use crate::app::{AppMode, AppState};
 use crate::events::AppEvent;
@@ -42,7 +41,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("rename <name>", "Rename the selected playlist or folder"),
     ("pixelate <n>", "Retro pixelation on cover art; 0 disables"),
     ("backdrop <name>", "Immersive view backdrop (desktop)"),
-    ("thumbs [on|off]", "Cover thumbnails in the sidebar"),
     (
         "autoupdate [on|off]",
         "Install new releases automatically (desktop)",
@@ -63,7 +61,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
         "Vim-style relative line numbers",
     ),
     ("range <short|medium|long>", "Top tracks/artists time range"),
-    ("redraw", "Clear and redraw (TUI only)"),
 ];
 
 /// Just the command names, for completion matching.
@@ -187,7 +184,6 @@ pub fn submit(state: &mut AppState) -> Option<AppEvent> {
     let cmd = state.ui.command_buffer.clone();
     state.ui.command_buffer.clear();
     state.ui.mode = AppMode::Normal;
-    state.ui.needs_terminal_clear = true;
     execute(state, &cmd)
 }
 
@@ -441,9 +437,6 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     None => set_status(state, format!("Usage: backdrop <{names}>")),
                 }
             }
-            "redraw" => {
-                state.ui.needs_terminal_clear = true;
-            }
             "newfolder" => {
                 let name = args.collect::<Vec<&str>>().join(" ");
                 if !name.is_empty() {
@@ -611,21 +604,6 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 }
                 state.ui.status_message_expiry =
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-            }
-            "thumbs" => {
-                let enabled = match args.next() {
-                    Some("on") => true,
-                    Some("off") => false,
-                    Some(other) => {
-                        state.ui.status_message =
-                            Some(format!("Usage: thumbs [on|off], got '{}'", other));
-                        state.ui.status_message_expiry =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-                        return None;
-                    }
-                    None => !state.ui.library_config.library_thumbnails,
-                };
-                state.set_library_thumbnails(enabled);
             }
             "autoupdate" => {
                 state.ui.library_config.auto_update = match args.next() {
@@ -1095,14 +1073,6 @@ mod tests {
             assert!(state.ui.status_message.is_some(), "{command}");
             assert!(state.ui.status_message_expiry.is_some(), "{command}");
         }
-    }
-
-    #[test]
-    fn redraw_command_requests_terminal_clear() {
-        let mut state = AppState::new();
-
-        assert!(submit_command(&mut state, "redraw").is_none());
-        assert!(state.ui.needs_terminal_clear);
     }
 
     #[test]

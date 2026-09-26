@@ -165,7 +165,6 @@ pub fn reconcile_manual_queue(manual: &mut Vec<String>, queue: &[Track]) {
 pub fn handle_tracks_queued(state: &mut AppState, track_ids: Vec<String>) {
     let count = track_ids.len();
     state.data.manual_queue.extend(track_ids);
-    state.ui.recent_queue_count += count;
     set_timed_status(
         state,
         i18n::t("messages.added_to_queue", &state.ui.library_config.language)
@@ -440,7 +439,6 @@ mod tests {
         crate::i18n::init();
         let mut state = AppState::new();
         handle_tracks_queued(&mut state, ids(&["a", "b"]));
-        assert_eq!(state.ui.recent_queue_count, 2);
         handle_queue_loaded(&mut state, vec![sample_track("b"), sample_track("ctx")]);
         assert_eq!(state.data.manual_queue, ids(&["b"]));
         assert_eq!(state.data.queue.len(), 2);

@@ -48,7 +48,6 @@ ksni = { version = "0.3", default-features = false, features = ["async-io"] }
 [build-dependencies]
 embed-resource = "3"
 
-# The plain "echo" identity is this crate's: the TUI packages as "echo TUI"/com.echo.tui.
 # Brand is styled all-lowercase everywhere, including installers and shortcuts.
 [package.metadata.packager]
 product-name = "echo"
@@ -64,15 +63,10 @@ icons = [
     "../../icons/128x128@2x.png",
 ]
 resources = [{ src = "../../themes", target = "themes" }]
-# The echo package carries both frontends: the desktop app plus the `spotify` TUI, so one
-# install puts the terminal command on PATH (MSI: install dir appended via the WiX fragment
-# below; macOS: both inside echo.app/Contents/MacOS). Linux does not build an installer at
-# all — assets/install.sh lays down the portable archive instead.
-binaries = [
-    { path = "echo-desktop", main = true },
-    { path = "spotify", main = false },
-]
-before-packaging-command = "cargo build --release -p echo-desktop -p spotify-tui"
+# Linux does not build an installer at all — assets/install.sh lays down the portable archive
+# instead.
+binaries = [{ path = "echo-desktop", main = true }]
+before-packaging-command = "cargo build --release -p echo-desktop"
 
 [package.metadata.packager.wix]
 # Appends the install dir to the machine PATH (and removes it on uninstall) so `spotify`

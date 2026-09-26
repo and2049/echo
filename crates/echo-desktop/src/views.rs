@@ -1,14 +1,13 @@
 //! Library sidebar and track list — the first real views of the desktop app.
 //!
 //! Both are thin projections of [`AppState`]: rows come straight from `library_view` /
-//! `saved_albums` / `tracks`, and activating a row goes through [`echo_core::intent`], the same
-//! functions the TUI's Enter key uses.
+//! `saved_albums` / `tracks`, and keyboard or pointer activation goes through
+//! [`echo_core::intent`].
 //!
 //! Thumbnails ride the core's [`echo_core::thumbnails`] cache. Rendering a row requests its
 //! cover; `drain_pending` (called after each row batch) spawns the fetches, and the resulting
-//! worker events repaint. Unlike the TUI this ignores the `library_thumbnails` config toggle —
-//! that flag exists because thumbnails cost real estate and glitch on some terminals, neither of
-//! which applies here.
+//! worker events repaint. This view always renders thumbnails because they fit the available
+//! space and render reliably.
 
 use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, QueueTab, SearchTab};
 use echo_core::config::RightPanel;
@@ -90,8 +89,8 @@ fn row_marked(
 }
 
 /// Resolves a translation in the configured language. Every user-facing desktop string goes
-/// through this so `:lang` applies on the next frame, like the TUI. Missing keys fall back to
-/// English inside [`echo_core::i18n::t`].
+/// through this so `:lang` applies on the next frame. Missing keys fall back to English inside
+/// [`echo_core::i18n::t`].
 pub(crate) fn tr(state: &echo_core::app::AppState, key: &str) -> SharedString {
     SharedString::from(echo_core::i18n::t(key, &state.ui.library_config.language))
 }
@@ -145,7 +144,7 @@ fn pill_row(
         .child(build(pill))
 }
 
-/// The TUI's start-screen wordmark, shown in the main area while nothing is selected.
+/// The start-screen wordmark, shown in the main area while nothing is selected.
 const ECHO_LOGO: [&str; 6] = [
     "███████╗ ██████╗██╗  ██╗ ██████╗               ██████╗ ███████╗",
     "██╔════╝██╔════╝██║  ██║██╔═══██╗              ██╔══██╗██╔════╝",
@@ -791,7 +790,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 )),
         )
         .child({
-            // The TUI's Browse nodes, as quick links.
+            // Browse nodes presented as quick links.
             let browse_link = |id: &'static str,
                                icon: &'static str,
                                label: SharedString,
@@ -1246,8 +1245,8 @@ pub fn main_area(
         .child(body)
 }
 
-/// First-run credentials: a BYOK (bring-your-own-key) card matching the TUI's setup screen,
-/// writing to the same `state.ui.setup_*` fields and submitting through the same intent.
+/// First-run credentials: a BYOK (bring-your-own-key) card writing to the
+/// `state.ui.setup_*` fields and submitting through the setup intent.
 fn setup_view(
     app: &mut EchoApp,
     window: &mut Window,
@@ -2925,8 +2924,8 @@ pub(crate) fn playing_context_label(state: &echo_core::app::AppState) -> Option<
     Some(tr(state, "desktop.playing_from").replace("{}", &name))
 }
 
-/// Index-column text for a list row, honoring `track_index_base` (negative hides the
-/// column — the caller omits the div) and `relative_line_numbers`, exactly as the TUI does.
+/// Index-column text for a list row, honoring `track_index_base` (negative hides the column —
+/// the caller omits the div) and `relative_line_numbers`.
 fn row_number(
     state: &echo_core::app::AppState,
     ix: usize,
@@ -6054,8 +6053,8 @@ pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
-/// Add-to-playlist picker over the choices both frontends share (own Spotify playlists plus
-/// local ones); Enter and row clicks resolve through `action_menu::commit_playlist_add`.
+/// Add-to-playlist picker over the core choices (own Spotify playlists plus local ones); Enter
+/// and row clicks resolve through `action_menu::commit_playlist_add`.
 pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
@@ -6210,8 +6209,8 @@ pub fn playlist_add_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl 
         )
 }
 
-/// The main-area empty state: the TUI's ECHO wordmark with a vertical secondary→primary
-/// gradient, or plain status text while authenticating.
+/// The main-area empty state: the ECHO wordmark with a vertical secondary→primary gradient, or
+/// plain status text while authenticating.
 fn library_placeholder(app: &EchoApp) -> AnyElement {
     let theme = &app.state.ui.active_theme;
     let muted = theme.text_muted.gpui(WINDOW_FG());
@@ -6818,10 +6817,9 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
         )
 }
 
-/// Right-click menu for a track row. The item set and labels come from the shared action-menu
-/// model (`ActionMenuContext::actions()` / `action_menu::label`), so it always matches the
-/// TUI's `A` popup; remove-from-playlist is appended for modifiable playlists, where the TUI
-/// uses `dd` instead.
+/// Right-click menu for a track row. The item set and labels come from the core action-menu
+/// model (`ActionMenuContext::actions()` / `action_menu::label`); remove-from-playlist is
+/// appended for modifiable playlists.
 /// The open track menu's rows: `(label, item, is_destructive)`. Keyboard selection indexes
 /// into this, so it is the single source of the menu's contents.
 pub fn track_menu_items(app: &EchoApp) -> Vec<(SharedString, TrackMenuItem, bool)> {
@@ -7148,8 +7146,8 @@ fn playlist_submenu(
         .into_any_element()
 }
 
-/// Confirm dialog for whichever destructive prompt is staged, resolved through the same
-/// `intent::confirm_prompt`/`cancel_prompt` the TUI's y/n keys use.
+/// Confirm dialog for whichever destructive prompt is staged, resolved through
+/// `intent::confirm_prompt`/`cancel_prompt`.
 pub fn prompt_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);

@@ -68,7 +68,6 @@ pub fn apply_worker_event(
         WorkerEvent::ApiRequestFailed { label, message } => {
             misc::handle_api_request_failed(state, label, message)
         }
-        WorkerEvent::ForceRedraw => misc::handle_force_redraw(state),
         WorkerEvent::AudioOutputUnavailable { message } => {
             misc::handle_audio_output_unavailable(state, message)
         }

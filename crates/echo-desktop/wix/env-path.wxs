@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Referenced from [package.metadata.packager.wix] fragment_paths. Appends the install
-    dir to the user's PATH so the bundled `spotify` TUI (and echo-desktop.exe) are callable
-    from any shell; Permanent="no" makes the MSI strip the entry again on uninstall.
+    dir to the user's PATH so echo-desktop.exe is callable from any shell; Permanent="no" makes the MSI strip the entry again on uninstall.
     Win64 is hardcoded: releases only build x86_64 Windows.
 
     System="no" writes HKCU\Environment rather than the machine PATH — writing the latter

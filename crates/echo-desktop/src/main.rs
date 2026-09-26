@@ -1,9 +1,9 @@
 //! echo — the GPUI desktop frontend.
 //!
-//! Same architecture as the `spotify` TUI: [`echo_core::bootstrap::init`] spawns the worker on a
-//! tokio runtime and hands back the two event channels; the frontend applies worker events to
-//! [`AppState`](echo_core::app::AppState) and draws from it. Here the 16ms poll loop is replaced
-//! by GPUI's reactive model — a spawned task awaits worker events and calls `cx.notify()`.
+//! [`echo_core::bootstrap::init`] spawns the worker on a tokio runtime and hands back the two
+//! event channels; the app applies worker events to [`AppState`](echo_core::app::AppState) and
+//! draws from it. GPUI's reactive model awaits worker events in a spawned task and calls
+//! `cx.notify()`.
 //!
 //! The tokio runtime lives on the main function's stack and stays entered for the lifetime of
 //! the UI, so worker tasks keep running on its threads while GPUI blocks in `run()`.
@@ -316,7 +316,7 @@ fn mac_menus() -> Vec<gpui::Menu> {
 /// `Modifiers::secondary` is cmd on macOS and ctrl elsewhere; a Mac that only matched `control`
 /// ignored cmd-v, which made the setup card — the first thing a new install shows, and a place
 /// where credentials are pasted rather than typed — impossible to paste into. ctrl-v is still
-/// accepted everywhere, since the desktop app mirrors the TUI's keymap.
+/// accepted everywhere as an alternative shortcut.
 fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
     modifiers.secondary() || modifiers.control
 }
@@ -499,8 +499,7 @@ impl EchoApp {
                     if app.state.playback.is_playing || animating {
                         cx.notify();
                     }
-                    // Status messages carry an expiry the TUI checks each frame; here the
-                    // periodic tick retires them.
+                    // Status messages carry an expiry; the periodic tick retires them.
                     if app
                         .state
                         .ui
@@ -691,7 +690,7 @@ impl EchoApp {
     }
 
     /// Rows in whatever currently has keyboard focus: the device modal when open, else the
-    /// `active_view` list — the same routing the TUI's navigation handler does.
+    /// `active_view` list.
     fn list_len(&self) -> usize {
         if self.state.ui.playlist_edit.is_some() {
             return 0;
@@ -925,8 +924,8 @@ impl EchoApp {
         self.set_selection(current.saturating_add_signed(delta).min(len - 1), cx);
     }
 
-    /// `l`, matching the TUI and README: like/unlike the focused track. On library rows it
-    /// acts as Enter (the TUI's `l`-opens behavior); un-liking stages the confirm prompt.
+    /// `l`: like/unlike the focused track. On library rows it acts as Enter; un-liking stages
+    /// the confirm prompt.
     fn toggle_like(&mut self, cx: &mut Context<Self>) {
         if self.overlay_open() {
             return;
@@ -965,7 +964,7 @@ impl EchoApp {
     }
 
     /// Accept an open confirm prompt, mirroring the Confirm button in `views::prompt_modal`.
-    /// Bound to Enter (through [`Self::activate_selection`]) and to `y` like the TUI.
+    /// Bound to Enter (through [`Self::activate_selection`]) and to `y`.
     fn confirm_prompt(&mut self, cx: &mut Context<Self>) {
         self.pending_count = None;
         if !echo_core::intent::prompt_active(&self.state) {
@@ -1084,10 +1083,10 @@ impl EchoApp {
     }
 
     /// Opening the queue leaves the immersive view, which has nowhere to show it.
-    /// `shift-Q`: the full-page, keyboard-navigable queue view (the TUI's `Q`).
+    /// `shift-Q`: the full-page, keyboard-navigable queue view.
     pub(crate) fn toggle_queue_view(&mut self, cx: &mut Context<Self>) {
         if self.state.ui.active_view == ActiveView::Queue {
-            // Mirrors the TUI's `q` from the queue view.
+            // `q` from the queue view returns to the library.
             self.state.ui.active_view = ActiveView::Library;
         } else {
             let event = echo_core::intent::open_queue(&mut self.state);
@@ -1149,8 +1148,7 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Escape / `h` / backspace: close whatever is topmost, else go back — the same ordering
-    /// as the TUI's back handling, with the desktop-only modals checked first.
+    /// Escape / `h` / backspace: close whatever is topmost, else go back, checking modals first.
     fn dismiss(&mut self, cx: &mut Context<Self>) {
         if self.state.ui.playlist_edit.is_some() {
             echo_core::intent::cancel_playlist_edit(&mut self.state);
@@ -1210,7 +1208,7 @@ impl EchoApp {
                 self.close_artist_page(cx);
             }
         } else if self.state.ui.active_view == ActiveView::SearchResults {
-            // Mirrors the TUI: leaving search results drops them entirely.
+            // Leaving search results drops them entirely.
             self.state.ui.active_view = ActiveView::Library;
             self.state.data.search_results = Default::default();
             self.state.ui.search_context_query.clear();
@@ -1481,7 +1479,7 @@ impl EchoApp {
     }
 
     /// The track `a` / `shift-a` act on: the focused row where the view has one, otherwise the
-    /// currently playing track. Mirrors the TUI's `A` handler.
+    /// currently playing track.
     pub(crate) fn action_target(&self) -> Option<echo_core::models::ActionMenuContext> {
         use echo_core::models::ActionMenuContext;
         let ui = &self.state.ui;
@@ -2025,8 +2023,8 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Apply a sort from the picker by running the matching `:sort` command, so the desktop
-    /// and the TUI cannot drift apart on what each option does.
+    /// Apply a sort from the picker by running the matching `:sort` command, so picker behavior
+    /// cannot drift from the command.
     pub(crate) fn apply_sort(&mut self, arg: &str, cx: &mut Context<Self>) {
         self.sort_menu_open = false;
         if let Some(event) = echo_core::commands::run(&mut self.state, &format!("sort {arg}")) {
@@ -2055,9 +2053,9 @@ impl EchoApp {
             || self.help_open
     }
 
-    /// Backspace: close the topmost overlay if one is open, else hand keyboard focus back to
-    /// the library sidebar while keeping the current page visible — the TUI's quick two-pane
-    /// hop, without walking the view history the way `h`/escape do.
+    /// Backspace: close the topmost overlay if one is open, else hand keyboard focus back to the
+    /// library sidebar while keeping the current page visible, without walking the view history
+    /// the way `h`/escape do.
     fn back_or_focus_library(&mut self, cx: &mut Context<Self>) {
         self.pending_count = None;
         if self.overlay_open() {
@@ -2068,8 +2066,8 @@ impl EchoApp {
     }
 
     // Vim-style command mode (`:`) and track filter (`/`) — a bar above the playback bar that
-    // owns key handling while one of the modes is active. The command registry itself is
-    // `echo_core::commands`, shared with the TUI.
+    // owns key handling while one of the modes is active. The command registry itself lives in
+    // `echo_core::commands`.
 
     fn open_command(&mut self, prefill: &str, window: &mut Window, cx: &mut Context<Self>) {
         echo_core::commands::clear_suggestions(&mut self.state);
@@ -2232,7 +2230,7 @@ impl EchoApp {
     }
 
     fn add_to_queue(&mut self, cx: &mut Context<Self>) {
-        // In visual mode `q` queues the whole range, matching the TUI.
+        // In visual mode `q` queues the whole range.
         if self.multi_selected() {
             if let Some(event) = echo_core::intent::queue_visual_selection(&mut self.state) {
                 self.dispatch(event);
@@ -2745,8 +2743,8 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Sends an intent-produced event to the worker, with the same side channels the TUI's main
-    /// loop has: a LoadContextTracks with cover art also kicks off the header image fetch, and
+    /// Sends an intent-produced event to the worker with its required side channels: a
+    /// LoadContextTracks with cover art also kicks off the header image fetch, and
     /// ReloadHeaderImage is handled entirely here (the worker has no handler for it).
     pub(crate) fn dispatch(&mut self, event: AppEvent) {
         if let AppEvent::GlobalSearch(query) = &event {
@@ -2848,8 +2846,8 @@ impl EchoApp {
             .flatten();
         let vis_bins = self.state.ui.vis_bins.clamp(5, 32);
 
-        // The pixelate transfer trick from the TUI: keep showing the previous cover while the
-        // current one refetches.
+        // Keep showing the previous cover while the current one refetches after a pixelate
+        // change.
         let cover = self
             .state
             .playback
@@ -2859,7 +2857,7 @@ impl EchoApp {
             .cloned()
             .and_then(|artwork| self.images.get(&artwork));
 
-        // The TUI's condensed-lyrics line: current lyric (accented) with the next one below,
+        // The condensed-lyrics line shows the current lyric accented with the next one below,
         // riding the same playback tick that advances the seek bar.
         let inline_lyrics = self
             .state
@@ -3072,9 +3070,8 @@ impl EchoApp {
                             })
                             .when_some(visualizer_bands, |el, bands| {
                                 // The engine always fills 32 bands, 0–100; they are averaged down
-                                // to the configured bin count (`:visbins`, same math as the TUI)
-                                // and painted as bottom-anchored bars. Repaints ride the fast
-                                // tick.
+                                // to the configured bin count (`:visbins`) and painted as
+                                // bottom-anchored bars. Repaints ride the fast tick.
                                 el.child(
                                     div().flex_none().w(px(120.0)).h(px(32.0)).child(
                                         canvas(
@@ -3997,6 +3994,7 @@ fn main() {
     // Windows cannot delete the image of a running process, so a previous upgrade leaves its
     // backups behind. Nothing holds them now.
     echo_core::update::sweep_backups();
+    echo_core::update::remove_retired();
 
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();
@@ -4013,9 +4011,9 @@ fn main() {
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
         cx.set_app_identity("com.echo.app", "echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
-        // The keymap mirrors the TUI's, so it is ctrl-based everywhere. These are the chords a
-        // Mac user reaches for without thinking, and they are what the menu bar below shows as
-        // its accelerators — gpui reads them back out of the keymap when it builds the menu.
+        // The keymap is ctrl-based everywhere. These are the chords a Mac user reaches for
+        // without thinking, and they are what the menu bar below shows as its accelerators —
+        // gpui reads them back out of the keymap when it builds the menu.
         if cfg!(target_os = "macos") {
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
@@ -4050,16 +4048,16 @@ fn main() {
             KeyBinding::new("home", SelectFirst, LIST_KEYS),
             KeyBinding::new("end", SelectLast, LIST_KEYS),
             KeyBinding::new("enter", Activate, LIST_KEYS),
-            // `z` is the TUI's Enter alias.
+            // `z` is an Enter alias.
             KeyBinding::new("z", Activate, LIST_KEYS),
-            // The TUI answers confirm prompts with `y`; Enter reaches the same handler.
+            // `y` answers confirm prompts; Enter reaches the same handler.
             KeyBinding::new("y", ConfirmPrompt, LIST_KEYS),
             KeyBinding::new("left", FocusLibrary, LIST_KEYS),
             KeyBinding::new("right", FocusTracks, LIST_KEYS),
-            // `l` matches the TUI/README: like the focused track (Enter on library rows);
+            // `l` likes the focused track (or acts as Enter on library rows);
             // `right` keeps pane focus for arrow navigation.
             KeyBinding::new("l", ToggleLike, LIST_KEYS),
-            // Vim motions, matching the TUI's navigation handler.
+            // Vim-style navigation motions.
             KeyBinding::new("g g", SelectFirst, LIST_KEYS),
             KeyBinding::new("shift-g", SelectLast, LIST_KEYS),
             KeyBinding::new("g c", JumpToCurrent, LIST_KEYS),
@@ -4067,14 +4065,13 @@ fn main() {
             KeyBinding::new("ctrl-d", HalfPageDown, LIST_KEYS),
             KeyBinding::new("ctrl-b", PageUp, LIST_KEYS),
             KeyBinding::new("ctrl-f", PageDown, LIST_KEYS),
-            // `h` is "back" in the TUI, not "focus sidebar" — the left arrow keeps that role.
+            // `h` is "back", not "focus sidebar" — the left arrow keeps that role.
             KeyBinding::new("h", Dismiss, LIST_KEYS),
-            // Backspace hops focus back to the sidebar (TUI habit); `h`/escape keep going
-            // back through the view history.
+            // Backspace hops focus back to the sidebar; `h`/escape keep going through history.
             KeyBinding::new("backspace", BackOrFocusLibrary, LIST_KEYS),
             KeyBinding::new("escape", Dismiss, LIST_KEYS),
             KeyBinding::new("tab", CycleTab, LIST_KEYS),
-            // Transport, the TUI's default keymap.
+            // Playback transport.
             KeyBinding::new("ctrl-right", NextTrack, LIST_KEYS),
             KeyBinding::new("ctrl-left", PreviousTrack, LIST_KEYS),
             KeyBinding::new("]", NextTrack, LIST_KEYS),
@@ -4105,8 +4102,8 @@ fn main() {
             KeyBinding::new("f", CommandSearch, LIST_KEYS),
             KeyBinding::new("c", NewPlaylistPrompt, LIST_KEYS),
             KeyBinding::new("e", RenamePrompt, LIST_KEYS),
-            // `/` filters the loaded track list like the TUI; the global search box gets
-            // ctrl-k (and stays clickable).
+            // `/` filters the loaded track list; the global search box gets ctrl-k (and stays
+            // clickable).
             KeyBinding::new("/", OpenFilter, LIST_KEYS),
             KeyBinding::new("n", NextMatch, LIST_KEYS),
             KeyBinding::new("shift-n", PrevMatch, LIST_KEYS),

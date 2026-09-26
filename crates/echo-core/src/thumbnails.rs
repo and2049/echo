@@ -6,13 +6,6 @@ use tokio::sync::mpsc;
 use crate::app::AppState;
 use crate::events::WorkerEvent;
 
-/// Width of the cover image in terminal cells.
-pub const THUMB_W: u16 = 6;
-/// Height of the cover image in terminal cells.
-pub const THUMB_H: u16 = 3;
-/// Height of one library row in thumbnail mode.
-pub const ROW_H: u16 = 3;
-
 const MAX_IN_FLIGHT: usize = 4;
 const MAX_MEMORY_ENTRIES: usize = 300;
 const MAX_DISK_FILES: usize = 500;

@@ -80,9 +80,8 @@
 
         <!--
             ECHO: default the install to %LOCALAPPDATA%\Programs\echo — a per-user install
-            root, not Program Files. echo updates itself (`spotify upgrade` and the desktop
-            Settings button both rewrite the binaries in place), and a Program Files install
-            makes every one of those paths demand elevation.
+            root, not Program Files. echo updates itself (the desktop app rewrites its binary
+            in place), and a Program Files install would make every update demand elevation.
 
             Set here at runtime rather than as a nested Directory element because a
             statically-declared user-profile directory fails ICE validation; see the
@@ -102,8 +101,8 @@
 
             A per-user package cannot remove a per-machine one, so both would remain
             installed — and the old copy's directory is on the *machine* PATH, which
-            resolves ahead of the user PATH this package writes. `spotify` would keep
-            launching the old build even after a successful upgrade. Searching for the
+            resolves ahead of the user PATH this package writes. `echo-desktop` would keep
+            launching the old build from a shell even after a successful upgrade. Searching for the
             file rather than a product code is deliberate: Product/@Id is "*", so the
             ProductCode changes every build and cannot be searched for.
         -->

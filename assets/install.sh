@@ -1,17 +1,16 @@
 #!/bin/sh
-# install.sh — install echo (the desktop app and the `spotify` terminal command) on Linux and macOS.
+# install.sh — install the echo desktop app on Linux and macOS.
 #
 #   curl -fsSL https://github.com/and2049/echo/releases/latest/download/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --version 0.4.6
 #   curl -fsSL .../install.sh | sh -s -- --uninstall
 #
-# Both frontends come from one release artifact and land in one directory, which is what makes
-# `spotify upgrade` able to replace them afterwards without reinstalling. See
-# crates/echo-core/src/update.rs.
+# The app lands in a directory the user owns, which is what lets its updater replace it
+# afterwards without reinstalling. See crates/echo-core/src/update.rs.
 #
-# Linux takes the portable `echo-linux-x64.tar.gz`; macOS takes the DMG, because a Mac desktop
-# app has to be an .app bundle to appear in Launchpad. Either way `spotify` ends up in
-# ~/.local/bin, on PATH.
+# Linux takes the portable `echo-linux-x64.tar.gz` and links `echo-desktop` into ~/.local/bin;
+# macOS takes the DMG, because a Mac desktop app has to be an .app bundle to appear in
+# Launchpad.
 
 set -eu
 
@@ -31,7 +30,7 @@ TMP_DIR=""
 
 usage() {
     cat <<EOF
-Install echo — the desktop app plus the \`spotify\` terminal command.
+Install the echo desktop app.
 
 Usage: install.sh [options]
 
@@ -41,7 +40,7 @@ Options:
       --uninstall          Remove echo (leaves your config in ~/.config/echo alone)
   -h, --help               Show this message
 
-After installing, upgrade with \`spotify upgrade\` — no need to re-run this script.
+After installing, echo updates itself from its Settings — no need to re-run this script.
 EOF
 }
 
@@ -129,20 +128,18 @@ install_linux() {
 
     mkdir -p "$TMP_DIR/unpacked"
     tar -xzf "$TMP_DIR/$archive" -C "$TMP_DIR/unpacked"
-    [ -f "$TMP_DIR/unpacked/spotify" ] || err "release archive is missing the spotify binary."
+    [ -f "$TMP_DIR/unpacked/echo-desktop" ] || err "release archive is missing the echo-desktop binary."
+    # The archive still carries a stub of the retired terminal client for older updaters.
+    rm -f "$TMP_DIR/unpacked/spotify"
 
     # Replaced wholesale rather than merged, so a release that drops a theme actually drops it.
     rm -rf "$LINUX_DIR"
     mkdir -p "$LINUX_DIR" "$BIN_HOME"
     cp -R "$TMP_DIR/unpacked/." "$LINUX_DIR/"
-    chmod +x "$LINUX_DIR/spotify"
-    ln -sf "$LINUX_DIR/spotify" "$BIN_HOME/spotify"
-
-    if [ -f "$LINUX_DIR/echo-desktop" ]; then
-        chmod +x "$LINUX_DIR/echo-desktop"
-        ln -sf "$LINUX_DIR/echo-desktop" "$BIN_HOME/echo-desktop"
-        install_desktop_entry
-    fi
+    chmod +x "$LINUX_DIR/echo-desktop"
+    ln -sf "$LINUX_DIR/echo-desktop" "$BIN_HOME/echo-desktop"
+    install_desktop_entry
+    remove_retired_link "$LINUX_DIR/spotify"
 
     INSTALLED_AT="$LINUX_DIR"
 }
@@ -230,10 +227,18 @@ install_macos() {
     rm -rf "$app"
     mv "$staging" "$app"
 
-    mkdir -p "$BIN_HOME"
-    ln -sf "$app/Contents/MacOS/spotify" "$BIN_HOME/spotify"
+    remove_retired_link "$app/Contents/MacOS/spotify"
 
     INSTALLED_AT="$app"
+}
+
+# Installs from v0.6.7 and earlier linked the retired `spotify` terminal client into
+# ~/.local/bin. Only a link pointing at this install goes; anything else by that name is not ours.
+remove_retired_link() {
+    link="$BIN_HOME/spotify"
+    if [ -L "$link" ] && [ "$(readlink "$link")" = "$1" ]; then
+        rm -f "$link"
+    fi
 }
 
 # --- PATH ------------------------------------------------------------------
@@ -287,11 +292,14 @@ add_to_path() {
 
 uninstall() {
     detect_os
-    rm -f "$BIN_HOME/spotify" "$BIN_HOME/echo-desktop"
+    rm -f "$BIN_HOME/echo-desktop"
     if [ "$OS" = macos ]; then
+        remove_retired_link "/Applications/echo.app/Contents/MacOS/spotify"
+        remove_retired_link "$HOME/Applications/echo.app/Contents/MacOS/spotify"
         # Both, because which one an install picked depends on whether the account is an admin.
         rm -rf "/Applications/echo.app" "$HOME/Applications/echo.app"
     else
+        remove_retired_link "$LINUX_DIR/spotify"
         rm -rf "$LINUX_DIR"
         rm -f "$DESKTOP_FILE"
         for size in 32x32 64x64 128x128 256x256; do
@@ -333,17 +341,16 @@ if [ "$OS" = macos ]; then
     install_macos
 else
     install_linux
+    add_to_path
 fi
-add_to_path
 
 info ""
-info "echo $VERSION is installed."
-info "  App:      $INSTALLED_AT"
-info "  Terminal: $BIN_HOME/spotify"
-info ""
-if [ "$PATH_CHANGED" -eq 1 ]; then
-    info "Open a new terminal, then run 'spotify' to start."
+info "echo $VERSION is installed at $INSTALLED_AT."
+if [ "$OS" = macos ]; then
+    info "Open it from Launchpad or Spotlight."
+elif [ "$PATH_CHANGED" -eq 1 ]; then
+    info "Open it from your applications menu, or run 'echo-desktop' in a new terminal."
 else
-    info "Run 'spotify' to start."
+    info "Open it from your applications menu, or run 'echo-desktop'."
 fi
-info "Later on, 'spotify upgrade' updates both the terminal client and the app."
+info "Later on, echo updates itself from its Settings."

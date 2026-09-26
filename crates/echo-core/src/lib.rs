@@ -1,9 +1,9 @@
 //! Frontend-agnostic core of echo: Spotify + local-library worker, domain models, config,
 //! app state and the events that tie a frontend to the worker.
 //!
-//! Frontends (the ratatui `spotify` binary, the GPUI `echo` desktop app) depend on this crate,
-//! spawn [`worker::Worker`] on a tokio runtime and talk to it over the two event channels in
-//! [`events`]. Nothing in here may depend on a rendering or input library.
+//! The GPUI desktop app depends on this crate, spawns [`worker::Worker`] on a tokio runtime and
+//! talks to it over the two event channels in [`events`]. Nothing in here may depend on a
+//! rendering or input library.
 
 pub mod action_menu;
 pub mod app;

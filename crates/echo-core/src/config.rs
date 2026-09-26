@@ -411,22 +411,18 @@ pub struct LibraryConfig {
     #[serde(default = "default_volume")]
     pub volume: u32,
     #[serde(default)]
-    pub keybindings: std::collections::HashMap<String, String>,
-    #[serde(default)]
     pub relative_line_numbers: bool,
-    #[serde(default)]
-    pub library_thumbnails: bool,
     #[serde(default = "default_bitrate")]
     pub bitrate: u32,
     #[serde(default = "default_normalisation")]
     pub normalisation: bool,
     #[serde(default = "default_normalisation_pregain")]
     pub normalisation_pregain: f64,
-    /// The picture behind the desktop app's immersive view. Ignored by the TUI.
+    /// The picture behind the desktop app's immersive view.
     #[serde(default)]
     pub immersive_backdrop: BackdropMode,
-    /// Desktop window geometry, so a resized window comes back the same size. Ignored by the
-    /// TUI. `None` until the desktop app has been run and closed at least once.
+    /// Desktop window geometry, so a resized window comes back the same size. `None` until the
+    /// desktop app has been run and closed at least once.
     #[serde(default)]
     pub sidebar_width: Option<f32>,
     #[serde(default)]
@@ -436,8 +432,7 @@ pub struct LibraryConfig {
     pub right_panel: Option<RightPanel>,
     #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
-    /// The desktop close button hides the window to the tray and keeps playing. Ignored by
-    /// the TUI.
+    /// The desktop close button hides the window to the tray and keeps playing.
     #[serde(default = "default_close_to_tray")]
     pub close_to_tray: bool,
     /// The `time_range` window used by the Top Tracks / Top Artists browse lists.
@@ -521,9 +516,7 @@ impl Default for LibraryConfig {
             enable_visualizer: false,
             local_music_dir: None,
             volume: 100,
-            keybindings: std::collections::HashMap::new(),
             relative_line_numbers: false,
-            library_thumbnails: false,
             bitrate: 320,
             normalisation: true,
             normalisation_pregain: default_normalisation_pregain(),
@@ -554,7 +547,7 @@ pub enum SortMode {
     Creator,
 }
 
-/// What the desktop app docks to the right of the main area. Ignored by the TUI.
+/// What the desktop app docks to the right of the main area.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RightPanel {

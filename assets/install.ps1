@@ -1,12 +1,12 @@
 #Requires -Version 5.0
 <#
 .SYNOPSIS
-    Install echo — the desktop app plus the `spotify` terminal command — on Windows.
+    Install the echo desktop app on Windows.
 
 .DESCRIPTION
-    Downloads the release MSI and installs it silently for the current user. The MSI puts both
-    frontends in %LOCALAPPDATA%\Programs\echo and adds that directory to the user PATH, which is
-    what lets `spotify upgrade` replace them later without elevation or another installer run.
+    Downloads the release MSI and installs it silently for the current user. The MSI puts echo
+    in %LOCALAPPDATA%\Programs\echo and adds that directory to the user PATH; the per-user
+    location is what lets the app update itself later without elevation or another installer run.
 
 .EXAMPLE
     irm https://github.com/and2049/echo/releases/latest/download/install.ps1 | iex
@@ -30,7 +30,7 @@ function Write-Failure { param([string]$Message) Write-Host $Message -Foreground
 
 if ($Help) {
     Write-Host @"
-Install echo - the desktop app plus the 'spotify' terminal command.
+Install the echo desktop app.
 
 Usage: install.ps1 [options]
 
@@ -39,7 +39,7 @@ Options:
     -Uninstall           Remove echo (leaves your settings in %APPDATA%\echo alone)
     -Help                Show this message
 
-After installing, upgrade with 'spotify upgrade' - no need to re-run this script.
+After installing, echo updates itself from its Settings - no need to re-run this script.
 "@
     exit 0
 }
@@ -97,7 +97,7 @@ if ($Version) {
 
 $installed = Get-EchoRegistration
 if ($installed -and $installed.DisplayVersion -eq $Version) {
-    Write-Info "echo $Version is already installed. Run 'spotify upgrade' to move to a newer release."
+    Write-Info "echo $Version is already installed. Update from echo's Settings to move to a newer release."
     exit 0
 }
 
@@ -105,9 +105,10 @@ if ($installed -and $installed.DisplayVersion -eq $Version) {
 
 # The MSI cannot rewrite files a running echo holds open; msiexec would otherwise schedule the
 # replacement for the next reboot and appear to have done nothing.
+# `spotify` is the terminal client older installs carried; the upgrade removes it.
 $running = Get-Process -Name "spotify", "echo-desktop" -ErrorAction SilentlyContinue
 if ($running) {
-    Write-Failure "echo is running. Close it (and any 'spotify' terminals) and try again."
+    Write-Failure "echo is running. Close it (and any 'spotify' terminals left from older versions) and try again."
     exit 1
 }
 
@@ -159,9 +160,7 @@ if ($env:GITHUB_ACTIONS -eq "true" -and $env:GITHUB_PATH) {
 
 Write-Host ""
 Write-Info "echo $Version is installed."
-Write-Info "  App:      $installDir\echo-desktop.exe (also in your Start menu)"
-Write-Info "  Terminal: $installDir\spotify.exe"
+Write-Info "  App: $installDir\echo-desktop.exe (also in your Start menu)"
 Write-Host ""
-Write-Info "Open a new terminal, then run 'spotify' to start."
-Write-Info "Later on, 'spotify upgrade' updates both the terminal client and the app."
+Write-Info "Later on, echo updates itself from its Settings."
 Write-Host ""

@@ -15,7 +15,7 @@ text_muted = "#596180" # Secondary text: artist/album columns, hints, timestamps
 
 highlight_bg = "#609bc2" # Selection source color; selected rows derive their fill from this.
 
-highlight_fg = "#2e3450" # Text on strong highlights (the TUI's selected rows).
+highlight_fg = "#2e3450" # Unused by the desktop app.
 
 error = "#e7403a" # Errors: failure messages and the audio-device banner.
 

@@ -1,18 +1,17 @@
 //! Self-upgrade: replacing an installed echo with a newer GitHub release.
 //!
-//! There is exactly one install shape — `echo-desktop` and `spotify` side by side in a directory
-//! the user owns, with `themes/` beside them — so there is exactly one thing to swap: the
-//! `echo-<os>-<arch>.tar.gz` archive of that directory. The installers (`assets/install.sh`,
-//! `assets/install.ps1`) lay that shape down; every upgrade after it happens here, with no
-//! installer UI involved.
+//! There is exactly one install shape — `echo-desktop` in a directory the user owns, with
+//! `themes/` beside it — so there is exactly one thing to swap: the `echo-<os>-<arch>.tar.gz`
+//! archive of that directory. The installers (`assets/install.sh`, `assets/install.ps1`) lay that
+//! shape down; every upgrade after it happens here, with no installer UI involved.
 //!
-//! Two details drive the design:
+//! Themes are loaded from `<exe dir>/themes` (see [`crate::config`]), so an archive of the bare
+//! binary would leave a release's theme changes behind. The archives carry `themes/` too and the
+//! directory is swapped along with the binary.
 //!
-//! - Both frontends live in the *same* directory on every platform (see
-//!   `echo-desktop/Cargo.toml`), so one archive updates both at once.
-//! - Themes are loaded from `<exe dir>/themes` (see [`crate::config`]), so an archive of bare
-//!   binaries would leave a release's theme changes behind. The archives carry `themes/` too and
-//!   the directory is swapped along with the binaries.
+//! Installs from v0.6.7 and earlier also hold the retired `spotify` terminal client. Their
+//! updaters insist on replacing it, so the archive still carries a stub under that name
+//! (`crates/spotify-stub`); [`remove_retired`] deletes it once a newer desktop app starts.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -81,7 +80,7 @@ pub const DEV_VERSION: &str = "0.1.0";
 /// GitHub rejects API requests that arrive without one.
 const USER_AGENT: &str = concat!("echo/", env!("CARGO_PKG_VERSION"));
 
-/// Network calls are bounded so a black-holed connection cannot hang `spotify upgrade`.
+/// Network calls are bounded so a black-holed connection cannot hang an upgrade.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
@@ -280,17 +279,13 @@ fn bin_name(stem: &str) -> String {
 fn resolve(exe: &Path, exists: impl Fn(&Path) -> bool) -> Result<Plan, UpdateError> {
     let dir = parent_of(exe)?;
 
-    // An install normally holds both binaries, but only what is actually on disk gets replaced:
-    // extracting `echo-desktop` over a directory that never had it would leave a stray copy
+    // Extracting `echo-desktop` over a directory that never had it would leave a stray copy
     // outside whatever the user's launcher points at.
-    let targets: Vec<PathBuf> = ["spotify", "echo-desktop"]
-        .into_iter()
-        .map(|stem| dir.join(bin_name(stem)))
-        .filter(|path| exists(path))
-        .collect();
-    if targets.is_empty() {
+    let desktop = dir.join(bin_name("echo-desktop"));
+    if !exists(&desktop) {
         return Err(UpdateError::UnknownInstall(dir));
     }
+    let targets = vec![desktop];
 
     // Mirrors `config::app_theme_dirs`: themes sit beside the binary, except in a macOS
     // bundle where they live in Contents/Resources.
@@ -316,7 +311,7 @@ fn resolve(exe: &Path, exists: impl Fn(&Path) -> bool) -> Result<Plan, UpdateErr
 /// Proves the install directory is writable before anything is downloaded, so someone on a
 /// system-owned path finds out immediately rather than after a 25 MB transfer.
 pub fn plan() -> Result<Plan, UpdateError> {
-    // Resolves symlinks, so the `~/.local/bin/spotify` link the installers leave behind lands
+    // Resolves symlinks, so the `~/.local/bin/echo-desktop` link install.sh leaves behind lands
     // on the real install directory rather than on a directory holding nothing but links.
     let exe = std::env::current_exe().map_err(io)?;
     let plan = resolve(&exe, |path| path.exists())?;
@@ -352,7 +347,7 @@ fn probe_writable(dir: &Path) -> Result<(), UpdateError> {
 /// Delete `*.old` files left behind by a previous upgrade.
 ///
 /// Windows cannot unlink the image of a running process, so [`apply`] leaves its backups in
-/// place. Both frontends call this at startup, when nothing holds them open any more.
+/// place. The desktop app calls this at startup, when nothing holds them open any more.
 pub fn sweep_backups() {
     let Ok(exe) = std::env::current_exe() else {
         return;
@@ -360,10 +355,63 @@ pub fn sweep_backups() {
     let Some(dir) = exe.parent() else {
         return;
     };
-    for stem in ["spotify", "echo-desktop"] {
+    for stem in std::iter::once("echo-desktop").chain(RETIRED) {
         let mut name = std::ffi::OsString::from(bin_name(stem));
         name.push(".old");
         let _ = std::fs::remove_file(dir.join(name));
+    }
+}
+
+/// Binaries older installs carry that echo no longer ships.
+const RETIRED: [&str; 1] = ["spotify"];
+
+/// Delete retired binaries from this install, along with the `~/.local/bin` links install.sh
+/// made for them. Called at startup; anything still in use (a `spotify.exe` running in a
+/// terminal on Windows) is left for the next launch.
+pub fn remove_retired() {
+    // A working tree's target/ is not an install, and cargo builds the stub there too.
+    if is_dev_build() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let bin_home = dirs::home_dir().map(|home| home.join(".local").join("bin"));
+    if remove_retired_from(dir, bin_home.as_deref()) {
+        // Removing a file from Contents/MacOS breaks a bundle seal just like swapping one.
+        resign_if_bundled(dir, &[]);
+    }
+}
+
+/// Returns whether any retired binary was actually deleted.
+fn remove_retired_from(dir: &Path, bin_home: Option<&Path>) -> bool {
+    let mut removed = false;
+    for stem in RETIRED {
+        let binary = dir.join(bin_name(stem));
+        // Links first: once the binary is gone there is nothing left to match them against.
+        if let Some(link) = bin_home.map(|bin| bin.join(stem))
+            && links_to(&link, &binary)
+        {
+            let _ = std::fs::remove_file(&link);
+        }
+        removed |= std::fs::remove_file(&binary).is_ok();
+    }
+    removed
+}
+
+/// Whether `link` is a symlink resolving to `target`. A same-named file that is not ours, or a
+/// link pointing anywhere else, is left alone.
+fn links_to(link: &Path, target: &Path) -> bool {
+    let is_link = std::fs::symlink_metadata(link).is_ok_and(|meta| meta.file_type().is_symlink());
+    if !is_link {
+        return false;
+    }
+    match (std::fs::canonicalize(link), std::fs::canonicalize(target)) {
+        (Ok(resolved), Ok(target)) => resolved == target,
+        _ => false,
     }
 }
 
@@ -845,22 +893,23 @@ mod tests {
 
     #[test]
     fn backups_keep_the_original_extension() {
-        // `with_extension` would turn spotify.exe into spotify.old and orphan the real binary.
+        // `with_extension` would turn echo-desktop.exe into echo-desktop.old and orphan the
+        // real binary.
         assert_eq!(
-            backup_path(Path::new("/opt/echo/spotify.exe")),
-            PathBuf::from("/opt/echo/spotify.exe.old")
+            backup_path(Path::new("/opt/echo/echo-desktop.exe")),
+            PathBuf::from("/opt/echo/echo-desktop.exe.old")
         );
         assert_eq!(
-            backup_path(Path::new("/opt/echo/spotify")),
-            PathBuf::from("/opt/echo/spotify.old")
+            backup_path(Path::new("/opt/echo/echo-desktop")),
+            PathBuf::from("/opt/echo/echo-desktop.old")
         );
     }
 
     #[test]
     fn archive_paths_that_escape_are_rejected() {
         assert_eq!(
-            safe_relative(Path::new("./spotify")).as_deref(),
-            Some(Path::new("spotify"))
+            safe_relative(Path::new("./echo-desktop")).as_deref(),
+            Some(Path::new("echo-desktop"))
         );
         assert_eq!(
             safe_relative(Path::new("themes/echo.toml")).as_deref(),
@@ -879,31 +928,13 @@ mod tests {
     }
 
     #[test]
-    fn both_binaries_side_by_side_are_both_replaced() {
+    fn the_desktop_binary_and_themes_are_replaced() {
         let dir = if cfg!(windows) {
             "C:/echo"
         } else {
             "/opt/echo"
         };
-        let exe = format!("{dir}/{}", bin_name("spotify"));
-        let desktop = format!("{dir}/{}", bin_name("echo-desktop"));
-        let plan = resolve(Path::new(&exe), present(&[&exe, &desktop])).unwrap();
-        assert_eq!(
-            plan.targets,
-            vec![PathBuf::from(&exe), PathBuf::from(&desktop)]
-        );
-    }
-
-    #[test]
-    fn only_the_binaries_actually_installed_are_replaced() {
-        // Someone who kept just the TUI out of the archive gets the same archive back, with
-        // `echo-desktop` left out of it rather than dropped beside a binary they never had.
-        let dir = if cfg!(windows) {
-            "C:/echo"
-        } else {
-            "/opt/echo"
-        };
-        let exe = format!("{dir}/{}", bin_name("spotify"));
+        let exe = format!("{dir}/{}", bin_name("echo-desktop"));
         let themes = format!("{dir}/themes");
         let plan = resolve(Path::new(&exe), present(&[&exe, &themes])).unwrap();
         assert_eq!(plan.targets, vec![PathBuf::from(&exe)]);
@@ -911,7 +942,60 @@ mod tests {
     }
 
     #[test]
-    fn an_install_with_neither_binary_is_not_upgradeable() {
+    fn a_leftover_terminal_client_is_not_an_upgrade_target() {
+        // Replacing it would pull the stub back in on every upgrade; `remove_retired` deletes it.
+        let dir = if cfg!(windows) {
+            "C:/echo"
+        } else {
+            "/opt/echo"
+        };
+        let exe = format!("{dir}/{}", bin_name("echo-desktop"));
+        let spotify = format!("{dir}/{}", bin_name("spotify"));
+        let plan = resolve(Path::new(&exe), present(&[&exe, &spotify])).unwrap();
+        assert_eq!(plan.targets, vec![PathBuf::from(&exe)]);
+    }
+
+    #[test]
+    fn retired_binaries_are_deleted_on_their_own() {
+        let dir = scratch_dir("retired");
+        std::fs::write(dir.join(bin_name("spotify")), b"stub").unwrap();
+        std::fs::write(dir.join(bin_name("echo-desktop")), b"app").unwrap();
+
+        assert!(remove_retired_from(&dir, None));
+        assert!(!dir.join(bin_name("spotify")).exists());
+        assert!(dir.join(bin_name("echo-desktop")).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_links_into_the_install_are_removed() {
+        let root = scratch_dir("retired-links");
+        let install = root.join("install");
+        let ours = root.join("bin-ours");
+        let theirs = root.join("bin-theirs");
+        for dir in [&install, &ours, &theirs] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(install.join("spotify"), b"stub").unwrap();
+        let elsewhere = root.join("some-other-spotify");
+        std::fs::write(&elsewhere, b"not ours").unwrap();
+        std::os::unix::fs::symlink(install.join("spotify"), ours.join("spotify")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, theirs.join("spotify")).unwrap();
+
+        remove_retired_from(&install, Some(&ours));
+        assert!(std::fs::symlink_metadata(ours.join("spotify")).is_err());
+        assert!(!install.join("spotify").exists());
+
+        std::fs::write(install.join("spotify"), b"stub").unwrap();
+        remove_retired_from(&install, Some(&theirs));
+        assert!(std::fs::symlink_metadata(theirs.join("spotify")).is_ok());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_install_without_the_desktop_binary_is_not_upgradeable() {
         let dir = if cfg!(windows) {
             "C:/echo"
         } else {
@@ -927,10 +1011,9 @@ mod tests {
     fn a_mac_bundle_finds_themes_in_resources() {
         // install.sh drops echo.app in /Applications, so the upgrade target is the bundle's
         // own MacOS directory — themes are one level up in Resources, not beside the binaries.
-        let exe = "/Applications/echo.app/Contents/MacOS/spotify";
-        let desktop = "/Applications/echo.app/Contents/MacOS/echo-desktop";
+        let exe = "/Applications/echo.app/Contents/MacOS/echo-desktop";
         let themes = "/Applications/echo.app/Contents/Resources/themes";
-        let plan = resolve(Path::new(exe), present(&[exe, desktop, themes])).unwrap();
+        let plan = resolve(Path::new(exe), present(&[exe, themes])).unwrap();
         assert_eq!(plan.themes, Some(PathBuf::from(themes)));
     }
 
@@ -962,13 +1045,13 @@ mod tests {
     #[test]
     fn unpack_then_apply_replaces_binaries_and_themes() {
         let dir = scratch_dir("roundtrip");
-        let binary = dir.join(bin_name("spotify"));
+        let binary = dir.join(bin_name("echo-desktop"));
         std::fs::write(&binary, b"old binary").unwrap();
         std::fs::create_dir(dir.join("themes")).unwrap();
         std::fs::write(dir.join("themes").join("echo.toml"), b"old theme").unwrap();
 
         let archive = build_archive(&[
-            (bin_name("spotify").as_str(), b"new binary"),
+            (bin_name("echo-desktop").as_str(), b"new binary"),
             ("themes/echo.toml", b"new theme"),
             ("themes/added.toml", b"added theme"),
         ]);
@@ -1007,14 +1090,17 @@ mod tests {
     #[test]
     fn archives_in_the_shape_ci_produces_unpack() {
         let dir = scratch_dir("ci-shape");
-        let binary = dir.join(bin_name("spotify"));
+        let binary = dir.join(bin_name("echo-desktop"));
         std::fs::write(&binary, b"old binary").unwrap();
         std::fs::create_dir(dir.join("themes")).unwrap();
         std::fs::write(dir.join("themes").join("echo.toml"), b"old theme").unwrap();
 
         let archive = build_archive(&[
             ("./", b""),
-            (format!("./{}", bin_name("spotify")).as_str(), b"new binary"),
+            (
+                format!("./{}", bin_name("echo-desktop")).as_str(),
+                b"new binary",
+            ),
             ("./themes/echo.toml", b"new theme"),
         ]);
 
@@ -1042,10 +1128,10 @@ mod tests {
     #[test]
     fn a_truncated_archive_is_rejected_rather_than_half_unpacked() {
         let dir = scratch_dir("truncated");
-        let binary = dir.join(bin_name("spotify"));
+        let binary = dir.join(bin_name("echo-desktop"));
         std::fs::write(&binary, b"old binary").unwrap();
 
-        let archive = build_archive(&[(bin_name("spotify").as_str(), b"new binary")]);
+        let archive = build_archive(&[(bin_name("echo-desktop").as_str(), b"new binary")]);
         // Losing the gzip trailer is exactly what a dropped connection looks like. `tar` alone
         // would not notice, because it stops at the end-of-archive marker.
         let truncated = &archive[..archive.len() - 8];
@@ -1064,7 +1150,7 @@ mod tests {
     #[test]
     fn an_archive_missing_a_wanted_binary_is_rejected() {
         let dir = scratch_dir("missing");
-        let binary = dir.join(bin_name("spotify"));
+        let binary = dir.join(bin_name("echo-desktop"));
         std::fs::write(&binary, b"old binary").unwrap();
 
         let archive = build_archive(&[("themes/echo.toml", b"only themes")]);
