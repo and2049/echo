@@ -7,8 +7,7 @@
 </p>
 <p align="center">
     <a href="README.md">English</a> |
-    <a href="README.zh.md">简体中文</a> |
-    <a href="README.zht.md">繁體中文</a>
+    <a href="README.zh.md">简体中文</a>
 </p>
 
 echo is a native desktop music player and Spotify client written in Rust. echo brings your entire Spotify library — liked songs, playlists, albums, and the artists you follow — plus your local music files into one fast, keyboard-friendly app, with full playback control, synced lyrics, and dynamic theming. A companion terminal client (`spotify`) ships in the same install for when you'd rather live in the terminal.

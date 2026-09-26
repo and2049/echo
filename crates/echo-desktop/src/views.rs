@@ -5387,7 +5387,6 @@ pub fn settings_modal(
             vec![
                 ("English".into(), "lang en".into(), language == "en"),
                 ("简体".into(), "lang zh-CN".into(), language == "zh-CN"),
-                ("繁體".into(), "lang zh-TW".into(), language == "zh-TW"),
             ],
             cx,
         ),

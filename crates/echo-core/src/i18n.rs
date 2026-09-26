@@ -10,13 +10,10 @@ pub fn init() {
         serde_json::from_str(include_str!("../../../locales/en.json")).unwrap();
     let zh: serde_json::Value =
         serde_json::from_str(include_str!("../../../locales/zh-CN.json")).unwrap();
-    let zh_tw: serde_json::Value =
-        serde_json::from_str(include_str!("../../../locales/zh-TW.json")).unwrap();
 
     map.insert("en", en);
     map.insert("zh", zh.clone());
     map.insert("zh-CN", zh);
-    map.insert("zh-TW", zh_tw);
 
     let _ = TRANSLATIONS.set(map);
 }
@@ -56,7 +53,7 @@ mod tests {
     fn setup_uri_keys_present_in_all_locales() {
         init();
         let map = TRANSLATIONS.get().unwrap();
-        for lang in ["en", "zh-CN", "zh-TW"] {
+        for lang in ["en", "zh-CN"] {
             let setup = &map[lang]["desktop"]["setup"];
             for key in ["step2", "copy", "copied"] {
                 assert!(setup[key].is_string(), "{lang} missing desktop.setup.{key}");
@@ -68,7 +65,7 @@ mod tests {
     fn tray_keys_present_in_all_locales() {
         init();
         let map = TRANSLATIONS.get().unwrap();
-        for lang in ["en", "zh-CN", "zh-TW"] {
+        for lang in ["en", "zh-CN"] {
             let desktop = &map[lang]["desktop"];
             for key in ["window", "tray", "tray_desc"] {
                 assert!(
