@@ -1866,7 +1866,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2142,7 +2142,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3218,7 +3218,7 @@ dependencies = [
  "windows 0.61.3",
  "windows-core 0.61.2",
  "windows-numerics 0.2.0",
- "windows-registry 0.5.3",
+ "windows-registry",
 ]
 
 [[package]]
@@ -3626,7 +3626,7 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
- "windows-registry 0.6.1",
+ "windows-registry",
 ]
 
 [[package]]
@@ -3641,7 +3641,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4317,7 +4317,7 @@ dependencies = [
 [[package]]
 name = "librespot-audio"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "aes",
  "bytes",
@@ -4336,7 +4336,7 @@ dependencies = [
 [[package]]
 name = "librespot-connect"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "futures-util",
  "librespot-core",
@@ -4355,7 +4355,7 @@ dependencies = [
 [[package]]
 name = "librespot-core"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "aes",
  "base64",
@@ -4412,7 +4412,7 @@ dependencies = [
 [[package]]
 name = "librespot-discovery"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "aes",
  "base64",
@@ -4439,7 +4439,7 @@ dependencies = [
 [[package]]
 name = "librespot-metadata"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4456,20 +4456,21 @@ dependencies = [
 [[package]]
 name = "librespot-oauth"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "log",
  "oauth2",
  "open",
  "reqwest 0.12.28",
  "thiserror 2.0.18",
+ "tokio",
  "url",
 ]
 
 [[package]]
 name = "librespot-playback"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "cpal",
  "form_urlencoded",
@@ -4492,7 +4493,7 @@ dependencies = [
 [[package]]
 name = "librespot-protocol"
 version = "0.8.0"
-source = "git+https://github.com/and2049/librespot?rev=3c8d876704028a903e411ec2139ef46f9334e147#3c8d876704028a903e411ec2139ef46f9334e147"
+source = "git+https://github.com/librespot-org/librespot?rev=939dc5ee9d833e1980f9495241219d9d4868a061#939dc5ee9d833e1980f9495241219d9d4868a061"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -4893,7 +4894,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5089,7 +5090,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5242,7 +5243,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7240,7 +7241,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7253,7 +7254,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7310,7 +7311,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7861,7 +7862,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7960,7 +7961,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8504,7 +8505,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9066,7 +9067,7 @@ dependencies = [
  "once_cell",
  "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9128,7 +9129,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -10050,7 +10051,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10300,17 +10301,6 @@ dependencies = [
  "windows-link 0.1.3",
  "windows-result 0.3.4",
  "windows-strings 0.4.2",
-]
-
-[[package]]
-name = "windows-registry"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
-dependencies = [
- "windows-link 0.2.1",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
 ]
 
 [[package]]
