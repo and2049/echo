@@ -498,7 +498,7 @@ impl Worker {
     ) -> Self {
         let (media_tx, media_rx) = mpsc::channel(32);
         media::spawn_media_thread(media_rx, app_tx);
-        let first_party = api::first_party::SpotifySessionManager::new(tx.clone())
+        let first_party = api::first_party::SpotifySessionManager::new()
             .map(api::first_party::SpotifyWebApi::new)
             .ok();
         Self {

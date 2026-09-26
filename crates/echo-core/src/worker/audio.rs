@@ -316,16 +316,6 @@ pub async fn spawn_librespot_daemon(
                     let oauth_client = client_builder.build()?;
                     let t = oauth_client.get_access_token()?;
 
-                    // Clear the terminal because librespot-oauth hardcodes a `println!` that
-                    // corrupts the TUI layout. Raw ANSI rather than crossterm so the core stays
-                    // frontend-free; a windowed frontend's stdout ignores this harmlessly.
-                    {
-                        use std::io::Write;
-                        let _ = write!(std::io::stdout(), "\x1b[2J\x1b[H");
-                        let _ = std::io::stdout().flush();
-                    }
-                    let _ = tx.send(WorkerEvent::ForceRedraw).await;
-
                     let creds = Credentials::with_access_token(t.access_token);
                     cache.save_credentials(&creds);
                     let _ = std::fs::remove_file(crate::config::debug_log_path(

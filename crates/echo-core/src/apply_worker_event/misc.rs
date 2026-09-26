@@ -11,10 +11,6 @@ pub fn set_timed_status(state: &mut AppState, message: String, seconds: u64) {
         Some(std::time::Instant::now() + std::time::Duration::from_secs(seconds));
 }
 
-pub fn handle_force_redraw(state: &mut AppState) {
-    state.ui.needs_terminal_clear = true;
-}
-
 pub fn handle_force_context_refresh(state: &AppState, app_tx: &mpsc::UnboundedSender<AppEvent>) {
     if state.ui.active_view == app::ActiveView::TrackList
         && let Some(context) = state.data.active_tracklist_context.clone()
@@ -44,7 +40,6 @@ pub fn handle_audio_output_unavailable(state: &mut AppState, message: String) {
     state.ui.audio_output_error = Some(format!(
         "Audio output disconnected: {message}. Reconnect a device and press Space to resume."
     ));
-    state.ui.needs_terminal_clear = true;
 }
 
 pub fn handle_audio_output_recovered(state: &mut AppState) {
@@ -68,7 +63,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn audio_output_error_is_persistent_and_forces_redraw() {
+    fn audio_output_error_is_persistent() {
         let mut state = AppState::new();
         state.playback.is_playing = true;
         state.playback.progress_ms = 1_000;
@@ -84,7 +79,6 @@ mod tests {
             state.playback.display_progress_ms(),
             state.playback.progress_ms
         );
-        assert!(state.ui.needs_terminal_clear);
         assert!(state.ui.status_message_expiry.is_none());
         assert!(
             state

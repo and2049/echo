@@ -94,7 +94,7 @@ BASE = [
     ("text", NAMED["white"], WINDOW_FG, "Main text."),
     ("text_muted", NAMED["darkgray"], WINDOW_FG, "Secondary text: artist/album columns, hints, timestamps, inactive icons."),
     ("highlight_bg", NAMED["white"], WINDOW_FG, "Selection source color; selected rows derive their fill from this."),
-    ("highlight_fg", NAMED["black"], WINDOW_FG, "Text on strong highlights (the TUI's selected rows)."),
+    ("highlight_fg", NAMED["black"], WINDOW_FG, "Unused by the desktop app."),
     ("error", NAMED["red"], WINDOW_FG, "Errors: failure messages and the audio-device banner."),
 ]
 

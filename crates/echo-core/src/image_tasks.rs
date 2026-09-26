@@ -1,7 +1,6 @@
 //! Fetching and decoding cover art off the render thread.
 //!
-//! Decoding hands back raw pixels ([`Artwork`]) rather than a terminal protocol object, so no
-//! `Picker` is needed and the same payload serves any frontend.
+//! Decoding hands back raw pixels ([`Artwork`]) so rendering can consume the payload directly.
 
 use std::sync::Arc;
 use tokio::sync::mpsc;

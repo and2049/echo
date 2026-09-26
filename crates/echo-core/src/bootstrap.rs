@@ -1,8 +1,8 @@
 //! Shared startup: channels, worker, config and initial state.
 //!
-//! Both frontends begin the same way — spawn the [`Worker`](crate::worker::Worker) on the
-//! current tokio runtime, load config and caches into an [`AppState`], and pick the starting
-//! mode. Only the render loop that follows differs, so everything up to that point lives here.
+//! Desktop startup spawns the [`Worker`](crate::worker::Worker) on the current tokio runtime,
+//! loads config and caches into an [`AppState`], and picks the starting mode. Everything before
+//! rendering begins lives here.
 
 use tokio::sync::mpsc;
 

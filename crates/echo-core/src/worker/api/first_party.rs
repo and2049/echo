@@ -5,9 +5,7 @@ use librespot_core::{
 use librespot_oauth::OAuthClientBuilder;
 use reqwest::header::RETRY_AFTER;
 use std::{io::Write, path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, mpsc};
-
-use crate::events::WorkerEvent;
+use tokio::sync::Mutex;
 
 pub use super::rate_limit::{SpotifyRateLimitError, rate_limit_error};
 use super::rate_limit::{fallback_backoff, parse_retry_after, should_retry_inline};
@@ -41,18 +39,16 @@ const OAUTH_SCOPES: &[&str] = &[
 pub struct SpotifySessionManager {
     cache: Cache,
     session: Arc<Mutex<Option<Session>>>,
-    tx: mpsc::Sender<WorkerEvent>,
 }
 
 impl SpotifySessionManager {
-    pub fn new(tx: mpsc::Sender<WorkerEvent>) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let cache = Cache::new(Some(Self::cache_dir()?), None, None, None)
             .context("Failed to create first-party Spotify session cache")?;
 
         Ok(Self {
             cache,
             session: Arc::new(Mutex::new(None)),
-            tx,
         })
     }
 
@@ -145,7 +141,6 @@ impl SpotifySessionManager {
             .get_access_token()
             .context("Failed to get first-party Spotify OAuth token")?;
 
-        clear_terminal_after_oauth(&self.tx);
         Ok(Credentials::with_access_token(token.access_token))
     }
 
@@ -309,14 +304,6 @@ impl From<SpotifyWebError> for anyhow::Error {
             SpotifyWebError::Other(err) => err,
         }
     }
-}
-
-fn clear_terminal_after_oauth(tx: &mpsc::Sender<WorkerEvent>) {
-    // Raw ANSI rather than crossterm so the core stays frontend-free; a windowed frontend's
-    // stdout ignores this harmlessly.
-    let _ = write!(std::io::stdout(), "\x1b[2J\x1b[H");
-    let _ = std::io::stdout().flush();
-    let _ = tx.try_send(WorkerEvent::ForceRedraw);
 }
 
 fn append_api_log(message: &str) {

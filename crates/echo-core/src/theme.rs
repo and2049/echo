@@ -1,9 +1,8 @@
 //! Frontend-neutral theme colors.
 //!
 //! Theme files store colors as strings (`config::Theme`); this module resolves them into
-//! [`ThemeColor`] values that carry no rendering dependency, so the same resolved theme serves
-//! any frontend. The ratatui views convert with an extension trait in `tui`; a GPUI frontend
-//! maps named colors through its own palette.
+//! [`ThemeColor`] values that carry no rendering dependency. The desktop maps named colors
+//! through its own GPUI palette.
 
 use crate::config::Theme;
 use std::str::FromStr;
@@ -43,8 +42,8 @@ pub enum ThemeColor {
 impl FromStr for ThemeColor {
     type Err = ();
 
-    /// Mirrors ratatui's `Color::from_str`: named colors (case- and separator-insensitive),
-    /// `#rrggbb` hex, or a bare palette index.
+    /// Accepts named colors (case- and separator-insensitive), `#rrggbb` hex, or a bare palette
+    /// index.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let normalized: String = s
             .chars()
@@ -90,7 +89,7 @@ impl FromStr for ThemeColor {
     }
 }
 
-/// A theme with every color parsed, falling back per-slot like the old ratatui-typed version.
+/// A theme with every color parsed and a fallback for each slot.
 #[derive(Clone)]
 pub struct ResolvedTheme {
     pub primary: ThemeColor,

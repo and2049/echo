@@ -181,7 +181,6 @@ pub enum WorkerEvent {
         item: Option<PlaybackItem>,
         context: Option<crate::models::PlayingContext>,
     },
-    ForceRedraw,
     ForceContextRefresh,
     TrackMetadataLoaded {
         track_id: String,

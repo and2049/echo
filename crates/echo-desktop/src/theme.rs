@@ -1,9 +1,7 @@
 //! GPUI bindings for the neutral theme types.
 //!
-//! The mirror of `spotify-tui`'s ratatui extension trait: [`echo_core::theme::ThemeColor`]
-//! resolves to a [`gpui::Hsla`]. Named ANSI colors map through a fixed palette (the terminal's
-//! palette isn't available — or meaningful — in a window), and `Reset` falls back to a slot-
-//! appropriate default supplied by the caller.
+//! [`echo_core::theme::ThemeColor`] resolves to a [`gpui::Hsla`]. Named ANSI colors map through
+//! a fixed palette, and `Reset` falls back to a slot-appropriate default supplied by the caller.
 
 use echo_core::theme::{NamedColor, ThemeColor};
 use gpui::{Hsla, Rgba};

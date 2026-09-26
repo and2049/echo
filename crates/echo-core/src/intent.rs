@@ -1,9 +1,9 @@
 //! Frontend-neutral user intents.
 //!
-//! "The user activated library row N" or "asked to play track N" means the same thing whether it
-//! arrived as an Enter keypress in the TUI or a click in the desktop app: mutate selection state
-//! and return the event the worker should receive. The frontends translate their input idioms
-//! into these calls and send whatever comes back over `app_tx`.
+//! "The user activated library row N" or "asked to play track N" has the same effect whether it
+//! arrived from a keyboard shortcut or a click: mutate selection state and return the event the
+//! worker should receive. The desktop translates its input idioms into these calls and sends
+//! whatever comes back over `app_tx`.
 
 use crate::app::{ActiveView, AppMode, AppState, SearchTab};
 use crate::events::AppEvent;
@@ -726,22 +726,7 @@ fn search_track_play_event(state: &AppState, track: &SearchTrack) -> Option<AppE
 
 // Artist pages.
 
-/// Opens the followed-artists list, fetching it in the background when empty. The
-/// artist-list view renders live from state, so a cold open fills in place.
-pub fn open_artist_list(state: &mut AppState) -> Option<AppEvent> {
-    state.push_view_history();
-    state.ui.active_view = ActiveView::ArtistList;
-    state.ui.artist_list_source = crate::app::ArtistListSource::Followed;
-    state.ui.selected_artist_index = 0;
-    state
-        .data
-        .followed_artists
-        .is_empty()
-        .then_some(AppEvent::FetchFollowedArtists)
-}
-
-/// Opens the user's top artists as an artist list, fetching in the background when
-/// empty — same fill-in-place behavior as [`open_artist_list`].
+/// Opens the user's top artists as an artist list, fetching in the background when empty.
 pub fn open_top_artists(state: &mut AppState) -> Option<AppEvent> {
     state.push_view_history();
     state.ui.active_view = ActiveView::ArtistList;
@@ -756,8 +741,7 @@ pub fn open_top_artists(state: &mut AppState) -> Option<AppEvent> {
         })
 }
 
-/// Opens the What's New feed (recent releases from followed artists), fetching in the
-/// background when empty — same fill-in-place behavior as [`open_artist_list`].
+/// Opens the What's New feed, fetching recent releases from followed artists when empty.
 pub fn open_whats_new(state: &mut AppState) -> Option<AppEvent> {
     state.push_view_history();
     state.ui.active_view = ActiveView::WhatsNew;
@@ -814,15 +798,7 @@ fn open_artist(state: &mut AppState, artist: Artist) -> Option<AppEvent> {
     })
 }
 
-/// Opens album `index` of the current artist page as a track list.
-pub fn open_artist_album(state: &mut AppState, index: usize) -> Option<AppEvent> {
-    state.ui.artist_page_album_index = index;
-    open_album_from_artist_page(state, index)
-}
-
-/// The album-opening body shared by [`open_artist_album`] (TUI, album-relative cursor) and
-/// [`activate_artist_page_row`] (desktop, combined cursor): deliberately does not touch the
-/// cursor, so each caller's own index space survives the history snapshot.
+/// Opens an artist-page album without changing the combined Popular/albums cursor.
 fn open_album_from_artist_page(state: &mut AppState, album_index: usize) -> Option<AppEvent> {
     let data = state.data.artist_page_data.clone()?;
     let album = data.albums.get(album_index)?;
@@ -895,11 +871,6 @@ pub fn set_discography_filter(state: &mut AppState, filter: DiscographyFilter) {
     crate::apply_worker_event::artist::apply_discography_filter(state);
 }
 
-/// Tab on the artist page: the next discography chip, wrapping.
-pub fn cycle_discography_filter(state: &mut AppState) {
-    set_discography_filter(state, state.ui.artist_discography_filter.next());
-}
-
 /// Follows or unfollows the artist of the open artist page, flipping the followed list at
 /// once; the worker reloads that list after the write, which also undoes a failed flip.
 pub fn toggle_follow_artist(state: &mut AppState) -> Option<AppEvent> {
@@ -919,13 +890,6 @@ pub fn toggle_follow_artist(state: &mut AppState) -> Option<AppEvent> {
         },
     );
     Some(AppEvent::FollowArtist(artist_id))
-}
-
-/// Backs out of an artist page to the artist list, cancelling any in-flight page load.
-pub fn back_to_artist_list(state: &mut AppState) -> AppEvent {
-    state.ui.active_view = ActiveView::ArtistList;
-    state.clear_pending_artist_page();
-    AppEvent::CancelArtistPageLoad
 }
 
 /// Saves the pasted Spotify developer credentials and starts authentication. `None` while
@@ -952,7 +916,6 @@ pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
     };
     state.ui.active_theme = crate::theme::ResolvedTheme::from_theme(theme);
     state.ui.library_config.active_theme = Some(name.to_string());
-    state.ui.needs_terminal_clear = true;
     state.save_library_config();
     true
 }
@@ -1025,7 +988,7 @@ pub fn set_top_items_range(
     None
 }
 
-// Vim-style motions and toggles shared by both frontends.
+// Vim-style motions and toggles.
 
 /// `g c`: jump the selection (or the whole view) to whatever is currently playing.
 pub fn jump_to_current_context(state: &mut AppState) -> Option<AppEvent> {
@@ -1133,7 +1096,7 @@ pub fn adjust_volume(state: &mut AppState, delta: i32) -> AppEvent {
     set_volume(state, next)
 }
 
-/// Ctrl-L: toggle the inline lyric line in the playback bar, persisted like the TUI does.
+/// Ctrl-L: toggle and persist the inline lyric line in the playback bar.
 /// `library_config` must be kept in sync too: later whole-section saves (window bounds on
 /// close, sidebar width) write it back verbatim and would otherwise revert the toggle.
 pub fn toggle_condensed_lyrics(state: &mut AppState) {
@@ -1451,9 +1414,8 @@ pub fn remove_playlist_from_folders(state: &mut AppState, id: &str) -> bool {
     removed
 }
 
-// Destructive-action prompts. A frontend sets one of the `*_prompt` fields, shows its own
-// confirm UI, and resolves it through these — the TUI with y/other keys, the desktop with
-// modal buttons.
+// Destructive-action prompts. The desktop sets one of the `*_prompt` fields, shows its confirm
+// UI, and resolves it through these from modal buttons or keyboard shortcuts.
 
 // Visual mode: a contiguous range anchored where `v` was pressed, extended by moving the
 // selection. `AppState::get_visual_selection_range` resolves the anchor and the live selection
@@ -2249,18 +2211,6 @@ mod tests {
     use crate::models::TrackListContextKind;
     use std::path::PathBuf;
 
-    #[test]
-    fn backing_out_cancels_pending_artist_without_clearing_page_data() {
-        let mut state = AppState::new();
-        state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
-
-        let event = back_to_artist_list(&mut state);
-
-        assert!(matches!(event, AppEvent::CancelArtistPageLoad));
-        assert!(state.ui.active_view == ActiveView::ArtistList);
-        assert!(state.data.pending_artist_page_id.is_none());
-    }
-
     fn library_playlist(id: &str) -> crate::models::Playlist {
         crate::models::Playlist {
             description: None,
@@ -2367,9 +2317,6 @@ mod tests {
         assert_eq!(names(&state), ["album-0", "album-2"]);
         set_discography_filter(&mut state, DiscographyFilter::AppearsOn);
         assert_eq!(names(&state), ["album-3"]);
-        cycle_discography_filter(&mut state);
-        assert_eq!(state.ui.artist_discography_filter, DiscographyFilter::All);
-        assert_eq!(names(&state), ["album-0", "album-1", "album-2"]);
     }
 
     #[test]
@@ -2940,23 +2887,6 @@ mod tests {
         // Only the two local results form the context, with the clicked one selected.
         assert_eq!(tracks.len(), 2);
         assert_eq!(selected_index, 1);
-    }
-
-    #[test]
-    fn opening_the_artist_list_fetches_only_when_empty() {
-        let mut state = AppState::new();
-        assert!(matches!(
-            open_artist_list(&mut state),
-            Some(AppEvent::FetchFollowedArtists)
-        ));
-
-        state.data.followed_artists.push(Artist {
-            id: "artist".to_string(),
-            name: "Artist".to_string(),
-            image_url: None,
-        });
-        assert!(open_artist_list(&mut state).is_none());
-        assert!(state.ui.active_view == ActiveView::ArtistList);
     }
 
     #[test]

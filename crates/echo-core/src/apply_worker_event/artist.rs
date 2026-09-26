@@ -63,9 +63,9 @@ pub fn handle_albums_loaded(state: &mut AppState, artist_id: String, albums: Vec
     }
 }
 
-/// Rebuilds the visible album rows from the discography under the active filter and keeps
-/// the cursor on a row. The TUI cursor is album-relative; the desktop's counts the Popular
-/// rows first, so both clamp against the same combined length.
+/// Rebuilds the visible album rows from the discography under the active filter and keeps the
+/// cursor on a row. The desktop cursor counts the Popular rows first, so it clamps against the
+/// combined length.
 pub fn apply_discography_filter(state: &mut AppState) {
     let Some(data) = state.data.artist_page_data.as_mut() else {
         return;

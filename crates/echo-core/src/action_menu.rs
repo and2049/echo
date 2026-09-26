@@ -1,6 +1,6 @@
-//! Track action-menu behavior shared by both frontends: executing a menu entry, labelling it,
-//! and the add-to-playlist picker it can open. The TUI presents these as the `A` popup and the
-//! desktop as a right-click context menu; both resolve an [`ActionMenuAction`] and call [`run`].
+//! Track action-menu behavior kept in core: executing and labelling menu entries, plus the
+//! add-to-playlist picker they can open. The desktop context menu resolves an
+//! [`ActionMenuAction`] and calls [`run`].
 
 use crate::app::{ActiveView, AppState, SearchTab};
 use crate::events::AppEvent;
@@ -77,7 +77,6 @@ pub fn run(
             }
         }
         ActionMenuAction::AddToPlaylist => {
-            state.ui.action_menu_context = None;
             state.ui.operation_register = vec![ctx.track_id];
             state.ui.playlist_add_modal_open = true;
             state.ui.playlist_add_filter.clear();
@@ -197,7 +196,7 @@ pub fn playlist_add_choices(state: &AppState) -> Vec<Playlist> {
 
 /// Confirm the add-to-playlist picker at `choice_index`. Tracks come from the operation
 /// register when set (the action-menu path), else from the current selection. Out-of-range
-/// index is a no-op and leaves the modal open, matching the TUI's behavior.
+/// index is a no-op and leaves the modal open.
 pub fn commit_playlist_add(state: &mut AppState, choice_index: usize) -> Option<AppEvent> {
     let playlists = playlist_add_choices(state);
     let playlist = playlists.get(choice_index)?;
