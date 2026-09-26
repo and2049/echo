@@ -12,6 +12,7 @@ pub enum CacheKey {
     TopArtists(TopItemsRange),
     RecentlyPlayed,
     FollowedArtists,
+    LikedSongs,
 }
 
 #[derive(Clone, Debug, PartialEq)]

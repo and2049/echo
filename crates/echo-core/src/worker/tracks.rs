@@ -3,6 +3,7 @@ use tokio::sync::mpsc;
 use crate::{
     config::{AppConfig, CacheData},
     events::WorkerEvent,
+    liked_songs::LikedSongs,
     models::TrackListContext,
 };
 
@@ -45,10 +46,12 @@ async fn load_context_tracks_with_policy(
         return;
     };
 
-    if context.is_album() {
+    if context.id == "LIKED_SONGS" {
+        load_liked_songs(api, context, tx, policy).await;
+    } else if context.is_album() {
         load_album_tracks(sp, api, context, tx, policy).await;
     } else {
-        load_playlist_tracks(sp, api, context, tx, policy).await;
+        load_playlist_tracks(sp, api, context, tx).await;
     }
 }
 
@@ -100,26 +103,39 @@ async fn load_album_tracks(
     }
 }
 
-async fn load_playlist_tracks(
-    sp: &SpotifyWorker,
+/// Shows the stored list straight away, then lets the sync decide whether Spotify needs
+/// asking: usually one page at most, and nothing when the last check is recent.
+async fn load_liked_songs(
     api: Option<&super::api::client::EchoSpotifyClient>,
-    mut context: TrackListContext,
+    context: TrackListContext,
     tx: &mpsc::Sender<WorkerEvent>,
     policy: ContextTrackCachePolicy,
 ) {
-    if policy == ContextTrackCachePolicy::UseCache
-        && context.id == "LIKED_SONGS"
-        && let Some(entry) = AppConfig::load_cache().get_context_tracks_entry(&context)
-    {
-        let needs_refresh = CacheData::context_tracks_need_refresh(&entry);
-        let cached = entry.value;
-        send_loaded(api, cached.tracks.clone(), cached.context.clone(), tx).await;
-        if !needs_refresh {
-            return;
-        }
-        context = cached.context;
+    let (tracks, total) =
+        LikedSongs::inspect(|liked| (liked.visible().map(<[_]>::to_vec), liked.count()));
+    let refresh = policy == ContextTrackCachePolicy::Refresh;
+    // Nothing on screen yet, or the user asked: a failed sync should say why.
+    let report_errors = refresh || tracks.is_none();
+    if let Some(tracks) = tracks {
+        let details = crate::context_details::liked_songs(&context, &tracks, total);
+        let context_id = context.id.clone();
+        let _ = tx.send(WorkerEvent::TracksLoaded(tracks, context)).await;
+        let _ = tx
+            .send(WorkerEvent::ContextDetailsLoaded {
+                context_id,
+                details,
+            })
+            .await;
     }
+    super::liked_songs::spawn_sync(api.cloned(), tx.clone(), refresh, report_errors);
+}
 
+async fn load_playlist_tracks(
+    sp: &SpotifyWorker,
+    api: Option<&super::api::client::EchoSpotifyClient>,
+    context: TrackListContext,
+    tx: &mpsc::Sender<WorkerEvent>,
+) {
     let id = context.id.clone();
     match sp.fetch_tracks(&id).await {
         Ok(tracks) => {

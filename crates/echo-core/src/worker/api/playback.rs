@@ -426,8 +426,21 @@ impl SpotifyWorker {
 
     async fn play_context_inner(&mut self, context_id: &str, is_album: bool) -> Result<()> {
         if context_id == "LIKED_SONGS" {
-            let tracks = self.fetch_tracks(context_id).await?;
-            let ids: Vec<_> = tracks.into_iter().map(|track| track.id).collect();
+            // The first 100, as before the whole list was stored, so the play request stays
+            // small; the network is only asked while the first sync has nothing yet.
+            let mut ids: Vec<String> = crate::liked_songs::LikedSongs::inspect(|liked| {
+                liked
+                    .visible()
+                    .unwrap_or_default()
+                    .iter()
+                    .take(100)
+                    .map(|track| track.id.clone())
+                    .collect()
+            });
+            if ids.is_empty() {
+                let tracks = self.fetch_tracks(context_id).await?;
+                ids = tracks.into_iter().map(|track| track.id).collect();
+            }
             anyhow::ensure!(!ids.is_empty(), "No saved tracks to play");
             return self.play_uris(&ids, 0).await;
         }

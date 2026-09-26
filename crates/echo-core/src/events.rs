@@ -203,6 +203,12 @@ pub enum WorkerEvent {
         artwork: Option<crate::artwork::SharedArtwork>,
     },
     LikedStatusUpdate(std::collections::HashMap<String, bool>),
+    /// The stored Liked Songs list changed: a sync step or an unlike. `total` is Spotify's
+    /// count, which can run ahead of `tracks` while the first walk is still going.
+    LikedSongsUpdated {
+        tracks: Vec<Track>,
+        total: Option<u32>,
+    },
     DevicesLoaded(Vec<crate::models::Device>),
     LyricsLoaded(Option<crate::models::Lyrics>),
     TopTracksLoaded(Vec<Track>),

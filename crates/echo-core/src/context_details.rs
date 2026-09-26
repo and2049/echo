@@ -36,6 +36,20 @@ impl ContextDetails {
     }
 }
 
+/// Liked Songs' header, from the stored list alone.
+pub fn liked_songs(
+    context: &TrackListContext,
+    tracks: &[Track],
+    total: Option<u32>,
+) -> ContextDetails {
+    ContextDetails {
+        owner: context.subtitle.clone(),
+        track_count: total,
+        duration_ms: total_duration(tracks),
+        ..Default::default()
+    }
+}
+
 pub fn total_duration(tracks: &[Track]) -> u64 {
     tracks
         .iter()
