@@ -30,7 +30,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("vis", "Toggle the audio visualizer"),
     ("visbins <5-32>", "Visualizer frequency bands"),
     ("album", "Jump to the selected track's album"),
-    ("lang <en|zh-CN|zh-TW>", "Switch language"),
+    ("lang <en|zh|zh-CN>", "Switch language"),
     ("newplaylist <name>", "Create a Spotify playlist"),
     ("newlocalplaylist <name>", "Create a local playlist"),
     (
@@ -104,12 +104,7 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                     .collect()
             }
             "lang" => {
-                let options = vec![
-                    "en".to_string(),
-                    "zh".to_string(),
-                    "zh-CN".to_string(),
-                    "zh-TW".to_string(),
-                ];
+                let options = vec!["en".to_string(), "zh".to_string(), "zh-CN".to_string()];
                 options
                     .into_iter()
                     .filter(|o| o.starts_with(arg_str))
@@ -565,11 +560,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
             }
             "lang" => {
                 if let Some(lang_code) = args.next() {
-                    if lang_code == "en"
-                        || lang_code == "zh"
-                        || lang_code == "zh-CN"
-                        || lang_code == "zh-TW"
-                    {
+                    if lang_code == "en" || lang_code == "zh" || lang_code == "zh-CN" {
                         state.ui.library_config.language = lang_code.to_string();
                         state.save_library_config();
                         state.ui.status_message = Some(

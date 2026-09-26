@@ -7,8 +7,7 @@
 </p>
 <p align="center">
     <a href="README.md">English</a> |
-    <a href="README.zh.md">简体中文</a> |
-    <a href="README.zht.md">繁體中文</a>
+    <a href="README.zh.md">简体中文</a>
 </p>
 
 echo 是一款用 Rust 编写的原生桌面音乐播放器和 Spotify 客户端。echo 将您的整个 Spotify 库——喜欢的歌曲、播放列表、专辑以及关注的艺术家——加上本地音乐文件汇集到一个快速、键盘友好的应用中，提供完整的播放控制、同步歌词和动态主题。同一安装包还附带一个终端客户端（`spotify`），在您想待在终端里时随时可用。
