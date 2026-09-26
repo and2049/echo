@@ -99,8 +99,8 @@ jobs:
         # new packager release should be adopted deliberately, not picked up by surprise.
         run: cargo install cargo-packager --locked --version 0.11.8
 
-      # One echo package carrying both frontends: the desktop app plus the `spotify` TUI. The
-      # MSI also puts its install dir on PATH; the macOS bundle holds both in Contents/MacOS.
+      # The MSI also puts its install dir on PATH. The stub is built for the upgrade archive
+      # only; the installers never carry it.
       - name: Build and Package
         shell: bash
         env:
@@ -110,9 +110,8 @@ jobs:
         run: |
           if [ -n "${{ matrix.formats }}" ]; then
             cargo packager --release -p echo-desktop --formats ${{ matrix.formats }}
-          else
-            cargo build --release -p echo-desktop -p spotify-tui
           fi
+          cargo build --release -p echo-desktop -p spotify-stub
 
       # A gpui_platform missing its wayland/x11 features still compiles — it just yields a
       # desktop binary that panics instead of opening a window, which no build step notices.
@@ -122,10 +121,13 @@ jobs:
         if: runner.os == 'Linux'
         run: ldd target/release/echo-desktop | grep -q libxkbcommon
 
-      # The portable archive: what `spotify upgrade` and the desktop's update button pull on
-      # every platform, and what install.sh lays down on Linux. It carries themes/ because
-      # themes are loaded from the install directory — binaries alone would leave a release's
-      # theme changes behind — and the hicolor icons install.sh files into the menu entry.
+      # The portable archive: what the desktop's updater pulls on every platform, and what
+      # install.sh lays down on Linux. It carries themes/ because themes are loaded from the
+      # install directory — the binary alone would leave a release's theme changes behind —
+      # and the hicolor icons install.sh files into the menu entry.
+      #
+      # `spotify` is the stub from crates/spotify-stub: updaters in v0.6.7 and earlier refuse
+      # an archive missing a binary they found installed. Drop it once those are gone.
       - name: Build upgrade archive
         shell: bash
         run: |

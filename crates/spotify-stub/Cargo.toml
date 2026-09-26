@@ -1,0 +1,12 @@
+[package]
+name = "spotify-stub"
+version.workspace = true
+edition.workspace = true
+
+# Stands in for the removed terminal client inside the release archive. Updaters from v0.6.7
+# and earlier replace every binary they find installed and reject an archive missing one, so
+# without this every existing install would fail to update. Newer desktop builds delete it at
+# startup (`echo_core::update::remove_retired`). Drop this crate once those versions are gone.
+[[bin]]
+name = "spotify"
+path = "src/main.rs"

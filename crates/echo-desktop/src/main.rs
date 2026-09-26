@@ -3997,6 +3997,7 @@ fn main() {
     // Windows cannot delete the image of a running process, so a previous upgrade leaves its
     // backups behind. Nothing holds them now.
     echo_core::update::sweep_backups();
+    echo_core::update::remove_retired();
 
     echo_core::i18n::init();
     let boot = echo_core::bootstrap::init();
