@@ -2489,6 +2489,7 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                             QueueRow::Header(text) => queue_header(
                                 text.clone(),
                                 (row_ix == 0 && has_manual).then(|| tr(&this.state, "actions.clear_queue")),
+                                COMPACT_PILL,
                                 fg,
                                 muted,
                                 cx,
@@ -2825,19 +2826,30 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
     .into_any_element()
 }
 
+/// A section label inside a queue list. `uniform_list` takes its row pitch from row 0, which is
+/// always a header, so the header has to be as tall as the track rows of the list it sits in:
+/// `metrics` is that list's. In rows taller than the compact ones the label drops to the bottom
+/// edge, next to the tracks it names.
 fn queue_header(
     text: String,
     clear_label: Option<SharedString>,
+    metrics: PillMetrics,
     fg: Hsla,
     muted: Hsla,
     cx: &mut Context<EchoApp>,
 ) -> gpui::AnyElement {
     div()
         .w_full()
-        .h(px(COMPACT_PILL.row_height))
+        .h(px(metrics.row_height))
         .px_4()
         .flex()
-        .items_center()
+        .map(|el| {
+            if metrics.row_height > COMPACT_PILL.row_height {
+                el.items_end().pb_1()
+            } else {
+                el.items_center()
+            }
+        })
         .justify_between()
         .text_xs()
         .text_color(muted)
@@ -4602,6 +4614,7 @@ fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement 
                                 return queue_header(
                                     text,
                                     (ix == 0 && has_manual).then(|| tr(&this.state, "actions.clear_queue")),
+                                    TRACK_PILL,
                                     fg,
                                     muted,
                                     cx,
