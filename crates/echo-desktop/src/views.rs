@@ -769,8 +769,6 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .h_full()
         .flex()
         .flex_col()
-        .border_r_1()
-        .border_color(palette.border)
         .child(nav_row)
         .child(div().id("home-link").mx_2().mt_2().px_2().py_2().rounded_md().flex().items_center().gap_2().text_sm().text_color(if app.state.ui.active_view == ActiveView::Home { accent } else { muted }).when(app.state.ui.active_view == ActiveView::Home, |el| el.bg(palette.row_selected)).hover(move |style| style.bg(palette.row_hover)).cursor_pointer().on_click(cx.listener(|this: &mut EchoApp, _, window, cx| { this.open_home(cx); window.focus(&this.focus_handle, cx); })).child(svg().path("icons/home.svg").size(px(18.0)).text_color(muted)).child(tr(&app.state, "desktop.home")))
         .child(
@@ -1244,6 +1242,19 @@ pub fn main_area(
         }
     };
 
+    let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
+    let background = app
+        .state
+        .ui
+        .active_theme
+        .background
+        .gpui(crate::theme::WINDOW_BG());
+    let body = if app.sidebar_collapsed {
+        body
+    } else {
+        rounded_content_frame(body, background, palette.border).into_any_element()
+    };
+
     div()
         .flex_grow(1.0)
         .h_full()
@@ -1252,6 +1263,64 @@ pub fn main_area(
         .overflow_hidden()
         .child(search)
         .child(body)
+}
+
+/// Join the library edge to the search header with an inner top-left corner. GPUI's
+/// overflow mask is rectangular, so paint the corner cutout after the scrolling content.
+/// The border belongs to this frame, not the sidebar/header, avoiding a square junction.
+fn rounded_content_frame(body: AnyElement, background: Hsla, border: Hsla) -> impl IntoElement {
+    div()
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .pt(px(1.0))
+        .pl(px(1.0))
+        .child(body)
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    let radius = px(12.0).min(bounds.size.width).min(bounds.size.height);
+                    let point = |x, y| bounds.origin + gpui::point(x, y);
+                    // A circular quarter-arc, approximated by a cubic Bezier.
+                    let control = radius * (1.0 - 0.552_284_8);
+                    let mut mask = gpui::PathBuilder::fill();
+                    mask.move_to(point(px(0.0), px(0.0)));
+                    mask.line_to(point(radius, px(0.0)));
+                    mask.cubic_bezier_to(
+                        point(px(0.0), radius),
+                        point(control, px(0.0)),
+                        point(px(0.0), control),
+                    );
+                    mask.close();
+                    if let Ok(path) = mask.build() {
+                        window.paint_path(path, background);
+                    }
+
+                    let half = px(0.5);
+                    let control = radius - (radius - half) * 0.552_284_8;
+                    let mut edge = gpui::PathBuilder::stroke(px(1.0));
+                    edge.move_to(point(bounds.size.width, half));
+                    edge.line_to(point(radius, half));
+                    edge.cubic_bezier_to(
+                        point(half, radius),
+                        point(control, half),
+                        point(half, control),
+                    );
+                    edge.line_to(point(half, bounds.size.height));
+                    if let Ok(path) = edge.build() {
+                        window.paint_path(path, border);
+                    }
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
 }
 
 /// First-run credentials: a BYOK (bring-your-own-key) card writing to the
@@ -1478,8 +1547,7 @@ fn search_bar(
         .pl_2()
         .pr_4()
         .py_2()
-        .border_b_1()
-        .border_color(palette.border)
+        .when(collapsed, |el| el.border_b_1().border_color(palette.border))
         .flex()
         .flex_row()
         .items_center()
