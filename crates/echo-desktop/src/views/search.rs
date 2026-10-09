@@ -397,12 +397,7 @@ pub fn all_results(
         &app.state.ui.search_context_query,
     );
     app.search_all_positions = vec![(0, None); rows.len()];
-    let sidebar = if app.sidebar_collapsed {
-        0.0
-    } else {
-        app.sidebar_width
-    };
-    let narrow = f32::from(window.viewport_size().width) - sidebar < 620.0;
+    let narrow = app.main_content_width(window) < 620.0;
     let mut top_band = div().flex().gap_4().when(narrow, |el| el.flex_col());
     if let Some(row) = rows.first()
         && let Some(item) = search_row_item(&app.state.data.search_results, *row)

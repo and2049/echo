@@ -14,6 +14,7 @@ use echo_core::config::RightPanel;
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
 mod menu_placement;
+pub(crate) mod panel_layout;
 mod playlist_edit;
 mod search;
 use gpui::{
@@ -484,6 +485,14 @@ pub(crate) fn client_corners(window: &Window) -> Option<gpui::Tiling> {
         gpui::Decorations::Client { tiling } => Some(tiling),
         gpui::Decorations::Server => None,
     }
+}
+
+/// Width of the visible app, excluding client-drawn shadow/resize margins.
+pub(crate) fn client_content_width(window: &Window) -> f32 {
+    let inset = client_corners(window).map_or(0.0, |tiling| {
+        f32::from(!tiling.left) * CLIENT_SHADOW + f32::from(!tiling.right) * CLIENT_SHADOW
+    });
+    (f32::from(window.viewport_size().width) - inset).max(0.0)
 }
 
 /// Rounds the corners an element shares with the window's.
@@ -2030,12 +2039,7 @@ fn track_list(
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
-    let sidebar_width = if app.sidebar_collapsed {
-        0.0
-    } else {
-        app.sidebar_width
-    };
-    let wide = f32::from(window.viewport_size().width) - sidebar_width >= 640.0;
+    let wide = app.main_content_width(window) >= 640.0;
     let hero = wide
         && app
             .state
@@ -2851,13 +2855,23 @@ fn queue_header(
             }
         })
         .justify_between()
+        .gap_2()
         .text_xs()
         .text_color(muted)
-        .child(SharedString::from(text))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(SharedString::from(text)),
+        )
         .when_some(clear_label, |el, label| {
             el.child(
                 div()
                     .id("clear-queue")
+                    .flex_none()
+                    .max_w(relative(0.6))
+                    .truncate()
                     .cursor_pointer()
                     .text_color(fg)
                     .hover(move |style| style.text_color(muted))
@@ -4412,12 +4426,17 @@ fn lyric_window(app: &EchoApp, colors: LyricColors, rows: usize, row_height: f32
 
 const PANEL_LYRIC_ROW: f32 = 26.0;
 const LYRIC_GLIDE: std::time::Duration = std::time::Duration::from_millis(240);
-pub(crate) const RIGHT_PANEL_WIDTH: f32 = 320.0;
 
 /// The docked column to the right of the main area: the queue or the lyrics, whichever the
 /// playback bar's buttons (or `shift-L`) opened. Persistent UI rather than an overlay, so
 /// escape leaves it alone and it comes back on the next launch.
-pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoApp>) -> AnyElement {
+pub fn right_panel(
+    app: &mut EchoApp,
+    panel: RightPanel,
+    window: &Window,
+    cx: &mut Context<EchoApp>,
+) -> AnyElement {
+    let width = app.effective_right_panel_width(window);
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
@@ -4432,14 +4451,15 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
             .then(|| app.state.playback.playing_track_title.clone().into()),
     };
     let body = match panel {
-        RightPanel::Queue => queue_panel_body(app, cx),
+        RightPanel::Queue => queue_panel_body(app, width, cx),
         RightPanel::Lyrics => lyric_status(app, muted).unwrap_or_else(|| lyric_list(app, cx)),
     };
 
     div()
         .id("right-panel")
+        .relative()
         .flex_none()
-        .w(px(RIGHT_PANEL_WIDTH))
+        .w(px(width))
         .h_full()
         .flex()
         .flex_col()
@@ -4467,6 +4487,7 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
                                 .text_sm()
                                 .font_weight(gpui::FontWeight::BOLD)
                                 .text_color(fg)
+                                .truncate()
                                 .child(title),
                         )
                         .when_some(subtitle, |el, subtitle| {
@@ -4491,13 +4512,31 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
                 )),
         )
         .child(body)
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w(px(5.0))
+                .cursor_col_resize()
+                .hover(move |style| style.bg(palette.drag_target))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, window, cx| {
+                        this.begin_right_panel_resize(event.position.x, window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+        )
         .into_any_element()
 }
 
 /// The queue panel: the playing track on top, then the same rows as the full queue view in a
 /// narrower two-line layout. Double-click plays a row, right-click opens its track menu; the
 /// keyboard-driven selection stays with the full view.
-fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
+fn queue_panel_body(app: &mut EchoApp, width: f32, cx: &mut Context<EchoApp>) -> AnyElement {
+    let show_duration = panel_layout::show_queue_duration(width);
     let theme = &app.state.ui.active_theme;
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -4675,13 +4714,15 @@ fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement 
                                                     .child(SharedString::from(track.artist.clone())),
                                             ),
                                     )
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .child(SharedString::from(format_time(track.duration_ms))),
-                                    )
+                                    .when(show_duration, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(format_time(track.duration_ms))),
+                                        )
+                                    })
                             })
                             .into_any_element()
                         })
@@ -6522,12 +6563,7 @@ fn home_view(
     let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
     let accent = app.state.ui.active_theme.primary.gpui(WINDOW_FG());
     let mut shelves = home_shelves(&app.state);
-    let width = f32::from(window.viewport_size().width)
-        - if app.sidebar_collapsed {
-            0.0
-        } else {
-            app.sidebar_width
-        };
+    let width = app.main_content_width(window);
     let columns = if width >= 640.0 {
         4
     } else if width >= 320.0 {
