@@ -13,6 +13,8 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, QueueTab, Search
 use echo_core::config::RightPanel;
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
+mod menu_placement;
+pub(crate) mod panel_layout;
 mod playlist_edit;
 mod search;
 use gpui::{
@@ -20,6 +22,7 @@ use gpui::{
     SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, relative, svg,
     uniform_list,
 };
+use menu_placement::{MenuAnchor, menu_bounds, menu_placement};
 pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
 
 use crate::backdrop::{Backdrop, ImmersiveColors};
@@ -27,11 +30,9 @@ use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
 use crate::{ControlColors, EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
-/// The add-to-playlist flyout's box. The row height is the measured height of one choice, used
-/// only to keep the panel on screen — see [`playlist_submenu`].
+/// The add-to-playlist flyout's preferred dimensions.
 const SUBMENU_WIDTH: f32 = 190.0;
 const SUBMENU_MAX_H: f32 = 270.0;
-const SUBMENU_ROW_HEIGHT: f32 = 31.0;
 const THUMB_EDGE: f32 = 26.0;
 // Native caption metrics: Windows titlebars are a fixed 32px, macOS gets a touch more.
 const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") {
@@ -288,7 +289,7 @@ pub fn titlebar(
     // The close button's hover fill reaches the window's top-right corner, so it rounds
     // itself too — DWM's radius on Windows 11, ours on a client-decorated Linux window.
     let close_radius = match corners {
-        Some(tiling) => (!tiling.top && !tiling.right).then(|| px(CLIENT_CORNER_RADIUS)),
+        Some(tiling) => (!tiling.top && !tiling.right).then(|| px(CLIENT_CONTENT_RADIUS)),
         None => (cfg!(target_os = "windows") && !maximized).then(|| px(WIN_CORNER_RADIUS)),
     };
 
@@ -461,6 +462,10 @@ fn caption_button(
 /// Corner radius and drop-shadow depth for a client-decorated window, matching what GNOME and
 /// Zed use so echo sits alongside them without looking off.
 const CLIENT_CORNER_RADIUS: f32 = 10.0;
+const CLIENT_BORDER_WIDTH: f32 = 1.0;
+// Content sits inside the frame border: reduce its radius by the same inset so both
+// arcs share a center instead of leaving a sliver between their antialiased edges.
+const CLIENT_CONTENT_RADIUS: f32 = CLIENT_CORNER_RADIUS - CLIENT_BORDER_WIDTH;
 /// The radius DWM clips an unmaximized window to on Windows 11.
 const WIN_CORNER_RADIUS: f32 = 8.0;
 const CLIENT_SHADOW: f32 = 10.0;
@@ -484,6 +489,14 @@ pub(crate) fn client_corners(window: &Window) -> Option<gpui::Tiling> {
         gpui::Decorations::Client { tiling } => Some(tiling),
         gpui::Decorations::Server => None,
     }
+}
+
+/// Width of the visible app, excluding client-drawn shadow/resize margins.
+pub(crate) fn client_content_width(window: &Window) -> f32 {
+    let inset = client_corners(window).map_or(0.0, |tiling| {
+        f32::from(!tiling.left) * CLIENT_SHADOW + f32::from(!tiling.right) * CLIENT_SHADOW
+    });
+    (f32::from(window.viewport_size().width) - inset).max(0.0)
 }
 
 /// Rounds the corners an element shares with the window's.
@@ -510,16 +523,20 @@ pub(crate) fn client_corner_radii(
     corners: Option<gpui::Tiling>,
     which: ClientCorners,
 ) -> gpui::Corners<gpui::Pixels> {
+    corner_radii(corners, which, CLIENT_CONTENT_RADIUS)
+}
+
+fn corner_radii(
+    corners: Option<gpui::Tiling>,
+    which: ClientCorners,
+    radius: f32,
+) -> gpui::Corners<gpui::Pixels> {
     let Some(tiling) = corners else {
         return gpui::Corners::default();
     };
     let all = matches!(which, ClientCorners::All);
     let radius = |rounded: bool| {
-        if rounded {
-            px(CLIENT_CORNER_RADIUS)
-        } else {
-            px(0.0)
-        }
+        if rounded { px(radius) } else { px(0.0) }
     };
     gpui::Corners {
         top_left: radius(!tiling.top && !tiling.left),
@@ -596,10 +613,17 @@ pub fn window_frame(
         .child(
             div()
                 .size_full()
-                .map(|el| round_client_corners(el, Some(tiling), ClientCorners::All))
+                .map(|el| {
+                    let radii =
+                        corner_radii(Some(tiling), ClientCorners::All, CLIENT_CORNER_RADIUS);
+                    el.rounded_tl(radii.top_left)
+                        .rounded_tr(radii.top_right)
+                        .rounded_bl(radii.bottom_left)
+                        .rounded_br(radii.bottom_right)
+                })
                 // A hairline outline stands in for the frame the compositor is not drawing, so
                 // the window still reads as one against a same-coloured background behind it.
-                .border_1()
+                .border(px(CLIENT_BORDER_WIDTH))
                 .border_color(palette.border)
                 .when(!tiling.is_tiled(), |el| {
                     el.shadow(vec![
@@ -760,8 +784,6 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
         .h_full()
         .flex()
         .flex_col()
-        .border_r_1()
-        .border_color(palette.border)
         .child(nav_row)
         .child(div().id("home-link").mx_2().mt_2().px_2().py_2().rounded_md().flex().items_center().gap_2().text_sm().text_color(if app.state.ui.active_view == ActiveView::Home { accent } else { muted }).when(app.state.ui.active_view == ActiveView::Home, |el| el.bg(palette.row_selected)).hover(move |style| style.bg(palette.row_hover)).cursor_pointer().on_click(cx.listener(|this: &mut EchoApp, _, window, cx| { this.open_home(cx); window.focus(&this.focus_handle, cx); })).child(svg().path("icons/home.svg").size(px(18.0)).text_color(muted)).child(tr(&app.state, "desktop.home")))
         .child(
@@ -1235,6 +1257,19 @@ pub fn main_area(
         }
     };
 
+    let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
+    let background = app
+        .state
+        .ui
+        .active_theme
+        .background
+        .gpui(crate::theme::WINDOW_BG());
+    let body = if app.sidebar_collapsed {
+        body
+    } else {
+        rounded_content_frame(body, background, palette.border).into_any_element()
+    };
+
     div()
         .flex_grow(1.0)
         .h_full()
@@ -1243,6 +1278,64 @@ pub fn main_area(
         .overflow_hidden()
         .child(search)
         .child(body)
+}
+
+/// Join the library edge to the search header with an inner top-left corner. GPUI's
+/// overflow mask is rectangular, so paint the corner cutout after the scrolling content.
+/// The border belongs to this frame, not the sidebar/header, avoiding a square junction.
+fn rounded_content_frame(body: AnyElement, background: Hsla, border: Hsla) -> impl IntoElement {
+    div()
+        .relative()
+        .flex_1()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .pt(px(1.0))
+        .pl(px(1.0))
+        .child(body)
+        .child(
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _| {
+                    let radius = px(12.0).min(bounds.size.width).min(bounds.size.height);
+                    let point = |x, y| bounds.origin + gpui::point(x, y);
+                    // A circular quarter-arc, approximated by a cubic Bezier.
+                    let control = radius * (1.0 - 0.552_284_8);
+                    let mut mask = gpui::PathBuilder::fill();
+                    mask.move_to(point(px(0.0), px(0.0)));
+                    mask.line_to(point(radius, px(0.0)));
+                    mask.cubic_bezier_to(
+                        point(px(0.0), radius),
+                        point(control, px(0.0)),
+                        point(px(0.0), control),
+                    );
+                    mask.close();
+                    if let Ok(path) = mask.build() {
+                        window.paint_path(path, background);
+                    }
+
+                    let half = px(0.5);
+                    let control = radius - (radius - half) * 0.552_284_8;
+                    let mut edge = gpui::PathBuilder::stroke(px(1.0));
+                    edge.move_to(point(bounds.size.width, half));
+                    edge.line_to(point(radius, half));
+                    edge.cubic_bezier_to(
+                        point(half, radius),
+                        point(control, half),
+                        point(half, control),
+                    );
+                    edge.line_to(point(half, bounds.size.height));
+                    if let Ok(path) = edge.build() {
+                        window.paint_path(path, border);
+                    }
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
 }
 
 /// First-run credentials: a BYOK (bring-your-own-key) card writing to the
@@ -1464,11 +1557,12 @@ fn search_bar(
 
     div()
         .flex_none()
-        // pl_2/pt_2 mirror the sidebar header's metrics so the button cluster lands on the
-        // same pixels whether it renders here (collapsed) or in the sidebar (expanded).
+        // Left/top spacing mirrors the sidebar header so its button cluster stays aligned.
+        // Equal bottom spacing keeps scrolling content clear of the search box.
         .pl_2()
         .pr_4()
-        .pt_2()
+        .py_2()
+        .when(collapsed, |el| el.border_b_1().border_color(palette.border))
         .flex()
         .flex_row()
         .items_center()
@@ -2030,12 +2124,7 @@ fn track_list(
     let theme = &app.state.ui.active_theme;
     let fg = theme.text.gpui(WINDOW_FG());
     let muted = theme.text_muted.gpui(WINDOW_FG());
-    let sidebar_width = if app.sidebar_collapsed {
-        0.0
-    } else {
-        app.sidebar_width
-    };
-    let wide = f32::from(window.viewport_size().width) - sidebar_width >= 640.0;
+    let wide = app.main_content_width(window) >= 640.0;
     let hero = wide
         && app
             .state
@@ -2851,13 +2940,23 @@ fn queue_header(
             }
         })
         .justify_between()
+        .gap_2()
         .text_xs()
         .text_color(muted)
-        .child(SharedString::from(text))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(SharedString::from(text)),
+        )
         .when_some(clear_label, |el, label| {
             el.child(
                 div()
                     .id("clear-queue")
+                    .flex_none()
+                    .max_w(relative(0.6))
+                    .truncate()
                     .cursor_pointer()
                     .text_color(fg)
                     .hover(move |style| style.text_color(muted))
@@ -4412,12 +4511,17 @@ fn lyric_window(app: &EchoApp, colors: LyricColors, rows: usize, row_height: f32
 
 const PANEL_LYRIC_ROW: f32 = 26.0;
 const LYRIC_GLIDE: std::time::Duration = std::time::Duration::from_millis(240);
-pub(crate) const RIGHT_PANEL_WIDTH: f32 = 320.0;
 
 /// The docked column to the right of the main area: the queue or the lyrics, whichever the
 /// playback bar's buttons (or `shift-L`) opened. Persistent UI rather than an overlay, so
 /// escape leaves it alone and it comes back on the next launch.
-pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoApp>) -> AnyElement {
+pub fn right_panel(
+    app: &mut EchoApp,
+    panel: RightPanel,
+    window: &Window,
+    cx: &mut Context<EchoApp>,
+) -> AnyElement {
+    let width = app.effective_right_panel_width(window);
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
@@ -4432,14 +4536,15 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
             .then(|| app.state.playback.playing_track_title.clone().into()),
     };
     let body = match panel {
-        RightPanel::Queue => queue_panel_body(app, cx),
+        RightPanel::Queue => queue_panel_body(app, width, cx),
         RightPanel::Lyrics => lyric_status(app, muted).unwrap_or_else(|| lyric_list(app, cx)),
     };
 
     div()
         .id("right-panel")
+        .relative()
         .flex_none()
-        .w(px(RIGHT_PANEL_WIDTH))
+        .w(px(width))
         .h_full()
         .flex()
         .flex_col()
@@ -4467,6 +4572,7 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
                                 .text_sm()
                                 .font_weight(gpui::FontWeight::BOLD)
                                 .text_color(fg)
+                                .truncate()
                                 .child(title),
                         )
                         .when_some(subtitle, |el, subtitle| {
@@ -4491,13 +4597,31 @@ pub fn right_panel(app: &mut EchoApp, panel: RightPanel, cx: &mut Context<EchoAp
                 )),
         )
         .child(body)
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .w(px(5.0))
+                .cursor_col_resize()
+                .hover(move |style| style.bg(palette.drag_target))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, window, cx| {
+                        this.begin_right_panel_resize(event.position.x, window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+        )
         .into_any_element()
 }
 
 /// The queue panel: the playing track on top, then the same rows as the full queue view in a
 /// narrower two-line layout. Double-click plays a row, right-click opens its track menu; the
 /// keyboard-driven selection stays with the full view.
-fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
+fn queue_panel_body(app: &mut EchoApp, width: f32, cx: &mut Context<EchoApp>) -> AnyElement {
+    let show_duration = panel_layout::show_queue_duration(width);
     let theme = &app.state.ui.active_theme;
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
@@ -4675,13 +4799,15 @@ fn queue_panel_body(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement 
                                                     .child(SharedString::from(track.artist.clone())),
                                             ),
                                     )
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .child(SharedString::from(format_time(track.duration_ms))),
-                                    )
+                                    .when(show_duration, |row| {
+                                        row.child(
+                                            div()
+                                                .flex_none()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(SharedString::from(format_time(track.duration_ms))),
+                                        )
+                                    })
                             })
                             .into_any_element()
                         })
@@ -6522,12 +6648,7 @@ fn home_view(
     let muted = app.state.ui.active_theme.text_muted.gpui(WINDOW_FG());
     let accent = app.state.ui.active_theme.primary.gpui(WINDOW_FG());
     let mut shelves = home_shelves(&app.state);
-    let width = f32::from(window.viewport_size().width)
-        - if app.sidebar_collapsed {
-            0.0
-        } else {
-            app.sidebar_width
-        };
+    let width = app.main_content_width(window);
     let columns = if width >= 640.0 {
         4
     } else if width >= 320.0 {
@@ -6546,13 +6667,15 @@ fn home_view(
         .w_full()
         .overflow_y_scroll()
         .track_scroll(&app.home_scroll)
-        .p_4()
+        // Shelves clip at the main area's edge; only non-scrolling content is inset.
+        .py_4()
         .flex()
         .flex_col()
         .gap_6()
         .child(
             div()
                 .flex_none()
+                .px_4()
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -6581,6 +6704,7 @@ fn home_view(
                 content = content.child(
                     div()
                         .flex_none()
+                        .px_4()
                         .flex()
                         .flex_col()
                         .gap_2()
@@ -6606,7 +6730,7 @@ fn home_view(
         app.home_section_indices.insert(kind, section);
         section += 1;
         if shelf.kind == HomeShelfKind::QuickPicks {
-            let mut grid = div().flex_none().flex().flex_col().gap_2();
+            let mut grid = div().flex_none().px_4().flex().flex_col().gap_2();
             for chunk in shelf.items.chunks(columns) {
                 let mut row = div().flex().gap_2().w_full();
                 for item in chunk {
@@ -6631,6 +6755,8 @@ fn home_view(
             .id(SharedString::from(format!("home-shelf-{:?}", shelf.kind)))
             .flex()
             .gap_3()
+            // Scroll the end spacing with the cards instead of clipping before the gutter.
+            .px_4()
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .track_scroll(&scroll)
@@ -6666,6 +6792,7 @@ fn home_view(
                         .text_size(px(18.0))
                         .font_weight(gpui::FontWeight::BOLD)
                         .text_color(fg)
+                        .px_4()
                         .child(tr(&app.state, shelf.kind.title_key())),
                 )
                 .child(row)
@@ -6690,7 +6817,11 @@ fn lerp_hsla(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
 
 /// The sidebar right-click menu: items depend on what the row is, actions run through
 /// [`EchoApp::run_menu_action`]. Destructive items stage a prompt for [`prompt_modal`].
-pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+pub fn context_menu(
+    app: &mut EchoApp,
+    window: &Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
     let menu = app
         .context_menu
         .clone()
@@ -6792,13 +6923,13 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 cx.notify();
             }),
         )
-        .child(
+        .child(menu_placement(
+            MenuAnchor::Pointer(menu.position),
             div()
                 .id("context-menu")
-                .absolute()
-                .left(menu.position.x)
-                .top(menu.position.y)
-                .w(px(210.0))
+                .occlude()
+                .w(px(210.0).min(menu_bounds(window).size.width))
+                .max_h(menu_bounds(window).size.height)
                 .rounded_md()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -6806,7 +6937,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .py_1()
                 .flex()
                 .flex_col()
-                .overflow_hidden()
+                .overflow_y_scroll()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(items.into_iter().map(|(label, action, danger)| {
@@ -6814,6 +6945,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                     // off the panel's rounded corners on the first and last item.
                     div()
                         .id(label.clone())
+                        .flex_shrink_0()
                         .mx_1()
                         .px_2()
                         .py_1()
@@ -6827,7 +6959,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         }))
                         .child(label)
                 })),
-        )
+        ))
 }
 
 /// Right-click menu for a track row. The item set and labels come from the core action-menu
@@ -6886,7 +7018,7 @@ pub fn track_context_menu(
     // menu panel clips its own children.
     let submenu = menu
         .submenu
-        .map(|choice| playlist_submenu(app, choice, window.viewport_size(), cx));
+        .map(|choice| playlist_submenu(app, choice, window, cx));
 
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
@@ -6915,17 +7047,15 @@ pub fn track_context_menu(
                 cx.notify();
             }),
         )
-        .when(menu.position.is_none(), |el| {
-            // Keyboard-opened: no click to anchor to, so center it like the other modals.
-            el.flex().items_center().justify_center()
-        })
-        .child(
+        .child(menu_placement(
+            menu.position
+                .map_or(MenuAnchor::Center, MenuAnchor::Pointer),
             div()
                 .id("track-menu")
-                .when_some(menu.position, |el, position| {
-                    el.absolute().left(position.x).top(position.y)
-                })
-                .w(px(210.0))
+                .occlude()
+                .track_scroll(&app.track_menu_scroll)
+                .w(px(210.0).min(menu_bounds(window).size.width))
+                .max_h(menu_bounds(window).size.height)
                 .rounded_md()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -6933,7 +7063,7 @@ pub fn track_context_menu(
                 .py_1()
                 .flex()
                 .flex_col()
-                .overflow_hidden()
+                .overflow_y_scroll()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(
@@ -6950,6 +7080,7 @@ pub fn track_context_menu(
                             let row_bounds = row_bounds.clone();
                             div()
                                 .id(label.clone())
+                                .flex_shrink_0()
                                 .relative()
                                 .mx_1()
                                 .px_2()
@@ -7007,7 +7138,7 @@ pub fn track_context_menu(
                                 })
                         }),
                 ),
-        )
+        ))
         .children(submenu)
 }
 
@@ -7017,7 +7148,7 @@ pub fn track_context_menu(
 fn playlist_submenu(
     app: &EchoApp,
     choice: usize,
-    viewport: gpui::Size<gpui::Pixels>,
+    window: &Window,
     cx: &mut Context<EchoApp>,
 ) -> AnyElement {
     let theme = &app.state.ui.active_theme;
@@ -7026,7 +7157,6 @@ fn playlist_submenu(
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
 
-    let row = app.submenu_row_bounds.get();
     let bounds = app.submenu_bounds.clone();
     let local_label = tr(&app.state, "ui.local");
     let empty_label = tr(&app.state, "desktop.playlist_add_none");
@@ -7045,118 +7175,108 @@ fn playlist_submenu(
         .chain(choices)
         .collect();
 
-    // A right-click near the window's right edge would otherwise hang the flyout off-screen,
-    // so it flips to the menu's other side; the same for a menu low enough that the list would
-    // run past the bottom. Height is estimated from the row count rather than measured — it is
-    // only needed to keep the panel on screen, and measuring costs a frame of jitter.
-    let height = px((choices.len().max(1) as f32 * SUBMENU_ROW_HEIGHT + 10.0).min(SUBMENU_MAX_H));
-    let flipped = row.right() + px(SUBMENU_WIDTH) > viewport.width - px(8.0);
-    let left = if flipped {
-        row.left() - px(SUBMENU_WIDTH)
-    } else {
-        row.right()
-    };
-    let top = (row.top() - px(5.0))
-        .min(viewport.height - height - px(8.0))
-        .max(px(8.0));
-
-    div()
-        .id("track-menu-submenu")
-        .absolute()
-        // `py_1` plus the border: lines the first choice up with the row it hangs off.
-        .left(left)
-        .top(top)
-        .w(px(SUBMENU_WIDTH))
-        .rounded_md()
-        .border_1()
-        .border_color(palette.menu_border)
-        .bg(surface)
-        .py_1()
-        .flex()
-        .flex_col()
-        // Swallows clicks and wheel events so neither reaches the backdrop or the list behind.
-        .occlude()
-        .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-        .when(!app.state.ui.playlist_add_filter.is_empty(), |el| {
-            el.child(
+    menu_placement(
+        MenuAnchor::Row(app.submenu_row_bounds.clone()),
+        div()
+            .id("track-menu-submenu")
+            .w(px(SUBMENU_WIDTH).min(menu_bounds(window).size.width))
+            .max_h(px(SUBMENU_MAX_H).min(menu_bounds(window).size.height))
+            .rounded_md()
+            .border_1()
+            .border_color(palette.menu_border)
+            .bg(surface)
+            .py_1()
+            .flex()
+            .flex_col()
+            // Swallows clicks and wheel events so neither reaches the backdrop or the list behind.
+            .occlude()
+            .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+            .when(!app.state.ui.playlist_add_filter.is_empty(), |el| {
+                el.child(
+                    div()
+                        .flex_shrink_0()
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .text_color(muted)
+                        .truncate()
+                        .child(app.state.ui.playlist_add_filter.clone()),
+                )
+            })
+            .child(
+                canvas(
+                    move |painted, _window, _cx| bounds.set(painted),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(if choices.is_empty() {
                 div()
+                    .mx_1()
                     .px_2()
                     .py_1()
                     .text_sm()
                     .text_color(muted)
-                    .truncate()
-                    .child(app.state.ui.playlist_add_filter.clone()),
-            )
-        })
-        .child(
-            canvas(
-                move |painted, _window, _cx| bounds.set(painted),
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .size_full(),
-        )
-        .child(if choices.is_empty() {
-            div()
-                .mx_1()
-                .px_2()
-                .py_1()
-                .text_sm()
-                .text_color(muted)
-                .child(empty_label)
-                .into_any_element()
-        } else {
-            div()
-                .id("track-menu-submenu-list")
-                .flex()
-                .flex_col()
-                .max_h(px(SUBMENU_MAX_H - 10.0))
-                .overflow_y_scroll()
-                .track_scroll(&app.submenu_scroll)
-                .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
-                    let is_selected = ix == choice;
-                    let local_label = local_label.clone();
-                    div()
-                        .id(ix)
-                        .mx_1()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .text_sm()
-                        .when(is_selected, |el| el.bg(palette.menu_selected))
-                        .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_hover))
-                        })
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            this.commit_playlist_submenu(ix, cx);
-                        }))
-                        .child(
-                            div()
-                                .flex_grow(1.0)
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .text_color(fg)
-                                .child(name),
-                        )
-                        .when(local, |el| {
-                            el.child(
+                    .child(empty_label)
+                    .into_any_element()
+            } else {
+                div()
+                    .id("track-menu-submenu-list")
+                    .flex()
+                    .flex_col()
+                    .min_h_0()
+                    .max_h(px(SUBMENU_MAX_H - 10.0))
+                    .overflow_y_scroll()
+                    .track_scroll(&app.submenu_scroll)
+                    .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
+                        let is_selected = ix == choice;
+                        let local_label = local_label.clone();
+                        div()
+                            .id(ix)
+                            .flex_shrink_0()
+                            .mx_1()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .text_sm()
+                            .when(is_selected, |el| el.bg(palette.menu_selected))
+                            .when(!is_selected, |el| {
+                                el.hover(move |style| style.bg(palette.menu_hover))
+                            })
+                            .cursor_pointer()
+                            .on_click(cx.listener(
+                                move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.commit_playlist_submenu(ix, cx);
+                                },
+                            ))
+                            .child(
                                 div()
-                                    .flex_none()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(local_label),
+                                    .flex_grow(1.0)
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .text_color(fg)
+                                    .child(name),
                             )
-                        })
-                }))
-                .into_any_element()
-        })
-        .into_any_element()
+                            .when(local, |el| {
+                                el.child(
+                                    div()
+                                        .flex_none()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(local_label),
+                                )
+                            })
+                    }))
+                    .into_any_element()
+            }),
+    )
+    .into_any_element()
 }
 
 /// Confirm dialog for whichever destructive prompt is staged, resolved through

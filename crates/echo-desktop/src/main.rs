@@ -137,9 +137,10 @@ enum Scrub {
 }
 
 #[derive(Clone, Copy)]
-struct SidebarResize {
+struct PanelResize {
     start_x: Pixels,
     start_width: f32,
+    right: bool,
 }
 
 #[derive(Clone)]
@@ -235,6 +236,7 @@ pub(crate) struct EchoApp {
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
     pub(crate) sidebar_width: f32,
+    pub(crate) right_panel_width: f32,
     pub(crate) sidebar_collapsed: bool,
     pub(crate) theme_modal_open: bool,
     pub(crate) immersive: bool,
@@ -262,6 +264,7 @@ pub(crate) struct EchoApp {
     pub(crate) context_menu: Option<ContextMenuState>,
     pub(crate) track_menu: Option<TrackMenuState>,
     pub(crate) submenu_scroll: ScrollHandle,
+    pub(crate) track_menu_scroll: ScrollHandle,
     pub(crate) submenu_row_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) submenu_bounds: Rc<Cell<Bounds<Pixels>>>,
     submenu_apex: gpui::Point<Pixels>,
@@ -272,7 +275,7 @@ pub(crate) struct EchoApp {
     /// The Home shelf whose scrollbar is being dragged; tracked at the window level like a
     /// scrub so the drag survives the pointer leaving the bar.
     shelf_scrub: Option<gpui::ScrollHandle>,
-    sidebar_resizing: Option<SidebarResize>,
+    panel_resizing: Option<PanelResize>,
     titlebar_should_move: bool,
     mono_font: SharedString,
     focus_handle: FocusHandle,
@@ -537,6 +540,13 @@ impl EchoApp {
             .sidebar_width
             .unwrap_or(views::SIDEBAR_WIDTH);
         let sidebar_collapsed = state.ui.library_config.sidebar_collapsed.unwrap_or(false);
+        let right_panel_width = views::panel_layout::preferred_width(
+            state
+                .ui
+                .library_config
+                .right_panel_width
+                .unwrap_or(views::panel_layout::RIGHT_PANEL_DEFAULT),
+        );
         let right_panel = state.ui.library_config.right_panel;
         state.ui.queue_panel_open = right_panel == Some(RightPanel::Queue);
         if state.ui.queue_panel_open {
@@ -578,6 +588,7 @@ impl EchoApp {
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
             sidebar_width: sidebar_width.clamp(180.0, 480.0),
+            right_panel_width,
             sidebar_collapsed,
             theme_modal_open: false,
             immersive: false,
@@ -605,6 +616,7 @@ impl EchoApp {
             context_menu: None,
             track_menu: None,
             submenu_scroll: ScrollHandle::new(),
+            track_menu_scroll: ScrollHandle::new(),
             submenu_row_bounds: Rc::default(),
             submenu_bounds: Rc::default(),
             submenu_apex: gpui::Point::default(),
@@ -613,7 +625,7 @@ impl EchoApp {
             volume_bounds: Rc::default(),
             scrubbing: None,
             shelf_scrub: None,
-            sidebar_resizing: None,
+            panel_resizing: None,
             titlebar_should_move: false,
             mono_font: resolve_mono_font(cx),
             focus_handle,
@@ -806,6 +818,7 @@ impl EchoApp {
                 self.submenu_scroll.scroll_to_item(index);
             } else {
                 menu.selected = index;
+                self.track_menu_scroll.scroll_to_item(index);
             }
         } else if self.sort_menu_open {
             self.sort_menu_index = index;
@@ -1099,6 +1112,9 @@ impl EchoApp {
     /// Opens, closes or swaps the docked panel. Opening the queue fetches it once; the core's
     /// `queue_visible` keeps it fresh from there.
     pub(crate) fn set_right_panel(&mut self, panel: Option<RightPanel>, cx: &mut Context<Self>) {
+        if self.panel_resizing.is_some_and(|resize| resize.right) {
+            self.finish_panel_resize(cx);
+        }
         self.right_panel = panel;
         self.state.ui.library_config.right_panel = panel;
         self.state.save_library_config();
@@ -1366,6 +1382,7 @@ impl EchoApp {
         if let Some(menu) = self.track_menu.as_mut() {
             if focus_row {
                 menu.selected = row;
+                self.track_menu_scroll.scroll_to_item(row);
             }
             if menu.submenu.is_none() {
                 self.state.ui.playlist_add_filter.clear();
@@ -2671,31 +2688,76 @@ impl EchoApp {
         scroll.set_offset(gpui::point(-scroll.max_offset().x * fraction, px(0.0)));
     }
 
-    // Drag-to-resize of the library sidebar: mouse-down on its right edge starts it, window-level
-    // mouse moves update the width optimistically, and release settles and saves it.
+    fn width_beside_library(&self, window: &Window) -> f32 {
+        (views::client_content_width(window)
+            - if self.sidebar_collapsed {
+                0.0
+            } else {
+                self.sidebar_width
+            })
+        .max(0.0)
+    }
+
+    pub(crate) fn effective_right_panel_width(&self, window: &Window) -> f32 {
+        views::panel_layout::fitted_width(self.right_panel_width, self.width_beside_library(window))
+    }
+
+    pub(crate) fn main_content_width(&self, window: &Window) -> f32 {
+        (self.width_beside_library(window)
+            - if self.right_panel.is_some() {
+                self.effective_right_panel_width(window)
+            } else {
+                0.0
+            })
+        .max(0.0)
+    }
+
+    // Both docks track drags at window level and persist only on release. The right dock's
+    // left edge moves in the opposite direction to the library's right edge.
 
     fn begin_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
-        self.sidebar_resizing = Some(SidebarResize {
+        self.panel_resizing = Some(PanelResize {
             start_x: x,
             start_width: self.sidebar_width,
+            right: false,
         });
         cx.notify();
     }
 
-    fn update_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
-        let Some(resize) = self.sidebar_resizing else {
-            return;
-        };
-        let delta = x - resize.start_x;
-        self.sidebar_width = (resize.start_width + f32::from(delta)).clamp(180.0, 480.0);
+    fn begin_right_panel_resize(&mut self, x: Pixels, window: &Window, cx: &mut Context<Self>) {
+        self.panel_resizing = Some(PanelResize {
+            start_x: x,
+            start_width: self.effective_right_panel_width(window),
+            right: true,
+        });
         cx.notify();
     }
 
-    fn finish_sidebar_resize(&mut self, cx: &mut Context<Self>) {
-        if self.sidebar_resizing.take().is_some() {
+    fn update_panel_resize(&mut self, x: Pixels, window: &Window, cx: &mut Context<Self>) {
+        let Some(resize) = self.panel_resizing else {
+            return;
+        };
+        let delta = x - resize.start_x;
+        if resize.right {
+            self.right_panel_width = views::panel_layout::fitted_width(
+                resize.start_width - f32::from(delta),
+                self.width_beside_library(window),
+            );
+        } else {
+            self.sidebar_width = (resize.start_width + f32::from(delta)).clamp(180.0, 480.0);
+        }
+        cx.notify();
+    }
+
+    fn finish_panel_resize(&mut self, cx: &mut Context<Self>) {
+        if let Some(resize) = self.panel_resizing.take() {
             // Saved on release rather than on every pointer move — a drag is one decision, not
             // a few hundred config writes.
-            self.state.ui.library_config.sidebar_width = Some(self.sidebar_width);
+            if resize.right {
+                self.state.ui.library_config.right_panel_width = Some(self.right_panel_width);
+            } else {
+                self.state.ui.library_config.sidebar_width = Some(self.sidebar_width);
+            }
             self.state.save_library_config();
             cx.notify();
         }
@@ -3613,7 +3675,10 @@ impl Render for EchoApp {
         let context_menu = self
             .context_menu
             .is_some()
-            .then(|| views::context_menu(self, cx).into_any_element());
+            .then(|| views::context_menu(self, window, cx).into_any_element());
+        if self.track_menu.is_none() {
+            self.track_menu_scroll.scroll_to_item(0);
+        }
         let track_menu = self
             .track_menu
             .is_some()
@@ -3680,12 +3745,12 @@ impl Render for EchoApp {
             // Scrubs track the pointer at the window level so dragging keeps working when the
             // pointer leaves the bar; release (or a move without the button) ends them.
             .on_mouse_move(
-                cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
-                    if this.sidebar_resizing.is_some() {
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    if this.panel_resizing.is_some() {
                         if event.pressed_button == Some(gpui::MouseButton::Left) {
-                            this.update_sidebar_resize(event.position.x, cx);
+                            this.update_panel_resize(event.position.x, window, cx);
                         } else {
-                            this.finish_sidebar_resize(cx);
+                            this.finish_panel_resize(cx);
                         }
                     }
                     if this.scrubbing.is_some() {
@@ -3708,7 +3773,7 @@ impl Render for EchoApp {
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, event: &gpui::MouseUpEvent, _window, cx| {
-                    this.finish_sidebar_resize(cx);
+                    this.finish_panel_resize(cx);
                     this.finish_scrub(event.position.x, cx);
                     this.shelf_scrub = None;
                 }),
@@ -3930,7 +3995,7 @@ impl Render for EchoApp {
                             })
                             .child(views::main_area(self, window, cx))
                             .when_some(self.right_panel, |el, panel| {
-                                el.child(views::right_panel(self, panel, cx))
+                                el.child(views::right_panel(self, panel, window, cx))
                             }),
                     )
                     .when_some(status_line, |el, line| el.child(line))

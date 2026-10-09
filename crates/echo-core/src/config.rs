@@ -430,6 +430,9 @@ pub struct LibraryConfig {
     /// The desktop app's docked right-hand panel, if one was open when it last closed.
     #[serde(default)]
     pub right_panel: Option<RightPanel>,
+    /// One desktop dock width, shared by queue and lyrics.
+    #[serde(default)]
+    pub right_panel_width: Option<f32>,
     #[serde(default)]
     pub window_bounds: Option<WindowBoundsConfig>,
     /// The desktop close button hides the window to the tray and keeps playing.
@@ -524,6 +527,7 @@ impl Default for LibraryConfig {
             sidebar_width: None,
             sidebar_collapsed: None,
             right_panel: None,
+            right_panel_width: None,
             window_bounds: None,
             close_to_tray: true,
             top_items_range: crate::models::TopItemsRange::default(),
@@ -908,6 +912,21 @@ fn load_themes_from_dir(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn right_panel_width_defaults_and_survives_panel_switches() {
+        let mut config: LibraryConfig = toml::from_str("sidebar_width = 250.0").unwrap();
+        assert_eq!(config.right_panel_width, None);
+        config.right_panel_width = Some(235.0);
+        for panel in [Some(RightPanel::Queue), Some(RightPanel::Lyrics), None] {
+            config.right_panel = panel;
+            let decoded: LibraryConfig =
+                toml::from_str(&toml::to_string(&config).unwrap()).unwrap();
+            assert_eq!(decoded.right_panel_width, Some(235.0));
+            assert_eq!(decoded.sidebar_width, Some(250.0));
+            assert_eq!(decoded.right_panel, panel);
+        }
+    }
+
     #[test]
     fn update_cache_keeps_every_writers_fields() {
         AppConfig::update_cache(|cache| cache.cooldown_failures.insert("first".into(), 1));

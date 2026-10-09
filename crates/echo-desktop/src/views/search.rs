@@ -397,12 +397,7 @@ pub fn all_results(
         &app.state.ui.search_context_query,
     );
     app.search_all_positions = vec![(0, None); rows.len()];
-    let sidebar = if app.sidebar_collapsed {
-        0.0
-    } else {
-        app.sidebar_width
-    };
-    let narrow = f32::from(window.viewport_size().width) - sidebar < 620.0;
+    let narrow = app.main_content_width(window) < 620.0;
     let mut top_band = div().flex().gap_4().when(narrow, |el| el.flex_col());
     if let Some(row) = rows.first()
         && let Some(item) = search_row_item(&app.state.data.search_results, *row)
@@ -438,13 +433,13 @@ pub fn all_results(
         .id("search-all-scroll")
         .flex_1()
         .min_h_0()
-        .p_4()
+        .py_4()
         .flex()
         .flex_col()
         .gap_6()
         .overflow_y_scroll()
         .track_scroll(&app.search_all_scroll)
-        .child(top_band.flex_none());
+        .child(top_band.flex_none().px_4());
     let mut section = 1;
     for (tab, key) in [
         (SearchTab::Albums, "ui.albums"),
@@ -465,6 +460,8 @@ pub fn all_results(
             .id("cards")
             .flex()
             .gap_3()
+            // Keep spacing inside the scrolling viewport so artwork clips at the page edge.
+            .px_4()
             .overflow_x_scroll()
             .track_scroll(&scroll);
         for (flat, row) in cards {
@@ -503,7 +500,7 @@ pub fn all_results(
                 .flex()
                 .flex_col()
                 .gap_3()
-                .child(section_title(app, key, tab, cx))
+                .child(div().px_4().child(section_title(app, key, tab, cx)))
                 .child(card_row),
         );
         section += 1;
