@@ -13,6 +13,7 @@ use echo_core::app::{ActiveView, AppMode, LibraryTab, QueueRow, QueueTab, Search
 use echo_core::config::RightPanel;
 use echo_core::models::{ActionMenuAction, ActionMenuContext, LibraryNode};
 use echo_core::thumbnails::{ThumbState, ThumbTier, tier_for_edge};
+mod menu_placement;
 mod playlist_edit;
 mod search;
 use gpui::{
@@ -20,6 +21,7 @@ use gpui::{
     SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, relative, svg,
     uniform_list,
 };
+use menu_placement::{MenuAnchor, menu_bounds, menu_placement};
 pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
 
 use crate::backdrop::{Backdrop, ImmersiveColors};
@@ -27,11 +29,9 @@ use crate::theme::{DesktopPalette, ToGpui, WINDOW_FG};
 use crate::{ControlColors, EchoApp, MenuAction, TrackMenuItem, UpdateState, format_time};
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 240.0;
-/// The add-to-playlist flyout's box. The row height is the measured height of one choice, used
-/// only to keep the panel on screen — see [`playlist_submenu`].
+/// The add-to-playlist flyout's preferred dimensions.
 const SUBMENU_WIDTH: f32 = 190.0;
 const SUBMENU_MAX_H: f32 = 270.0;
-const SUBMENU_ROW_HEIGHT: f32 = 31.0;
 const THUMB_EDGE: f32 = 26.0;
 // Native caption metrics: Windows titlebars are a fixed 32px, macOS gets a touch more.
 const TITLEBAR_HEIGHT: f32 = if cfg!(target_os = "windows") {
@@ -6690,7 +6690,11 @@ fn lerp_hsla(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
 
 /// The sidebar right-click menu: items depend on what the row is, actions run through
 /// [`EchoApp::run_menu_action`]. Destructive items stage a prompt for [`prompt_modal`].
-pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+pub fn context_menu(
+    app: &mut EchoApp,
+    window: &Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
     let menu = app
         .context_menu
         .clone()
@@ -6792,13 +6796,13 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 cx.notify();
             }),
         )
-        .child(
+        .child(menu_placement(
+            MenuAnchor::Pointer(menu.position),
             div()
                 .id("context-menu")
-                .absolute()
-                .left(menu.position.x)
-                .top(menu.position.y)
-                .w(px(210.0))
+                .occlude()
+                .w(px(210.0).min(menu_bounds(window).size.width))
+                .max_h(menu_bounds(window).size.height)
                 .rounded_md()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -6806,7 +6810,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                 .py_1()
                 .flex()
                 .flex_col()
-                .overflow_hidden()
+                .overflow_y_scroll()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(items.into_iter().map(|(label, action, danger)| {
@@ -6814,6 +6818,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                     // off the panel's rounded corners on the first and last item.
                     div()
                         .id(label.clone())
+                        .flex_shrink_0()
                         .mx_1()
                         .px_2()
                         .py_1()
@@ -6827,7 +6832,7 @@ pub fn context_menu(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEl
                         }))
                         .child(label)
                 })),
-        )
+        ))
 }
 
 /// Right-click menu for a track row. The item set and labels come from the core action-menu
@@ -6886,7 +6891,7 @@ pub fn track_context_menu(
     // menu panel clips its own children.
     let submenu = menu
         .submenu
-        .map(|choice| playlist_submenu(app, choice, window.viewport_size(), cx));
+        .map(|choice| playlist_submenu(app, choice, window, cx));
 
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
@@ -6915,17 +6920,15 @@ pub fn track_context_menu(
                 cx.notify();
             }),
         )
-        .when(menu.position.is_none(), |el| {
-            // Keyboard-opened: no click to anchor to, so center it like the other modals.
-            el.flex().items_center().justify_center()
-        })
-        .child(
+        .child(menu_placement(
+            menu.position
+                .map_or(MenuAnchor::Center, MenuAnchor::Pointer),
             div()
                 .id("track-menu")
-                .when_some(menu.position, |el, position| {
-                    el.absolute().left(position.x).top(position.y)
-                })
-                .w(px(210.0))
+                .occlude()
+                .track_scroll(&app.track_menu_scroll)
+                .w(px(210.0).min(menu_bounds(window).size.width))
+                .max_h(menu_bounds(window).size.height)
                 .rounded_md()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -6933,7 +6936,7 @@ pub fn track_context_menu(
                 .py_1()
                 .flex()
                 .flex_col()
-                .overflow_hidden()
+                .overflow_y_scroll()
                 // Clicks on the menu itself must not reach the backdrop's close handler.
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .children(
@@ -6950,6 +6953,7 @@ pub fn track_context_menu(
                             let row_bounds = row_bounds.clone();
                             div()
                                 .id(label.clone())
+                                .flex_shrink_0()
                                 .relative()
                                 .mx_1()
                                 .px_2()
@@ -7007,7 +7011,7 @@ pub fn track_context_menu(
                                 })
                         }),
                 ),
-        )
+        ))
         .children(submenu)
 }
 
@@ -7017,7 +7021,7 @@ pub fn track_context_menu(
 fn playlist_submenu(
     app: &EchoApp,
     choice: usize,
-    viewport: gpui::Size<gpui::Pixels>,
+    window: &Window,
     cx: &mut Context<EchoApp>,
 ) -> AnyElement {
     let theme = &app.state.ui.active_theme;
@@ -7026,7 +7030,6 @@ fn playlist_submenu(
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
 
-    let row = app.submenu_row_bounds.get();
     let bounds = app.submenu_bounds.clone();
     let local_label = tr(&app.state, "ui.local");
     let empty_label = tr(&app.state, "desktop.playlist_add_none");
@@ -7045,118 +7048,108 @@ fn playlist_submenu(
         .chain(choices)
         .collect();
 
-    // A right-click near the window's right edge would otherwise hang the flyout off-screen,
-    // so it flips to the menu's other side; the same for a menu low enough that the list would
-    // run past the bottom. Height is estimated from the row count rather than measured — it is
-    // only needed to keep the panel on screen, and measuring costs a frame of jitter.
-    let height = px((choices.len().max(1) as f32 * SUBMENU_ROW_HEIGHT + 10.0).min(SUBMENU_MAX_H));
-    let flipped = row.right() + px(SUBMENU_WIDTH) > viewport.width - px(8.0);
-    let left = if flipped {
-        row.left() - px(SUBMENU_WIDTH)
-    } else {
-        row.right()
-    };
-    let top = (row.top() - px(5.0))
-        .min(viewport.height - height - px(8.0))
-        .max(px(8.0));
-
-    div()
-        .id("track-menu-submenu")
-        .absolute()
-        // `py_1` plus the border: lines the first choice up with the row it hangs off.
-        .left(left)
-        .top(top)
-        .w(px(SUBMENU_WIDTH))
-        .rounded_md()
-        .border_1()
-        .border_color(palette.menu_border)
-        .bg(surface)
-        .py_1()
-        .flex()
-        .flex_col()
-        // Swallows clicks and wheel events so neither reaches the backdrop or the list behind.
-        .occlude()
-        .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
-        .when(!app.state.ui.playlist_add_filter.is_empty(), |el| {
-            el.child(
+    menu_placement(
+        MenuAnchor::Row(app.submenu_row_bounds.clone()),
+        div()
+            .id("track-menu-submenu")
+            .w(px(SUBMENU_WIDTH).min(menu_bounds(window).size.width))
+            .max_h(px(SUBMENU_MAX_H).min(menu_bounds(window).size.height))
+            .rounded_md()
+            .border_1()
+            .border_color(palette.menu_border)
+            .bg(surface)
+            .py_1()
+            .flex()
+            .flex_col()
+            // Swallows clicks and wheel events so neither reaches the backdrop or the list behind.
+            .occlude()
+            .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+            .when(!app.state.ui.playlist_add_filter.is_empty(), |el| {
+                el.child(
+                    div()
+                        .flex_shrink_0()
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .text_color(muted)
+                        .truncate()
+                        .child(app.state.ui.playlist_add_filter.clone()),
+                )
+            })
+            .child(
+                canvas(
+                    move |painted, _window, _cx| bounds.set(painted),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(if choices.is_empty() {
                 div()
+                    .mx_1()
                     .px_2()
                     .py_1()
                     .text_sm()
                     .text_color(muted)
-                    .truncate()
-                    .child(app.state.ui.playlist_add_filter.clone()),
-            )
-        })
-        .child(
-            canvas(
-                move |painted, _window, _cx| bounds.set(painted),
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .size_full(),
-        )
-        .child(if choices.is_empty() {
-            div()
-                .mx_1()
-                .px_2()
-                .py_1()
-                .text_sm()
-                .text_color(muted)
-                .child(empty_label)
-                .into_any_element()
-        } else {
-            div()
-                .id("track-menu-submenu-list")
-                .flex()
-                .flex_col()
-                .max_h(px(SUBMENU_MAX_H - 10.0))
-                .overflow_y_scroll()
-                .track_scroll(&app.submenu_scroll)
-                .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
-                    let is_selected = ix == choice;
-                    let local_label = local_label.clone();
-                    div()
-                        .id(ix)
-                        .mx_1()
-                        .px_2()
-                        .py_1()
-                        .rounded_md()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap_2()
-                        .text_sm()
-                        .when(is_selected, |el| el.bg(palette.menu_selected))
-                        .when(!is_selected, |el| {
-                            el.hover(move |style| style.bg(palette.menu_hover))
-                        })
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            this.commit_playlist_submenu(ix, cx);
-                        }))
-                        .child(
-                            div()
-                                .flex_grow(1.0)
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .whitespace_nowrap()
-                                .text_color(fg)
-                                .child(name),
-                        )
-                        .when(local, |el| {
-                            el.child(
+                    .child(empty_label)
+                    .into_any_element()
+            } else {
+                div()
+                    .id("track-menu-submenu-list")
+                    .flex()
+                    .flex_col()
+                    .min_h_0()
+                    .max_h(px(SUBMENU_MAX_H - 10.0))
+                    .overflow_y_scroll()
+                    .track_scroll(&app.submenu_scroll)
+                    .children(choices.into_iter().enumerate().map(|(ix, (name, local))| {
+                        let is_selected = ix == choice;
+                        let local_label = local_label.clone();
+                        div()
+                            .id(ix)
+                            .flex_shrink_0()
+                            .mx_1()
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .text_sm()
+                            .when(is_selected, |el| el.bg(palette.menu_selected))
+                            .when(!is_selected, |el| {
+                                el.hover(move |style| style.bg(palette.menu_hover))
+                            })
+                            .cursor_pointer()
+                            .on_click(cx.listener(
+                                move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.commit_playlist_submenu(ix, cx);
+                                },
+                            ))
+                            .child(
                                 div()
-                                    .flex_none()
-                                    .text_xs()
-                                    .text_color(muted)
-                                    .child(local_label),
+                                    .flex_grow(1.0)
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
+                                    .text_color(fg)
+                                    .child(name),
                             )
-                        })
-                }))
-                .into_any_element()
-        })
-        .into_any_element()
+                            .when(local, |el| {
+                                el.child(
+                                    div()
+                                        .flex_none()
+                                        .text_xs()
+                                        .text_color(muted)
+                                        .child(local_label),
+                                )
+                            })
+                    }))
+                    .into_any_element()
+            }),
+    )
+    .into_any_element()
 }
 
 /// Confirm dialog for whichever destructive prompt is staged, resolved through

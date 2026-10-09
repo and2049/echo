@@ -262,6 +262,7 @@ pub(crate) struct EchoApp {
     pub(crate) context_menu: Option<ContextMenuState>,
     pub(crate) track_menu: Option<TrackMenuState>,
     pub(crate) submenu_scroll: ScrollHandle,
+    pub(crate) track_menu_scroll: ScrollHandle,
     pub(crate) submenu_row_bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) submenu_bounds: Rc<Cell<Bounds<Pixels>>>,
     submenu_apex: gpui::Point<Pixels>,
@@ -605,6 +606,7 @@ impl EchoApp {
             context_menu: None,
             track_menu: None,
             submenu_scroll: ScrollHandle::new(),
+            track_menu_scroll: ScrollHandle::new(),
             submenu_row_bounds: Rc::default(),
             submenu_bounds: Rc::default(),
             submenu_apex: gpui::Point::default(),
@@ -806,6 +808,7 @@ impl EchoApp {
                 self.submenu_scroll.scroll_to_item(index);
             } else {
                 menu.selected = index;
+                self.track_menu_scroll.scroll_to_item(index);
             }
         } else if self.sort_menu_open {
             self.sort_menu_index = index;
@@ -1366,6 +1369,7 @@ impl EchoApp {
         if let Some(menu) = self.track_menu.as_mut() {
             if focus_row {
                 menu.selected = row;
+                self.track_menu_scroll.scroll_to_item(row);
             }
             if menu.submenu.is_none() {
                 self.state.ui.playlist_add_filter.clear();
@@ -3613,7 +3617,10 @@ impl Render for EchoApp {
         let context_menu = self
             .context_menu
             .is_some()
-            .then(|| views::context_menu(self, cx).into_any_element());
+            .then(|| views::context_menu(self, window, cx).into_any_element());
+        if self.track_menu.is_none() {
+            self.track_menu_scroll.scroll_to_item(0);
+        }
         let track_menu = self
             .track_menu
             .is_some()
