@@ -289,7 +289,7 @@ pub fn titlebar(
     // The close button's hover fill reaches the window's top-right corner, so it rounds
     // itself too — DWM's radius on Windows 11, ours on a client-decorated Linux window.
     let close_radius = match corners {
-        Some(tiling) => (!tiling.top && !tiling.right).then(|| px(CLIENT_CORNER_RADIUS)),
+        Some(tiling) => (!tiling.top && !tiling.right).then(|| px(CLIENT_CONTENT_RADIUS)),
         None => (cfg!(target_os = "windows") && !maximized).then(|| px(WIN_CORNER_RADIUS)),
     };
 
@@ -462,6 +462,10 @@ fn caption_button(
 /// Corner radius and drop-shadow depth for a client-decorated window, matching what GNOME and
 /// Zed use so echo sits alongside them without looking off.
 const CLIENT_CORNER_RADIUS: f32 = 10.0;
+const CLIENT_BORDER_WIDTH: f32 = 1.0;
+// Content sits inside the frame border: reduce its radius by the same inset so both
+// arcs share a center instead of leaving a sliver between their antialiased edges.
+const CLIENT_CONTENT_RADIUS: f32 = CLIENT_CORNER_RADIUS - CLIENT_BORDER_WIDTH;
 /// The radius DWM clips an unmaximized window to on Windows 11.
 const WIN_CORNER_RADIUS: f32 = 8.0;
 const CLIENT_SHADOW: f32 = 10.0;
@@ -519,16 +523,20 @@ pub(crate) fn client_corner_radii(
     corners: Option<gpui::Tiling>,
     which: ClientCorners,
 ) -> gpui::Corners<gpui::Pixels> {
+    corner_radii(corners, which, CLIENT_CONTENT_RADIUS)
+}
+
+fn corner_radii(
+    corners: Option<gpui::Tiling>,
+    which: ClientCorners,
+    radius: f32,
+) -> gpui::Corners<gpui::Pixels> {
     let Some(tiling) = corners else {
         return gpui::Corners::default();
     };
     let all = matches!(which, ClientCorners::All);
     let radius = |rounded: bool| {
-        if rounded {
-            px(CLIENT_CORNER_RADIUS)
-        } else {
-            px(0.0)
-        }
+        if rounded { px(radius) } else { px(0.0) }
     };
     gpui::Corners {
         top_left: radius(!tiling.top && !tiling.left),
@@ -605,10 +613,17 @@ pub fn window_frame(
         .child(
             div()
                 .size_full()
-                .map(|el| round_client_corners(el, Some(tiling), ClientCorners::All))
+                .map(|el| {
+                    let radii =
+                        corner_radii(Some(tiling), ClientCorners::All, CLIENT_CORNER_RADIUS);
+                    el.rounded_tl(radii.top_left)
+                        .rounded_tr(radii.top_right)
+                        .rounded_bl(radii.bottom_left)
+                        .rounded_br(radii.bottom_right)
+                })
                 // A hairline outline stands in for the frame the compositor is not drawing, so
                 // the window still reads as one against a same-coloured background behind it.
-                .border_1()
+                .border(px(CLIENT_BORDER_WIDTH))
                 .border_color(palette.border)
                 .when(!tiling.is_tiled(), |el| {
                     el.shadow(vec![
