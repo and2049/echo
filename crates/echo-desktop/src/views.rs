@@ -6582,13 +6582,15 @@ fn home_view(
         .w_full()
         .overflow_y_scroll()
         .track_scroll(&app.home_scroll)
-        .p_4()
+        // Shelves clip at the main area's edge; only non-scrolling content is inset.
+        .py_4()
         .flex()
         .flex_col()
         .gap_6()
         .child(
             div()
                 .flex_none()
+                .px_4()
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -6617,6 +6619,7 @@ fn home_view(
                 content = content.child(
                     div()
                         .flex_none()
+                        .px_4()
                         .flex()
                         .flex_col()
                         .gap_2()
@@ -6642,7 +6645,7 @@ fn home_view(
         app.home_section_indices.insert(kind, section);
         section += 1;
         if shelf.kind == HomeShelfKind::QuickPicks {
-            let mut grid = div().flex_none().flex().flex_col().gap_2();
+            let mut grid = div().flex_none().px_4().flex().flex_col().gap_2();
             for chunk in shelf.items.chunks(columns) {
                 let mut row = div().flex().gap_2().w_full();
                 for item in chunk {
@@ -6667,6 +6670,8 @@ fn home_view(
             .id(SharedString::from(format!("home-shelf-{:?}", shelf.kind)))
             .flex()
             .gap_3()
+            // Scroll the end spacing with the cards instead of clipping before the gutter.
+            .px_4()
             .overflow_x_scroll()
             .restrict_scroll_to_axis()
             .track_scroll(&scroll)
@@ -6702,6 +6707,7 @@ fn home_view(
                         .text_size(px(18.0))
                         .font_weight(gpui::FontWeight::BOLD)
                         .text_color(fg)
+                        .px_4()
                         .child(tr(&app.state, shelf.kind.title_key())),
                 )
                 .child(row)
