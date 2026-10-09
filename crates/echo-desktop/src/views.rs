@@ -1473,11 +1473,13 @@ fn search_bar(
 
     div()
         .flex_none()
-        // pl_2/pt_2 mirror the sidebar header's metrics so the button cluster lands on the
-        // same pixels whether it renders here (collapsed) or in the sidebar (expanded).
+        // Left/top spacing mirrors the sidebar header so its button cluster stays aligned.
+        // Equal bottom spacing keeps scrolling content clear of the search box.
         .pl_2()
         .pr_4()
-        .pt_2()
+        .py_2()
+        .border_b_1()
+        .border_color(palette.border)
         .flex()
         .flex_row()
         .items_center()
