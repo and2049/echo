@@ -24,7 +24,7 @@ impl Drop for HomeRequest {
 }
 
 use super::{
-    api::client::{ArtistAlbumsCachePolicy, EchoSpotifyClient},
+    api::client::{AlbumScope, ArtistAlbumsCachePolicy, EchoSpotifyClient},
     errors::api_request_error_message,
 };
 
@@ -32,6 +32,9 @@ use super::{
 const WHATS_NEW_WINDOW_DAYS: i64 = 90;
 const WHATS_NEW_MAX_ARTISTS: usize = 50;
 const WHATS_NEW_MAX_ALBUMS: usize = 50;
+/// Between artists that hit the network: the albums endpoint carries a per-endpoint quota
+/// that a startup burst over every followed artist exhausted for hours at a time.
+const WHATS_NEW_ARTIST_PAUSE: std::time::Duration = std::time::Duration::from_millis(750);
 
 pub fn spawn_top_tracks(
     api_client: Option<EchoSpotifyClient>,
@@ -218,7 +221,11 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
             let done = index + 1;
             let mut from_network = false;
             match api
-                .artist_albums_with_policy(&artist.id, ArtistAlbumsCachePolicy::UseCache)
+                .artist_albums_with_policy(
+                    &artist.id,
+                    ArtistAlbumsCachePolicy::UseCache,
+                    AlbumScope::Releases,
+                )
                 .await
             {
                 Ok(response) => {
@@ -243,7 +250,7 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
                     .await;
             }
             if from_network && done < total {
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                tokio::time::sleep(WHATS_NEW_ARTIST_PAUSE).await;
             }
         }
 

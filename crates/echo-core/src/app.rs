@@ -1020,6 +1020,7 @@ impl AppState {
             artist_name,
             image_url,
             albums: Vec::new(),
+            albums_complete: false,
             top_tracks: Vec::new(),
             discography: Vec::new(),
         });

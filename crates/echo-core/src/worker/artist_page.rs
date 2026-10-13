@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use crate::events::WorkerEvent;
 
 use super::{
-    api::client::{ArtistAlbumsCachePolicy, ArtistAlbumsResponse, EchoSpotifyClient},
+    api::client::{AlbumScope, ArtistAlbumsCachePolicy, ArtistAlbumsResponse, EchoSpotifyClient},
     errors::artist_retry_after_secs,
 };
 
@@ -93,7 +93,11 @@ pub fn spawn_load_artist_page(
             });
         }
         match api
-            .artist_albums_with_policy(&artist_id, ArtistAlbumsCachePolicy::UseCache)
+            .artist_albums_with_policy(
+                &artist_id,
+                ArtistAlbumsCachePolicy::UseCache,
+                AlbumScope::Full,
+            )
             .await
         {
             Ok(response) => {
@@ -117,7 +121,11 @@ pub fn spawn_refresh_artist_albums(
 
     tokio::spawn(async move {
         match api
-            .artist_albums_with_policy(&artist_id, ArtistAlbumsCachePolicy::Refresh)
+            .artist_albums_with_policy(
+                &artist_id,
+                ArtistAlbumsCachePolicy::Refresh,
+                AlbumScope::Full,
+            )
             .await
         {
             Ok(response) => {

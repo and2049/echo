@@ -14,7 +14,7 @@ use crate::{
 
 use super::{
     SpotifyWorker,
-    cache::{CacheKey, FetchGate, SpotifyApiCache},
+    cache::{ArtistAlbums, CacheKey, FetchGate, SpotifyApiCache},
     first_party::{SpotifyWebApi, rate_limit_error},
     parse,
     policy::ApiEndpoint,
@@ -36,6 +36,26 @@ pub enum ArtistAlbumsCachePolicy {
     UseCache,
     Refresh,
 }
+
+/// Which album groups a caller needs: the What's New feed only reads the artist's own
+/// albums and singles, the artist page wants compilations and appearances as well. A cached
+/// `Releases` entry serves a `Full` request by fetching only the missing groups.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlbumScope {
+    Releases,
+    Full,
+}
+
+impl AlbumScope {
+    fn groups(self) -> &'static str {
+        match self {
+            Self::Releases => "album,single",
+            Self::Full => "album,single,compilation,appears_on",
+        }
+    }
+}
+
+const EXTRA_ALBUM_GROUPS: &str = "compilation,appears_on";
 
 #[derive(Clone, Debug, Default)]
 pub struct ArtistAlbumsResponse {
@@ -555,48 +575,29 @@ impl EchoSpotifyClient {
         &self,
         artist_id: &str,
         policy: ArtistAlbumsCachePolicy,
+        scope: AlbumScope,
     ) -> Result<ArtistAlbumsResponse> {
-        let force_refresh = policy == ArtistAlbumsCachePolicy::Refresh;
         let mut response = ArtistAlbumsResponse::default();
-        let mut needs_refresh = force_refresh;
+        let mut groups = Some(scope.groups());
+        let mut keep = Vec::new();
 
-        if !force_refresh {
-            let memory = {
-                let cache = self.cache.lock().await;
-                cache.artist_albums(artist_id).map(|albums| {
-                    (
-                        albums,
-                        cache.artist_albums_need_refresh(artist_id).unwrap_or(true),
-                    )
-                })
-            };
-            if let Some((albums, memory_needs_refresh)) = memory {
-                log_api(&format!(
-                    "artist_albums route=cache artist={artist_id} needs_refresh={memory_needs_refresh}"
-                ));
-                response.cached = Some(albums);
-                needs_refresh = memory_needs_refresh;
-            } else if let Some(entry) = AppConfig::load_cache().get_artist_page_entry(artist_id) {
-                let persistent_needs_refresh = CacheData::artist_page_needs_album_refresh(&entry);
-                log_api(&format!(
-                    "artist_albums route=persistent_cache artist={artist_id} needs_refresh={persistent_needs_refresh}"
-                ));
-                response.cached = Some(entry.value.albums.clone());
-                needs_refresh = persistent_needs_refresh;
-                if !persistent_needs_refresh {
-                    self.cache
-                        .lock()
-                        .await
-                        .set_artist_albums(artist_id.to_string(), entry.value.albums);
-                }
+        if policy == ArtistAlbumsCachePolicy::UseCache
+            && let Some((cached, stale)) = self.cached_artist_albums(artist_id).await
+        {
+            groups = if stale {
+                Some(scope.groups())
+            } else if scope == AlbumScope::Full && !cached.complete {
+                keep = cached.albums.clone();
+                Some(EXTRA_ALBUM_GROUPS)
             } else {
-                needs_refresh = true;
-            }
+                None
+            };
+            response.cached = Some(cached.albums);
         }
 
-        if !needs_refresh && response.cached.is_some() {
+        let Some(groups) = groups else {
             return Ok(response);
-        }
+        };
 
         let key = CacheKey::ArtistAlbums(artist_id.to_string());
         if !self.begin_fetch(key.clone(), "Artist albums").await? {
@@ -604,12 +605,56 @@ impl EchoSpotifyClient {
             return Ok(response);
         }
 
-        let result = self.fetch_artist_albums_network(artist_id).await;
+        let result = self.fetch_artist_albums_network(artist_id, groups).await;
         self.finish_fetch(&key, &result).await;
-        let albums = result?;
+        let mut albums = result?;
+        albums.extend(keep);
+        sort_albums_newest_first(&mut albums);
+        let albums = ArtistAlbums {
+            albums,
+            complete: scope == AlbumScope::Full,
+        };
         self.store_artist_albums(artist_id, albums.clone()).await;
-        response.refreshed = Some(albums);
+        response.refreshed = Some(albums.albums);
         Ok(response)
+    }
+
+    /// The cached releases and whether they are past their refresh TTL, from memory first,
+    /// then the persistent cache (promoted to memory when still fresh).
+    async fn cached_artist_albums(&self, artist_id: &str) -> Option<(ArtistAlbums, bool)> {
+        let memory = {
+            let cache = self.cache.lock().await;
+            cache.artist_albums(artist_id).map(|albums| {
+                (
+                    albums,
+                    cache.artist_albums_need_refresh(artist_id).unwrap_or(true),
+                )
+            })
+        };
+        if let Some((albums, stale)) = memory {
+            log_api(&format!(
+                "artist_albums route=cache artist={artist_id} needs_refresh={stale} complete={}",
+                albums.complete
+            ));
+            return Some((albums, stale));
+        }
+        let entry = AppConfig::load_cache().get_artist_page_entry(artist_id)?;
+        let stale = CacheData::artist_page_needs_album_refresh(&entry);
+        let albums = ArtistAlbums {
+            albums: entry.value.albums,
+            complete: entry.value.albums_complete,
+        };
+        log_api(&format!(
+            "artist_albums route=persistent_cache artist={artist_id} needs_refresh={stale} complete={}",
+            albums.complete
+        ));
+        if !stale {
+            self.cache
+                .lock()
+                .await
+                .set_artist_albums(artist_id.to_string(), albums.clone());
+        }
+        Some((albums, stale))
     }
 
     /// Follows or unfollows an artist, then reloads the followed list past both caches so
@@ -803,8 +848,12 @@ impl EchoSpotifyClient {
             .unwrap_or_default())
     }
 
-    async fn fetch_artist_albums_network(&self, artist_id: &str) -> Result<Vec<Album>> {
-        match self.third_party_artist_albums(artist_id).await {
+    async fn fetch_artist_albums_network(
+        &self,
+        artist_id: &str,
+        groups: &str,
+    ) -> Result<Vec<Album>> {
+        match self.third_party_artist_albums(artist_id, groups).await {
             Ok(albums) => {
                 log_api(&format!(
                     "artist_albums route=third_party artist={artist_id}"
@@ -818,7 +867,7 @@ impl EchoSpotifyClient {
                 if self.third_party_only || is_probable_rate_limit(&err) {
                     Err(err)
                 } else {
-                    self.first_party_artist_albums(artist_id)
+                    self.first_party_artist_albums(artist_id, groups)
                         .await
                         .inspect(|_| {
                             log_api(&format!(
@@ -830,7 +879,7 @@ impl EchoSpotifyClient {
         }
     }
 
-    async fn store_artist_albums(&self, artist_id: &str, albums: Vec<Album>) {
+    async fn store_artist_albums(&self, artist_id: &str, albums: ArtistAlbums) {
         self.cache
             .lock()
             .await
@@ -844,10 +893,12 @@ impl EchoSpotifyClient {
                     artist_name: "Unknown Artist".to_string(),
                     image_url: None,
                     albums: Vec::new(),
+                    albums_complete: false,
                     top_tracks: Vec::new(),
                     discography: Vec::new(),
                 });
-            page.albums = albums.clone();
+            page.albums = albums.albums.clone();
+            page.albums_complete = albums.complete;
             cache.set_artist_page(artist_id.to_string(), page);
         });
     }
@@ -886,12 +937,12 @@ impl EchoSpotifyClient {
         Ok(serde_json::from_str(&body)?)
     }
 
-    async fn third_party_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
+    async fn third_party_artist_albums(&self, artist_id: &str, groups: &str) -> Result<Vec<Album>> {
         let mut albums = Vec::new();
         let mut offset = 0usize;
         loop {
             let albums_json = self
-                .third_party_json(&artist_albums_url(artist_id, offset))
+                .third_party_json(&artist_albums_url(artist_id, groups, offset))
                 .await?;
             let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
             let page_len = page_albums.len();
@@ -901,27 +952,17 @@ impl EchoSpotifyClient {
             }
             offset += ARTIST_ALBUMS_PAGE_LIMIT;
         }
-        albums.sort_by(|a, b| {
-            let key = |album: &Album| {
-                album
-                    .release_date
-                    .clone()
-                    .unwrap_or_else(|| album.release_year.clone())
-            };
-            key(b).cmp(&key(a))
-        });
-
         Ok(albums)
     }
 
-    async fn first_party_artist_albums(&self, artist_id: &str) -> Result<Vec<Album>> {
+    async fn first_party_artist_albums(&self, artist_id: &str, groups: &str) -> Result<Vec<Album>> {
         let mut albums = Vec::new();
         let mut offset = 0usize;
         loop {
             let albums_json = self
                 .first_party_json(
                     ApiEndpoint::ArtistPage,
-                    &artist_albums_url(artist_id, offset),
+                    &artist_albums_url(artist_id, groups, offset),
                 )
                 .await?;
             let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
@@ -932,16 +973,6 @@ impl EchoSpotifyClient {
             }
             offset += ARTIST_ALBUMS_PAGE_LIMIT;
         }
-        albums.sort_by(|a, b| {
-            let key = |album: &Album| {
-                album
-                    .release_date
-                    .clone()
-                    .unwrap_or_else(|| album.release_year.clone())
-            };
-            key(b).cmp(&key(a))
-        });
-
         Ok(albums)
     }
 
@@ -961,6 +992,18 @@ impl EchoSpotifyClient {
 
 const ARTIST_ALBUMS_PAGE_LIMIT: usize = 10;
 
+fn sort_albums_newest_first(albums: &mut [Album]) {
+    albums.sort_by(|a, b| {
+        let key = |album: &Album| {
+            album
+                .release_date
+                .clone()
+                .unwrap_or_else(|| album.release_year.clone())
+        };
+        key(b).cmp(&key(a))
+    });
+}
+
 fn recent_playlist_url(id: &str) -> String {
     let mut url = reqwest::Url::parse("https://api.spotify.com/v1/playlists/").unwrap();
     url.path_segments_mut().unwrap().pop_if_empty().push(id);
@@ -971,9 +1014,9 @@ fn recent_playlist_url(id: &str) -> String {
     url.into()
 }
 
-fn artist_albums_url(artist_id: &str, offset: usize) -> String {
+fn artist_albums_url(artist_id: &str, groups: &str, offset: usize) -> String {
     format!(
-        "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups=album,single,compilation,appears_on&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
+        "https://api.spotify.com/v1/artists/{artist_id}/albums?include_groups={groups}&market=from_token&limit={ARTIST_ALBUMS_PAGE_LIMIT}&offset={offset}"
     )
 }
 
@@ -1090,12 +1133,42 @@ mod tests {
 
     #[test]
     fn artist_album_url_uses_spotify_limit_ten() {
-        let url = artist_albums_url("artist", 20);
+        let url = artist_albums_url("artist", AlbumScope::Full.groups(), 20);
 
         assert!(url.contains("/artists/artist/albums"));
         assert!(url.contains("limit=10"));
         assert!(url.contains("offset=20"));
         assert!(url.contains("include_groups=album,single,compilation,appears_on"));
+    }
+
+    #[test]
+    fn the_feed_scope_skips_compilations_and_appearances() {
+        let url = artist_albums_url("artist", AlbumScope::Releases.groups(), 0);
+        assert!(url.contains("include_groups=album,single&"));
+        assert_eq!(EXTRA_ALBUM_GROUPS, "compilation,appears_on");
+    }
+
+    #[test]
+    fn merged_albums_sort_newest_first_across_groups() {
+        let album = |id: &str, date: &str| Album {
+            id: id.to_string(),
+            name: id.to_string(),
+            artists: String::new(),
+            image_url: None,
+            thumb_url: None,
+            release_year: date[..4].to_string(),
+            release_date: Some(date.to_string()),
+            track_count: None,
+            group: None,
+        };
+        let mut albums = vec![
+            album("old", "2020-01-01"),
+            album("new", "2026-03-01"),
+            album("mid", "2024-06-01"),
+        ];
+        sort_albums_newest_first(&mut albums);
+        let ids: Vec<&str> = albums.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["new", "mid", "old"]);
     }
 
     #[test]

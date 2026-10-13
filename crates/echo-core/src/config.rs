@@ -1107,6 +1107,7 @@ mod tests {
                 track_count,
                 group: track_count.map(|_| AlbumGroup::Album),
             }],
+            albums_complete: true,
             top_tracks: Vec::new(),
             discography: Vec::new(),
         });

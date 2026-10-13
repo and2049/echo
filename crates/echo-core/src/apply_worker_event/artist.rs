@@ -30,6 +30,7 @@ pub fn handle_page_opened(
             artist_name,
             image_url: artist_image_url.clone(),
             albums: Vec::new(),
+            albums_complete: false,
             top_tracks: Vec::new(),
             discography: Vec::new(),
         });

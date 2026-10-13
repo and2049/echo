@@ -22,6 +22,14 @@ pub enum FetchGate {
     CoolingDown(Duration),
 }
 
+/// An artist's cached releases and whether they cover every album group or only the
+/// artist's own albums and singles.
+#[derive(Clone, Debug, Default)]
+pub struct ArtistAlbums {
+    pub albums: Vec<Album>,
+    pub complete: bool,
+}
+
 #[derive(Clone)]
 struct Timed<T> {
     value: T,
@@ -59,7 +67,7 @@ pub struct SpotifyApiCache {
     top_artists: HashMap<TopItemsRange, Timed<Vec<Artist>>>,
     recently_played: Option<Timed<Vec<Track>>>,
     followed_artists: Option<Timed<Vec<Artist>>>,
-    artist_albums: HashMap<String, Timed<Vec<Album>>>,
+    artist_albums: HashMap<String, Timed<ArtistAlbums>>,
     artist_top_tracks: HashMap<String, Timed<Vec<Track>>>,
     inflight: HashSet<CacheKey>,
     cooldowns: HashMap<CacheKey, Instant>,
@@ -112,7 +120,7 @@ impl SpotifyApiCache {
         self.followed_artists = Some(Timed::new(artists, Duration::from_secs(24 * 60 * 60)));
     }
 
-    pub fn artist_albums(&self, artist_id: &str) -> Option<Vec<Album>> {
+    pub fn artist_albums(&self, artist_id: &str) -> Option<ArtistAlbums> {
         self.artist_albums.get(artist_id).and_then(Timed::get)
     }
 
@@ -120,11 +128,11 @@ impl SpotifyApiCache {
         let entry = self.artist_albums.get(artist_id)?;
         Some(
             entry.fetched_at.elapsed() > ARTIST_ALBUMS_REFRESH_TTL
-                || !artist_album_metadata_complete(&entry.value),
+                || !artist_album_metadata_complete(&entry.value.albums),
         )
     }
 
-    pub fn set_artist_albums(&mut self, artist_id: String, albums: Vec<Album>) {
+    pub fn set_artist_albums(&mut self, artist_id: String, albums: ArtistAlbums) {
         self.clear_cooldown(&CacheKey::ArtistAlbums(artist_id.clone()));
         self.artist_albums.insert(
             artist_id,
@@ -247,7 +255,7 @@ mod tests {
             Duration::from_secs(50),
         );
 
-        cache.set_artist_albums("artist".to_string(), Vec::new());
+        cache.set_artist_albums("artist".to_string(), ArtistAlbums::default());
 
         assert_eq!(
             cache.begin(CacheKey::ArtistAlbums("artist".to_string())),
