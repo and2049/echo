@@ -2,11 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::config::{ARTIST_ALBUMS_REFRESH_TTL, artist_album_metadata_complete};
-use crate::models::{Album, Artist, TopItemsRange, Track};
+use crate::models::{Album, Artist, DiscographyFilter, DiscographyPage, TopItemsRange, Track};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum CacheKey {
     ArtistAlbums(String),
+    Discography(String, DiscographyFilter),
     ArtistTopTracks(String),
     TopTracks(TopItemsRange),
     TopArtists(TopItemsRange),
@@ -20,14 +21,6 @@ pub enum FetchGate {
     Start,
     InFlight,
     CoolingDown(Duration),
-}
-
-/// An artist's cached releases and whether they cover every album group or only the
-/// artist's own albums and singles.
-#[derive(Clone, Debug, Default)]
-pub struct ArtistAlbums {
-    pub albums: Vec<Album>,
-    pub complete: bool,
 }
 
 #[derive(Clone)]
@@ -67,7 +60,8 @@ pub struct SpotifyApiCache {
     top_artists: HashMap<TopItemsRange, Timed<Vec<Artist>>>,
     recently_played: Option<Timed<Vec<Track>>>,
     followed_artists: Option<Timed<Vec<Artist>>>,
-    artist_albums: HashMap<String, Timed<ArtistAlbums>>,
+    artist_albums: HashMap<String, Timed<Vec<Album>>>,
+    discography: HashMap<(String, DiscographyFilter), Timed<DiscographyPage>>,
     artist_top_tracks: HashMap<String, Timed<Vec<Track>>>,
     inflight: HashSet<CacheKey>,
     cooldowns: HashMap<CacheKey, Instant>,
@@ -120,7 +114,7 @@ impl SpotifyApiCache {
         self.followed_artists = Some(Timed::new(artists, Duration::from_secs(24 * 60 * 60)));
     }
 
-    pub fn artist_albums(&self, artist_id: &str) -> Option<ArtistAlbums> {
+    pub fn artist_albums(&self, artist_id: &str) -> Option<Vec<Album>> {
         self.artist_albums.get(artist_id).and_then(Timed::get)
     }
 
@@ -128,16 +122,43 @@ impl SpotifyApiCache {
         let entry = self.artist_albums.get(artist_id)?;
         Some(
             entry.fetched_at.elapsed() > ARTIST_ALBUMS_REFRESH_TTL
-                || !artist_album_metadata_complete(&entry.value.albums),
+                || !artist_album_metadata_complete(&entry.value),
         )
     }
 
-    pub fn set_artist_albums(&mut self, artist_id: String, albums: ArtistAlbums) {
+    pub fn set_artist_albums(&mut self, artist_id: String, albums: Vec<Album>) {
         self.clear_cooldown(&CacheKey::ArtistAlbums(artist_id.clone()));
         self.artist_albums.insert(
             artist_id,
             Timed::new(albums, Duration::from_secs(24 * 60 * 60)),
         );
+    }
+
+    pub fn discography_page(
+        &self,
+        artist_id: &str,
+        filter: DiscographyFilter,
+    ) -> Option<DiscographyPage> {
+        self.discography
+            .get(&(artist_id.to_string(), filter))
+            .and_then(Timed::get)
+    }
+
+    pub fn set_discography_page(
+        &mut self,
+        artist_id: String,
+        filter: DiscographyFilter,
+        page: DiscographyPage,
+    ) {
+        self.clear_cooldown(&CacheKey::Discography(artist_id.clone(), filter));
+        self.discography.insert(
+            (artist_id, filter),
+            Timed::new(page, ARTIST_ALBUMS_REFRESH_TTL),
+        );
+    }
+
+    pub fn clear_discography(&mut self, artist_id: &str) {
+        self.discography.retain(|(id, _), _| id != artist_id);
     }
 
     pub fn artist_top_tracks(&self, artist_id: &str) -> Option<Vec<Track>> {
@@ -255,7 +276,7 @@ mod tests {
             Duration::from_secs(50),
         );
 
-        cache.set_artist_albums("artist".to_string(), ArtistAlbums::default());
+        cache.set_artist_albums("artist".to_string(), Vec::new());
 
         assert_eq!(
             cache.begin(CacheKey::ArtistAlbums("artist".to_string())),

@@ -9,12 +9,12 @@ use tokio::sync::Mutex;
 use crate::{
     config::{AppConfig, CacheData},
     liked_songs::SavedPage,
-    models::{Album, Artist, ArtistPageData, Track},
+    models::{Album, Artist, ArtistPageData, DiscographyFilter, DiscographyPage, Track},
 };
 
 use super::{
     SpotifyWorker,
-    cache::{ArtistAlbums, CacheKey, FetchGate, SpotifyApiCache},
+    cache::{CacheKey, FetchGate, SpotifyApiCache},
     first_party::{SpotifyWebApi, rate_limit_error},
     parse,
     policy::ApiEndpoint,
@@ -37,25 +37,8 @@ pub enum ArtistAlbumsCachePolicy {
     Refresh,
 }
 
-/// Which album groups a caller needs: the What's New feed only reads the artist's own
-/// albums and singles, the artist page wants compilations and appearances as well. A cached
-/// `Releases` entry serves a `Full` request by fetching only the missing groups.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AlbumScope {
-    Releases,
-    Full,
-}
-
-impl AlbumScope {
-    fn groups(self) -> &'static str {
-        match self {
-            Self::Releases => "album,single",
-            Self::Full => "album,single,compilation,appears_on",
-        }
-    }
-}
-
-const EXTRA_ALBUM_GROUPS: &str = "compilation,appears_on";
+/// The groups the own-releases cache holds: what What's New walks in full.
+const OWN_RELEASE_GROUPS: &str = DiscographyFilter::All.groups();
 
 #[derive(Clone, Debug, Default)]
 pub struct ArtistAlbumsResponse {
@@ -571,33 +554,16 @@ impl EchoSpotifyClient {
             .context("Artist profile has no name")
     }
 
-    pub async fn artist_albums_with_policy(
-        &self,
-        artist_id: &str,
-        policy: ArtistAlbumsCachePolicy,
-        scope: AlbumScope,
-    ) -> Result<ArtistAlbumsResponse> {
+    /// The artist's own albums and singles, walked in full, for the What's New feed: the
+    /// cached list when fresh, else a network walk behind the artist's fetch gate.
+    pub async fn own_releases(&self, artist_id: &str) -> Result<ArtistAlbumsResponse> {
         let mut response = ArtistAlbumsResponse::default();
-        let mut groups = Some(scope.groups());
-        let mut keep = Vec::new();
-
-        if policy == ArtistAlbumsCachePolicy::UseCache
-            && let Some((cached, stale)) = self.cached_artist_albums(artist_id).await
-        {
-            groups = if stale {
-                Some(scope.groups())
-            } else if scope == AlbumScope::Full && !cached.complete {
-                keep = cached.albums.clone();
-                Some(EXTRA_ALBUM_GROUPS)
-            } else {
-                None
-            };
-            response.cached = Some(cached.albums);
+        if let Some((albums, stale)) = self.cached_artist_albums(artist_id).await {
+            response.cached = Some(albums);
+            if !stale {
+                return Ok(response);
+            }
         }
-
-        let Some(groups) = groups else {
-            return Ok(response);
-        };
 
         let key = CacheKey::ArtistAlbums(artist_id.to_string());
         if !self.begin_fetch(key.clone(), "Artist albums").await? {
@@ -605,23 +571,104 @@ impl EchoSpotifyClient {
             return Ok(response);
         }
 
-        let result = self.fetch_artist_albums_network(artist_id, groups).await;
+        let result = self.fetch_artist_albums_network(artist_id).await;
         self.finish_fetch(&key, &result).await;
-        let mut albums = result?;
-        albums.extend(keep);
-        sort_albums_newest_first(&mut albums);
-        let albums = ArtistAlbums {
-            albums,
-            complete: scope == AlbumScope::Full,
-        };
+        let albums = result?;
         self.store_artist_albums(artist_id, albums.clone()).await;
-        response.refreshed = Some(albums.albums);
+        response.refreshed = Some(albums);
         Ok(response)
     }
 
-    /// The cached releases and whether they are past their refresh TTL, from memory first,
-    /// then the persistent cache (promoted to memory when still fresh).
-    async fn cached_artist_albums(&self, artist_id: &str) -> Option<(ArtistAlbums, bool)> {
+    /// One chip of an artist's discography: its rows fetched so far, plus the next page from
+    /// Spotify when `more` asks for it and the chip has pages left. `Refresh` drops the
+    /// artist's chips first. The All, Albums and Singles chips come free from a fresh
+    /// own-releases cache; Appears On always pages the network. `Ok(None)` when the same chip
+    /// is already being fetched.
+    pub async fn discography_page(
+        &self,
+        artist_id: &str,
+        filter: DiscographyFilter,
+        policy: ArtistAlbumsCachePolicy,
+        more: bool,
+    ) -> Result<Option<DiscographyPage>> {
+        let mut page = DiscographyPage::default();
+        match policy {
+            ArtistAlbumsCachePolicy::Refresh => {
+                self.cache.lock().await.clear_discography(artist_id)
+            }
+            ArtistAlbumsCachePolicy::UseCache => {
+                let cached = self.cache.lock().await.discography_page(artist_id, filter);
+                if let Some(cached) = cached {
+                    if !more || !cached.has_more {
+                        return Ok(Some(cached));
+                    }
+                    page = cached;
+                } else if filter != DiscographyFilter::AppearsOn
+                    && let Some((albums, false)) = self.cached_artist_albums(artist_id).await
+                {
+                    let albums: Vec<Album> = albums
+                        .into_iter()
+                        .filter(|album| filter.matches(album))
+                        .collect();
+                    let page = DiscographyPage {
+                        total: albums.len(),
+                        albums,
+                        has_more: false,
+                    };
+                    self.cache.lock().await.set_discography_page(
+                        artist_id.to_string(),
+                        filter,
+                        page.clone(),
+                    );
+                    return Ok(Some(page));
+                }
+            }
+        }
+
+        let key = CacheKey::Discography(artist_id.to_string(), filter);
+        if !self.begin_fetch(key.clone(), "Artist albums").await? {
+            return Ok(None);
+        }
+        let result = self
+            .fetch_artist_albums_page(artist_id, filter.groups(), page.albums.len())
+            .await;
+        self.finish_fetch(&key, &result).await;
+        let fetched = result?;
+        page.albums.extend(fetched.albums);
+        page.has_more = fetched.has_next;
+        page.total = fetched.total;
+        self.cache
+            .lock()
+            .await
+            .set_discography_page(artist_id.to_string(), filter, page.clone());
+        Ok(Some(page))
+    }
+
+    /// What a chip can show while Spotify refuses its page: the artist's own releases from
+    /// the cache, however old, filtered to the chip. Nothing for Appears On, never cached.
+    pub async fn stale_discography(
+        &self,
+        artist_id: &str,
+        filter: DiscographyFilter,
+    ) -> Option<DiscographyPage> {
+        if filter == DiscographyFilter::AppearsOn {
+            return None;
+        }
+        let (albums, _) = self.cached_artist_albums(artist_id).await?;
+        let albums: Vec<Album> = albums
+            .into_iter()
+            .filter(|album| filter.matches(album))
+            .collect();
+        (!albums.is_empty()).then_some(DiscographyPage {
+            total: albums.len(),
+            albums,
+            has_more: false,
+        })
+    }
+
+    /// The cached own releases and whether they are past their refresh TTL, from memory
+    /// first, then the persistent cache (promoted to memory when still fresh).
+    async fn cached_artist_albums(&self, artist_id: &str) -> Option<(Vec<Album>, bool)> {
         let memory = {
             let cache = self.cache.lock().await;
             cache.artist_albums(artist_id).map(|albums| {
@@ -633,28 +680,22 @@ impl EchoSpotifyClient {
         };
         if let Some((albums, stale)) = memory {
             log_api(&format!(
-                "artist_albums route=cache artist={artist_id} needs_refresh={stale} complete={}",
-                albums.complete
+                "artist_albums route=cache artist={artist_id} needs_refresh={stale}"
             ));
             return Some((albums, stale));
         }
         let entry = AppConfig::load_cache().get_artist_page_entry(artist_id)?;
         let stale = CacheData::artist_page_needs_album_refresh(&entry);
-        let albums = ArtistAlbums {
-            albums: entry.value.albums,
-            complete: entry.value.albums_complete,
-        };
         log_api(&format!(
-            "artist_albums route=persistent_cache artist={artist_id} needs_refresh={stale} complete={}",
-            albums.complete
+            "artist_albums route=persistent_cache artist={artist_id} needs_refresh={stale}"
         ));
         if !stale {
             self.cache
                 .lock()
                 .await
-                .set_artist_albums(artist_id.to_string(), albums.clone());
+                .set_artist_albums(artist_id.to_string(), entry.value.albums.clone());
         }
-        Some((albums, stale))
+        Some((entry.value.albums, stale))
     }
 
     /// Follows or unfollows an artist, then reloads the followed list past both caches so
@@ -848,38 +889,49 @@ impl EchoSpotifyClient {
             .unwrap_or_default())
     }
 
-    async fn fetch_artist_albums_network(
+    /// Every page of the artist's own releases, newest first.
+    async fn fetch_artist_albums_network(&self, artist_id: &str) -> Result<Vec<Album>> {
+        let mut albums = Vec::new();
+        loop {
+            let page = self
+                .fetch_artist_albums_page(artist_id, OWN_RELEASE_GROUPS, albums.len())
+                .await?;
+            let page_len = page.albums.len();
+            albums.extend(page.albums);
+            if !page.has_next || page_len == 0 {
+                break;
+            }
+        }
+        sort_albums_newest_first(&mut albums);
+        Ok(albums)
+    }
+
+    /// One page of `/artists/{id}/albums`, falling back to the first-party route for
+    /// anything but a rate limit.
+    async fn fetch_artist_albums_page(
         &self,
         artist_id: &str,
         groups: &str,
-    ) -> Result<Vec<Album>> {
-        match self.third_party_artist_albums(artist_id, groups).await {
-            Ok(albums) => {
-                log_api(&format!(
-                    "artist_albums route=third_party artist={artist_id}"
-                ));
-                Ok(albums)
-            }
+        offset: usize,
+    ) -> Result<AlbumsPage> {
+        let url = artist_albums_url(artist_id, groups, offset);
+        match self.third_party_json(&url).await {
+            Ok(json) => Ok(parse_artist_albums_page(&json)),
+            Err(err) if self.third_party_only || is_probable_rate_limit(&err) => Err(err),
             Err(err) => {
                 log_api(&format!(
                     "artist_albums route=third_party failed artist={artist_id} err={err:?}"
                 ));
-                if self.third_party_only || is_probable_rate_limit(&err) {
-                    Err(err)
-                } else {
-                    self.first_party_artist_albums(artist_id, groups)
-                        .await
-                        .inspect(|_| {
-                            log_api(&format!(
-                                "artist_albums route=first_party artist={artist_id}"
-                            ));
-                        })
-                }
+                let json = self.first_party_json(ApiEndpoint::ArtistPage, &url).await?;
+                log_api(&format!(
+                    "artist_albums route=first_party artist={artist_id}"
+                ));
+                Ok(parse_artist_albums_page(&json))
             }
         }
     }
 
-    async fn store_artist_albums(&self, artist_id: &str, albums: ArtistAlbums) {
+    async fn store_artist_albums(&self, artist_id: &str, albums: Vec<Album>) {
         self.cache
             .lock()
             .await
@@ -893,12 +945,10 @@ impl EchoSpotifyClient {
                     artist_name: "Unknown Artist".to_string(),
                     image_url: None,
                     albums: Vec::new(),
-                    albums_complete: false,
                     top_tracks: Vec::new(),
-                    discography: Vec::new(),
+                    chips: Default::default(),
                 });
-            page.albums = albums.albums.clone();
-            page.albums_complete = albums.complete;
+            page.albums = albums;
             cache.set_artist_page(artist_id.to_string(), page);
         });
     }
@@ -935,45 +985,6 @@ impl EchoSpotifyClient {
         }
 
         Ok(serde_json::from_str(&body)?)
-    }
-
-    async fn third_party_artist_albums(&self, artist_id: &str, groups: &str) -> Result<Vec<Album>> {
-        let mut albums = Vec::new();
-        let mut offset = 0usize;
-        loop {
-            let albums_json = self
-                .third_party_json(&artist_albums_url(artist_id, groups, offset))
-                .await?;
-            let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
-            let page_len = page_albums.len();
-            albums.append(&mut page_albums);
-            if !has_next || page_len == 0 {
-                break;
-            }
-            offset += ARTIST_ALBUMS_PAGE_LIMIT;
-        }
-        Ok(albums)
-    }
-
-    async fn first_party_artist_albums(&self, artist_id: &str, groups: &str) -> Result<Vec<Album>> {
-        let mut albums = Vec::new();
-        let mut offset = 0usize;
-        loop {
-            let albums_json = self
-                .first_party_json(
-                    ApiEndpoint::ArtistPage,
-                    &artist_albums_url(artist_id, groups, offset),
-                )
-                .await?;
-            let (mut page_albums, has_next) = parse_artist_albums_page(&albums_json);
-            let page_len = page_albums.len();
-            albums.append(&mut page_albums);
-            if !has_next || page_len == 0 {
-                break;
-            }
-            offset += ARTIST_ALBUMS_PAGE_LIMIT;
-        }
-        Ok(albums)
     }
 
     /// Fetch an artist's profile image URL via the standard third-party API.
@@ -1020,14 +1031,28 @@ fn artist_albums_url(artist_id: &str, groups: &str, offset: usize) -> String {
     )
 }
 
-fn parse_artist_albums_page(json: &serde_json::Value) -> (Vec<Album>, bool) {
-    let albums = json
+struct AlbumsPage {
+    albums: Vec<Album>,
+    has_next: bool,
+    total: usize,
+}
+
+fn parse_artist_albums_page(json: &serde_json::Value) -> AlbumsPage {
+    let albums: Vec<Album> = json
         .get("items")
         .and_then(|v| v.as_array())
         .map(|items| items.iter().filter_map(parse::album).collect())
         .unwrap_or_default();
     let has_next = json.get("next").is_some_and(|v| !v.is_null());
-    (albums, has_next)
+    let total = json
+        .get("total")
+        .and_then(|v| v.as_u64())
+        .map_or(albums.len(), |v| v as usize);
+    AlbumsPage {
+        albums,
+        has_next,
+        total,
+    }
 }
 
 fn saved_tracks_url(offset: u32) -> String {
@@ -1083,7 +1108,10 @@ fn persistent_cooldown_key(key: &CacheKey) -> String {
         CacheKey::RecentlyPlayed => "recently_played".to_string(),
         CacheKey::FollowedArtists => "followed_artists".to_string(),
         CacheKey::LikedSongs => "liked_songs".to_string(),
-        CacheKey::ArtistAlbums(artist_id) => format!("artist_albums:{artist_id}"),
+        // One quota covers every chip of an artist, so their cooldowns share a key.
+        CacheKey::ArtistAlbums(artist_id) | CacheKey::Discography(artist_id, _) => {
+            format!("artist_albums:{artist_id}")
+        }
         CacheKey::ArtistTopTracks(artist_id) => format!("artist_top_tracks:{artist_id}"),
     }
 }
@@ -1133,19 +1161,18 @@ mod tests {
 
     #[test]
     fn artist_album_url_uses_spotify_limit_ten() {
-        let url = artist_albums_url("artist", AlbumScope::Full.groups(), 20);
+        let url = artist_albums_url("artist", DiscographyFilter::AppearsOn.groups(), 20);
 
         assert!(url.contains("/artists/artist/albums"));
         assert!(url.contains("limit=10"));
         assert!(url.contains("offset=20"));
-        assert!(url.contains("include_groups=album,single,compilation,appears_on"));
+        assert!(url.contains("include_groups=compilation,appears_on"));
     }
 
     #[test]
-    fn the_feed_scope_skips_compilations_and_appearances() {
-        let url = artist_albums_url("artist", AlbumScope::Releases.groups(), 0);
+    fn the_feed_walks_only_the_artists_own_releases() {
+        let url = artist_albums_url("artist", OWN_RELEASE_GROUPS, 0);
         assert!(url.contains("include_groups=album,single&"));
-        assert_eq!(EXTRA_ALBUM_GROUPS, "compilation,appears_on");
     }
 
     #[test]
@@ -1193,13 +1220,20 @@ mod tests {
             ]
         });
 
-        let (albums, has_next) = parse_artist_albums_page(&json);
+        let page = parse_artist_albums_page(&json);
 
-        assert!(has_next);
-        assert_eq!(albums.len(), 2);
-        assert_eq!(albums[0].id, "album-a");
-        assert_eq!(albums[0].release_year, "2024");
-        assert_eq!(albums[1].id, "album-b");
+        assert!(page.has_next);
+        assert_eq!(page.total, 2);
+        assert_eq!(page.albums.len(), 2);
+        assert_eq!(page.albums[0].id, "album-a");
+        assert_eq!(page.albums[0].release_year, "2024");
+        assert_eq!(page.albums[1].id, "album-b");
+    }
+
+    #[test]
+    fn artist_album_page_parser_reads_the_query_total() {
+        let json = serde_json::json!({ "next": null, "total": 217, "items": [] });
+        assert_eq!(parse_artist_albums_page(&json).total, 217);
     }
 
     #[test]
@@ -1209,10 +1243,10 @@ mod tests {
             "items": []
         });
 
-        let (albums, has_next) = parse_artist_albums_page(&json);
+        let page = parse_artist_albums_page(&json);
 
-        assert!(albums.is_empty());
-        assert!(!has_next);
+        assert!(page.albums.is_empty());
+        assert!(!page.has_next);
     }
 
     #[test]

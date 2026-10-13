@@ -752,13 +752,14 @@ impl EchoApp {
             },
             ActiveView::ArtistList => self.state.artist_list().len(),
             ActiveView::WhatsNew => self.state.data.whats_new.len(),
-            // Combined index space: Popular rows first, then the album rows.
-            ActiveView::ArtistPage => self
-                .state
-                .data
-                .artist_page_data
-                .as_ref()
-                .map_or(0, |data| data.top_tracks.len() + data.albums.len()),
+            // Combined index space: Popular rows first, then the album rows and the chip's
+            // Load more row.
+            ActiveView::ArtistPage => {
+                let filter = self.state.ui.artist_discography_filter;
+                self.state.data.artist_page_data.as_ref().map_or(0, |data| {
+                    data.top_tracks.len() + data.album_row_count(filter)
+                })
+            }
             _ => match self.state.ui.active_library_tab {
                 LibraryTab::Albums => self.state.data.saved_albums.len(),
                 LibraryTab::Artists => self.state.data.followed_artists.len(),
@@ -770,7 +771,9 @@ impl EchoApp {
     /// Switches the discography chip and lands the cursor on the first album row, past the
     /// Popular rows the combined index space puts first.
     pub(crate) fn set_discography_filter(&mut self, filter: echo_core::models::DiscographyFilter) {
-        echo_core::intent::set_discography_filter(&mut self.state, filter);
+        if let Some(event) = echo_core::intent::set_discography_filter(&mut self.state, filter) {
+            self.dispatch(event);
+        }
         self.state.ui.artist_page_album_index = self.artist_page_top_len();
         self.artist_albums_scroll
             .scroll_to_item(0, ScrollStrategy::Top);

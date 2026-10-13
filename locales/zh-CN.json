@@ -134,6 +134,7 @@
     "loading": "加载中…",
     "loading_artist": "正在加载歌手…",
     "loading_albums": "正在加载专辑…",
+    "load_more": "加载更多",
     "loading_lyrics": "正在加载歌词…",
     "queue_upcoming": "{} 首待播",
     "queue_empty": "播放队列为空",

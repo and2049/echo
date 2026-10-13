@@ -23,10 +23,7 @@ impl Drop for HomeRequest {
     }
 }
 
-use super::{
-    api::client::{AlbumScope, ArtistAlbumsCachePolicy, EchoSpotifyClient},
-    errors::api_request_error_message,
-};
+use super::{api::client::EchoSpotifyClient, errors::api_request_error_message};
 
 /// How far back the What's New feed reaches, as an ISO date cutoff.
 const WHATS_NEW_WINDOW_DAYS: i64 = 90;
@@ -220,14 +217,7 @@ pub fn spawn_whats_new(api_client: Option<EchoSpotifyClient>, tx: mpsc::Sender<W
         for (index, artist) in artists.into_iter().take(WHATS_NEW_MAX_ARTISTS).enumerate() {
             let done = index + 1;
             let mut from_network = false;
-            match api
-                .artist_albums_with_policy(
-                    &artist.id,
-                    ArtistAlbumsCachePolicy::UseCache,
-                    AlbumScope::Releases,
-                )
-                .await
-            {
+            match api.own_releases(&artist.id).await {
                 Ok(response) => {
                     from_network = response.refreshed.is_some();
                     if let Some(albums) = response.refreshed.or(response.cached) {
@@ -350,7 +340,7 @@ mod tests {
                 .unwrap_or_default(),
             release_date: release_date.map(str::to_string),
             track_count: None,
-            group: None,
+            group: Some(crate::models::AlbumGroup::Album),
         }
     }
 

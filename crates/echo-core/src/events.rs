@@ -112,8 +112,15 @@ pub enum AppEvent {
         artist_name: Option<String>,
         artist_image_url: Option<String>,
     },
+    /// One discography chip's rows: the first page, or with `more` the next one.
+    LoadArtistAlbums {
+        artist_id: String,
+        filter: crate::models::DiscographyFilter,
+        more: bool,
+    },
     RefreshArtistAlbums {
         artist_id: String,
+        filter: crate::models::DiscographyFilter,
     },
 }
 
@@ -234,7 +241,8 @@ pub enum WorkerEvent {
     },
     ArtistAlbumsLoaded {
         artist_id: String,
-        albums: Vec<crate::models::Album>,
+        filter: crate::models::DiscographyFilter,
+        page: crate::models::DiscographyPage,
     },
     ArtistAlbumsLoadFailed {
         artist_id: String,

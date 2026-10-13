@@ -10,3 +10,4 @@
  - The playing song in the playback bar and an artist's Popular tracks can be dragged into a sidebar playlist; dragged tracks show their cover, title and artist instead of just the name
  - What's New only fetches each followed artist's own albums and singles and paces the walk, so a launch no longer burns through the artist-albums quota for hours; opening an artist page fetches just the missing compilations and appearances
  - Various-artists compilations now sit under an artist's Appears On chip instead of crowding All and Albums, and no longer show up in What's New
+ - Artist pages load one page of the active discography chip and offer a Load more row, instead of walking every release up front; each chip is fetched on first use and remembered for the session

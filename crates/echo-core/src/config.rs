@@ -1107,9 +1107,8 @@ mod tests {
                 track_count,
                 group: track_count.map(|_| AlbumGroup::Album),
             }],
-            albums_complete: true,
             top_tracks: Vec::new(),
-            discography: Vec::new(),
+            chips: Default::default(),
         });
         entry.fetched_at = now_epoch_secs().saturating_sub(age.as_secs());
         entry

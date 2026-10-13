@@ -177,9 +177,11 @@ pub fn apply_worker_event(
             artist_name,
             artist_image_url,
         } => artist::handle_page_opened(state, worker_tx, artist_id, artist_name, artist_image_url),
-        WorkerEvent::ArtistAlbumsLoaded { artist_id, albums } => {
-            artist::handle_albums_loaded(state, artist_id, albums)
-        }
+        WorkerEvent::ArtistAlbumsLoaded {
+            artist_id,
+            filter,
+            page,
+        } => artist::handle_albums_loaded(state, artist_id, filter, page),
         WorkerEvent::ArtistAlbumsLoadFailed { artist_id, message } => {
             artist::handle_albums_load_failed(state, artist_id, message)
         }

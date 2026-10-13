@@ -4045,8 +4045,13 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
         .active_library_header_image
         .clone()
         .and_then(|artwork| app.images.get(&artwork));
-    let count = data.albums.len();
-    let loading = app.state.data.artist_albums_loading && count == 0;
+    let filter = app.state.ui.artist_discography_filter;
+    let count = data
+        .chips
+        .get(&echo_core::models::DiscographyFilter::All)
+        .map_or(data.albums.len(), |page| page.total);
+    let loading = app.state.data.artist_albums_loading && data.albums.is_empty();
+    let row_count = data.album_row_count(filter);
     let top_len = data.top_tracks.len();
     let top_loading = app.state.data.artist_top_tracks_loading;
 
@@ -4312,7 +4317,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
         } else {
             uniform_list(
                 "artist-album-rows",
-                count,
+                row_count,
                 cx.processor(
                     move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
                         let theme = &this.state.ui.active_theme;
@@ -4323,6 +4328,14 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                         // Album rows sit after the Popular rows in the page's combined index space.
                         let selected = this.state.ui.artist_page_album_index;
                         let top_len = this.artist_page_top_len();
+                        let more_label = tr(
+                            &this.state,
+                            if this.state.data.artist_albums_loading {
+                                "desktop.loading"
+                            } else {
+                                "desktop.load_more"
+                            },
+                        );
 
                         let rows: Vec<AnyElement> = range
                             .map(|ix| {
@@ -4334,7 +4347,32 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                     .and_then(|data| data.albums.get(ix))
                                     .cloned()
                                 else {
-                                    return div().id(ix).into_any_element();
+                                    // The Load more row after the last album.
+                                    return pill_row(
+                                        ix,
+                                        LIST_PILL,
+                                        ix + top_len == selected,
+                                        selected_bg,
+                                        palette.row_hover,
+                                        |row| {
+                                            row.justify_center()
+                                                .text_color(muted)
+                                                .on_click(cx.listener(
+                                                    move |this: &mut EchoApp, _event, _window, cx| {
+                                                        if let Some(event) =
+                                                            echo_core::intent::load_more_artist_albums(
+                                                                &mut this.state,
+                                                            )
+                                                        {
+                                                            this.dispatch(event);
+                                                        }
+                                                        cx.notify();
+                                                    },
+                                                ))
+                                                .child(more_label.clone())
+                                        },
+                                    )
+                                    .into_any_element();
                                 };
                                 let thumb_url =
                                     album.thumb_url.clone().or_else(|| album.image_url.clone());

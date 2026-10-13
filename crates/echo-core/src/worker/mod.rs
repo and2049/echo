@@ -1859,11 +1859,25 @@ impl Worker {
                                     artist_image_url,
                                 );
                             }
-                            AppEvent::RefreshArtistAlbums { artist_id } => {
+                            AppEvent::LoadArtistAlbums {
+                                artist_id,
+                                filter,
+                                more,
+                            } => {
+                                artist_page::spawn_load_artist_albums(
+                                    api_client.as_ref(),
+                                    self.tx.clone(),
+                                    artist_id,
+                                    filter,
+                                    more,
+                                );
+                            }
+                            AppEvent::RefreshArtistAlbums { artist_id, filter } => {
                                 artist_page::spawn_refresh_artist_albums(
                                     api_client.as_ref(),
                                     self.tx.clone(),
                                     artist_id,
+                                    filter,
                                 );
                             }
                             _ => {}

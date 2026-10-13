@@ -1020,9 +1020,8 @@ impl AppState {
             artist_name,
             image_url,
             albums: Vec::new(),
-            albums_complete: false,
             top_tracks: Vec::new(),
-            discography: Vec::new(),
+            chips: Default::default(),
         });
         self.data.pending_artist_page_id = Some(artist_id);
         self.ui.artist_page_album_index = 0;

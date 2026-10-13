@@ -813,19 +813,38 @@ fn open_album_from_artist_page(state: &mut AppState, album_index: usize) -> Opti
 }
 
 /// Activates row `index` of the artist page in the desktop's combined index space:
-/// rows `0..top_tracks.len()` play a Popular track, the rest open the matching album.
+/// rows `0..top_tracks.len()` play a Popular track, the album rows open the matching album,
+/// and the Load more row after them asks for the chip's next page.
 pub fn activate_artist_page_row(state: &mut AppState, index: usize) -> Option<AppEvent> {
-    let top_len = state
+    let (top_len, album_len) = state
         .data
         .artist_page_data
         .as_ref()
-        .map_or(0, |data| data.top_tracks.len());
+        .map_or((0, 0), |data| (data.top_tracks.len(), data.albums.len()));
     state.ui.artist_page_album_index = index;
     if index < top_len {
         play_artist_top_track(state, index)
-    } else {
+    } else if index - top_len < album_len {
         open_album_from_artist_page(state, index - top_len)
+    } else {
+        load_more_artist_albums(state)
     }
+}
+
+/// Asks for the active chip's next page, once, while it has one.
+pub fn load_more_artist_albums(state: &mut AppState) -> Option<AppEvent> {
+    let filter = state.ui.artist_discography_filter;
+    let data = state.data.artist_page_data.as_ref()?;
+    if state.data.artist_albums_loading || !data.has_more(filter) {
+        return None;
+    }
+    let artist_id = data.artist_id.clone();
+    state.data.artist_albums_loading = true;
+    Some(AppEvent::LoadArtistAlbums {
+        artist_id,
+        filter,
+        more: true,
+    })
 }
 
 /// Plays top track `index` of the current artist page. The whole Popular list is sent as
@@ -860,15 +879,28 @@ pub fn selected_artist_top_track(state: &AppState) -> Option<&Track> {
         .get(state.ui.artist_page_album_index)
 }
 
-/// Switches the artist page's discography chip and puts the cursor back on the first row of
-/// the caller's index space (desktop callers move it past the Popular rows themselves).
-pub fn set_discography_filter(state: &mut AppState, filter: DiscographyFilter) {
+/// Switches the artist page's discography chip, showing its rows when they are already known
+/// and asking the worker for its first page otherwise. Puts the cursor back on the first row
+/// of the caller's index space (desktop callers move it past the Popular rows themselves).
+pub fn set_discography_filter(state: &mut AppState, filter: DiscographyFilter) -> Option<AppEvent> {
     if state.ui.artist_discography_filter == filter {
-        return;
+        return None;
     }
     state.ui.artist_discography_filter = filter;
     state.ui.artist_page_album_index = 0;
-    crate::apply_worker_event::artist::apply_discography_filter(state);
+    let data = state.data.artist_page_data.as_mut()?;
+    if let Some(page) = data.chips.get(&filter) {
+        data.albums = page.albums.clone();
+        return None;
+    }
+    data.albums.clear();
+    let artist_id = data.artist_id.clone();
+    state.data.artist_albums_loading = true;
+    Some(AppEvent::LoadArtistAlbums {
+        artist_id,
+        filter,
+        more: false,
+    })
 }
 
 /// Follows or unfollows the artist of the open artist page, flipping the followed list at
@@ -1108,7 +1140,7 @@ pub fn toggle_condensed_lyrics(state: &mut AppState) {
 /// `R`: refresh whatever the active view shows (artist albums or the library lists).
 pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
     if state.ui.active_view == ActiveView::ArtistPage
-        && let Some(data) = state.data.artist_page_data.as_ref()
+        && let Some(data) = state.data.artist_page_data.as_mut()
     {
         if state.data.artist_albums_loading {
             state.ui.status_message =
@@ -1117,10 +1149,13 @@ pub fn refresh_view(state: &mut AppState) -> Option<AppEvent> {
                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
             return None;
         }
+        data.chips.clear();
+        let artist_id = data.artist_id.clone();
         state.data.artist_albums_loading = true;
         state.ui.status_message = Some("Refreshing artist albums...".to_string());
         return Some(AppEvent::RefreshArtistAlbums {
-            artist_id: data.artist_id.clone(),
+            artist_id,
+            filter: state.ui.artist_discography_filter,
         });
     }
     if state.ui.active_view == ActiveView::Library {
@@ -2285,20 +2320,28 @@ mod tests {
     }
 
     #[test]
-    fn discography_filter_narrows_the_visible_albums_and_resets_the_cursor() {
-        use crate::models::AlbumGroup;
-        let mut state = artist_page_with(&["t0"], 4);
+    fn discography_chips_show_known_rows_and_request_unknown_ones() {
+        use crate::models::DiscographyPage;
+        let mut state = artist_page_with(&["t0"], 2);
         if let Some(data) = state.data.artist_page_data.as_mut() {
-            data.discography = data.albums.clone();
-            for (album, group) in data.discography.iter_mut().zip([
-                AlbumGroup::Album,
-                AlbumGroup::Single,
-                AlbumGroup::Compilation,
-                AlbumGroup::AppearsOn,
-            ]) {
-                album.group = Some(group);
-            }
+            data.chips.insert(
+                DiscographyFilter::All,
+                DiscographyPage {
+                    albums: data.albums.clone(),
+                    has_more: true,
+                    total: 5,
+                },
+            );
+            data.chips.insert(
+                DiscographyFilter::Singles,
+                DiscographyPage {
+                    albums: vec![data.albums[1].clone()],
+                    has_more: false,
+                    total: 1,
+                },
+            );
         }
+        state.data.artist_albums_loading = false;
         state.ui.artist_page_album_index = 3;
         let names = |state: &AppState| -> Vec<String> {
             state
@@ -2310,13 +2353,49 @@ mod tests {
                 })
         };
 
-        set_discography_filter(&mut state, DiscographyFilter::Singles);
+        assert!(set_discography_filter(&mut state, DiscographyFilter::Singles).is_none());
         assert_eq!(names(&state), ["album-1"]);
         assert_eq!(state.ui.artist_page_album_index, 0);
-        set_discography_filter(&mut state, DiscographyFilter::Albums);
-        assert_eq!(names(&state), ["album-0", "album-2"]);
-        set_discography_filter(&mut state, DiscographyFilter::AppearsOn);
-        assert_eq!(names(&state), ["album-3"]);
+
+        assert!(matches!(
+            set_discography_filter(&mut state, DiscographyFilter::AppearsOn),
+            Some(AppEvent::LoadArtistAlbums {
+                filter: DiscographyFilter::AppearsOn,
+                more: false,
+                ..
+            })
+        ));
+        assert!(names(&state).is_empty());
+        assert!(state.data.artist_albums_loading);
+
+        state.data.artist_albums_loading = false;
+        assert!(set_discography_filter(&mut state, DiscographyFilter::All).is_none());
+        assert_eq!(names(&state), ["album-0", "album-1"]);
+    }
+
+    #[test]
+    fn the_load_more_row_asks_for_the_next_page_once() {
+        use crate::models::DiscographyPage;
+        let mut state = artist_page_with(&["t0"], 2);
+        state.data.artist_albums_loading = false;
+        assert!(load_more_artist_albums(&mut state).is_none());
+
+        if let Some(data) = state.data.artist_page_data.as_mut() {
+            data.chips.insert(
+                DiscographyFilter::All,
+                DiscographyPage {
+                    albums: data.albums.clone(),
+                    has_more: true,
+                    total: 5,
+                },
+            );
+        }
+        assert!(matches!(
+            activate_artist_page_row(&mut state, 3),
+            Some(AppEvent::LoadArtistAlbums { more: true, .. })
+        ));
+        assert!(state.data.artist_albums_loading);
+        assert!(load_more_artist_albums(&mut state).is_none());
     }
 
     #[test]

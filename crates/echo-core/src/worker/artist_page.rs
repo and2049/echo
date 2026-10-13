@@ -2,10 +2,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::mpsc;
 
-use crate::events::WorkerEvent;
+use crate::{events::WorkerEvent, models::DiscographyFilter};
 
 use super::{
-    api::client::{AlbumScope, ArtistAlbumsCachePolicy, ArtistAlbumsResponse, EchoSpotifyClient},
+    api::client::{ArtistAlbumsCachePolicy, EchoSpotifyClient},
     errors::artist_retry_after_secs,
 };
 
@@ -92,104 +92,97 @@ pub fn spawn_load_artist_page(
                 }
             });
         }
-        match api
-            .artist_albums_with_policy(
-                &artist_id,
-                ArtistAlbumsCachePolicy::UseCache,
-                AlbumScope::Full,
-            )
-            .await
-        {
-            Ok(response) => {
-                send_artist_albums_response(tx, artist_id, response).await;
-            }
-            Err(e) => {
-                send_artist_albums_error(tx, artist_id, e).await;
-            }
-        }
+        load_discography(
+            api,
+            tx,
+            artist_id,
+            DiscographyFilter::All,
+            ArtistAlbumsCachePolicy::UseCache,
+            false,
+        )
+        .await;
     });
+}
+
+pub fn spawn_load_artist_albums(
+    api_client: Option<&EchoSpotifyClient>,
+    tx: mpsc::Sender<WorkerEvent>,
+    artist_id: String,
+    filter: DiscographyFilter,
+    more: bool,
+) {
+    let Some(api) = api_client.cloned() else {
+        return;
+    };
+    tokio::spawn(load_discography(
+        api,
+        tx,
+        artist_id,
+        filter,
+        ArtistAlbumsCachePolicy::UseCache,
+        more,
+    ));
 }
 
 pub fn spawn_refresh_artist_albums(
     api_client: Option<&EchoSpotifyClient>,
     tx: mpsc::Sender<WorkerEvent>,
     artist_id: String,
+    filter: DiscographyFilter,
 ) {
     let Some(api) = api_client.cloned() else {
         return;
     };
+    tokio::spawn(load_discography(
+        api,
+        tx,
+        artist_id,
+        filter,
+        ArtistAlbumsCachePolicy::Refresh,
+        false,
+    ));
+}
 
-    tokio::spawn(async move {
-        match api
-            .artist_albums_with_policy(
-                &artist_id,
-                ArtistAlbumsCachePolicy::Refresh,
-                AlbumScope::Full,
-            )
-            .await
-        {
-            Ok(response) => {
-                send_artist_albums_response(tx, artist_id, response).await;
+async fn load_discography(
+    api: EchoSpotifyClient,
+    tx: mpsc::Sender<WorkerEvent>,
+    artist_id: String,
+    filter: DiscographyFilter,
+    policy: ArtistAlbumsCachePolicy,
+    more: bool,
+) {
+    let event = match api.discography_page(&artist_id, filter, policy, more).await {
+        Ok(Some(page)) => WorkerEvent::ArtistAlbumsLoaded {
+            artist_id,
+            filter,
+            page,
+        },
+        Ok(None) => WorkerEvent::ArtistAlbumsLoadFailed {
+            artist_id,
+            message: "refresh already in progress".to_string(),
+        },
+        Err(err) => {
+            // An empty chip still shows the cached releases under the failure message.
+            if !more && let Some(page) = api.stale_discography(&artist_id, filter).await {
+                let _ = tx
+                    .send(WorkerEvent::ArtistAlbumsLoaded {
+                        artist_id: artist_id.clone(),
+                        filter,
+                        page,
+                    })
+                    .await;
             }
-            Err(e) => {
-                send_artist_albums_error(tx, artist_id, e).await;
+            match artist_retry_after_secs(&err) {
+                Some(retry_after_secs) => WorkerEvent::ArtistAlbumsRateLimited {
+                    artist_id,
+                    retry_after_secs,
+                },
+                None => WorkerEvent::ArtistAlbumsLoadFailed {
+                    artist_id,
+                    message: err.to_string(),
+                },
             }
         }
-    });
-}
-
-async fn send_artist_albums_response(
-    tx: mpsc::Sender<WorkerEvent>,
-    artist_id: String,
-    response: ArtistAlbumsResponse,
-) {
-    let mut sent_albums = false;
-    if let Some(albums) = response.cached {
-        sent_albums = true;
-        let _ = tx
-            .send(WorkerEvent::ArtistAlbumsLoaded {
-                artist_id: artist_id.clone(),
-                albums,
-            })
-            .await;
-    }
-    if let Some(albums) = response.refreshed {
-        sent_albums = true;
-        let _ = tx
-            .send(WorkerEvent::ArtistAlbumsLoaded {
-                artist_id: artist_id.clone(),
-                albums,
-            })
-            .await;
-    }
-    if response.refresh_skipped && !sent_albums {
-        let _ = tx
-            .send(WorkerEvent::ArtistAlbumsLoadFailed {
-                artist_id,
-                message: "refresh already in progress".to_string(),
-            })
-            .await;
-    }
-}
-
-async fn send_artist_albums_error(
-    tx: mpsc::Sender<WorkerEvent>,
-    artist_id: String,
-    err: anyhow::Error,
-) {
-    if let Some(retry_after_secs) = artist_retry_after_secs(&err) {
-        let _ = tx
-            .send(WorkerEvent::ArtistAlbumsRateLimited {
-                artist_id,
-                retry_after_secs,
-            })
-            .await;
-    } else {
-        let _ = tx
-            .send(WorkerEvent::ArtistAlbumsLoadFailed {
-                artist_id,
-                message: err.to_string(),
-            })
-            .await;
-    }
+    };
+    let _ = tx.send(event).await;
 }

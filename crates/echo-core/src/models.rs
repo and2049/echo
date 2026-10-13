@@ -99,23 +99,6 @@ pub enum AlbumGroup {
     AppearsOn,
 }
 
-/// The artist credit Spotify gives various-artists compilations ("100 Hits - The 20s" and
-/// the like), which list every featured artist under `album_group: compilation`.
-pub const VARIOUS_ARTISTS: &str = "Various Artists";
-
-impl Album {
-    /// The group the discography chips sort this release under: a compilation credited to
-    /// Various Artists is a feature, not one of the artist's own records.
-    pub fn listing_group(&self) -> Option<AlbumGroup> {
-        match self.group {
-            Some(AlbumGroup::Compilation) if self.artists == VARIOUS_ARTISTS => {
-                Some(AlbumGroup::AppearsOn)
-            }
-            group => group,
-        }
-    }
-}
-
 impl AlbumGroup {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -128,9 +111,11 @@ impl AlbumGroup {
     }
 }
 
-/// The artist page's discography chips. `All` is the artist's own releases; features and
-/// compilations by others sit behind `AppearsOn` alone.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+/// The artist page's discography chips, each its own Spotify query. `All` is the artist's
+/// own albums and singles; compilations sit with the features behind `AppearsOn`, since
+/// nearly all of them are various-artists records and fetching them to sort locally cost
+/// more pages than the artist's own releases.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiscographyFilter {
     #[default]
@@ -161,46 +146,79 @@ impl DiscographyFilter {
         }
     }
 
-    pub fn matches(self, album: &Album) -> bool {
-        let group = album.listing_group();
+    /// The `include_groups` the chip asks Spotify for.
+    pub const fn groups(self) -> &'static str {
         match self {
-            Self::All => group != Some(AlbumGroup::AppearsOn),
-            Self::Albums => matches!(group, Some(AlbumGroup::Album | AlbumGroup::Compilation)),
-            Self::Singles => group == Some(AlbumGroup::Single),
-            Self::AppearsOn => group == Some(AlbumGroup::AppearsOn),
+            Self::All => "album,single",
+            Self::Albums => "album",
+            Self::Singles => "single",
+            Self::AppearsOn => "compilation,appears_on",
         }
     }
+
+    /// Whether a cached release belongs under the chip, mirroring [`Self::groups`].
+    pub fn matches(self, album: &Album) -> bool {
+        match self {
+            Self::All => matches!(album.group, Some(AlbumGroup::Album | AlbumGroup::Single)),
+            Self::Albums => album.group == Some(AlbumGroup::Album),
+            Self::Singles => album.group == Some(AlbumGroup::Single),
+            Self::AppearsOn => matches!(
+                album.group,
+                Some(AlbumGroup::Compilation | AlbumGroup::AppearsOn)
+            ),
+        }
+    }
+}
+
+/// One discography chip's rows: the pages fetched so far, whether Spotify has more, and the
+/// query's total for the header.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DiscographyPage {
+    pub albums: Vec<Album>,
+    pub has_more: bool,
+    pub total: usize,
 }
 
 #[cfg(test)]
 mod discography_tests {
     use super::*;
 
-    fn compilation(artists: &str) -> Album {
+    fn release(group: AlbumGroup) -> Album {
         Album {
-            id: "c".to_string(),
-            name: "Hits".to_string(),
-            artists: artists.to_string(),
+            id: "r".to_string(),
+            name: "Release".to_string(),
+            artists: "Artist".to_string(),
             image_url: None,
             thumb_url: None,
             release_year: "2026".to_string(),
             release_date: None,
-            track_count: Some(40),
-            group: Some(AlbumGroup::Compilation),
+            track_count: Some(10),
+            group: Some(group),
         }
     }
 
     #[test]
-    fn various_artists_compilations_count_as_appearances() {
-        let various = compilation(VARIOUS_ARTISTS);
-        assert!(DiscographyFilter::AppearsOn.matches(&various));
-        assert!(!DiscographyFilter::All.matches(&various));
-        assert!(!DiscographyFilter::Albums.matches(&various));
-
-        let own = compilation("Artist");
-        assert!(DiscographyFilter::All.matches(&own));
-        assert!(DiscographyFilter::Albums.matches(&own));
-        assert!(!DiscographyFilter::AppearsOn.matches(&own));
+    fn chips_match_the_groups_they_query() {
+        for filter in DiscographyFilter::ALL {
+            for group in [
+                AlbumGroup::Album,
+                AlbumGroup::Single,
+                AlbumGroup::Compilation,
+                AlbumGroup::AppearsOn,
+            ] {
+                let name = match group {
+                    AlbumGroup::Album => "album",
+                    AlbumGroup::Single => "single",
+                    AlbumGroup::Compilation => "compilation",
+                    AlbumGroup::AppearsOn => "appears_on",
+                };
+                assert_eq!(
+                    filter.matches(&release(group)),
+                    filter.groups().split(',').any(|g| g == name),
+                    "{filter:?} vs {name}"
+                );
+            }
+        }
     }
 }
 
@@ -1100,30 +1118,33 @@ pub struct Lyrics {
     pub lines: Vec<LyricLine>,
 }
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArtistPageData {
     pub artist_id: String,
     pub artist_name: String,
     #[serde(default)]
     pub image_url: Option<String>,
-    /// In the persistent cache: every release fetched for the artist. In app state: the rows
-    /// the active [`DiscographyFilter`] leaves visible, which every cursor and row index
-    /// addresses; the full list lives in `discography`.
+    /// In the persistent cache: the artist's own albums and singles, walked in full by the
+    /// What's New feed. In app state: the rows of the active [`DiscographyFilter`], which
+    /// every cursor and row index addresses; each chip's pages live in `chips`.
     pub albums: Vec<Album>,
-    /// Persistent cache only: whether `albums` covers compilations and appearances too, or
-    /// just the artist's own albums and singles (what the What's New feed fetches).
-    #[serde(default = "default_true")]
-    pub albums_complete: bool,
     /// Session-only: never written to the persistent artist-page cache (whose single
     /// `fetched_at` tracks album freshness), so persisted entries deserialize it empty.
     #[serde(default, skip_serializing)]
     pub top_tracks: Vec<Track>,
     #[serde(default, skip_serializing)]
-    pub discography: Vec<Album>,
+    pub chips: std::collections::HashMap<DiscographyFilter, DiscographyPage>,
+}
+
+impl ArtistPageData {
+    pub fn has_more(&self, filter: DiscographyFilter) -> bool {
+        self.chips.get(&filter).is_some_and(|page| page.has_more)
+    }
+
+    /// The album rows on screen plus the Load more row while the chip has pages left.
+    pub fn album_row_count(&self, filter: DiscographyFilter) -> usize {
+        self.albums.len() + usize::from(self.has_more(filter))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

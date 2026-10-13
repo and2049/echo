@@ -4,7 +4,7 @@ use crate::{
     app::{self, AppState},
     events::WorkerEvent,
     image_tasks,
-    models::Album,
+    models::{DiscographyFilter, DiscographyPage},
 };
 
 use super::misc::set_timed_status;
@@ -30,9 +30,8 @@ pub fn handle_page_opened(
             artist_name,
             image_url: artist_image_url.clone(),
             albums: Vec::new(),
-            albums_complete: false,
             top_tracks: Vec::new(),
-            discography: Vec::new(),
+            chips: Default::default(),
         });
     } else if let Some(data) = state.data.artist_page_data.as_mut()
         && data.image_url.is_none()
@@ -53,32 +52,28 @@ pub fn handle_page_opened(
     }
 }
 
-pub fn handle_albums_loaded(state: &mut AppState, artist_id: String, albums: Vec<Album>) {
-    if let Some(data) = state.data.artist_page_data.as_mut()
-        && data.artist_id == artist_id
-    {
-        data.discography = albums;
-        apply_discography_filter(state);
-        state.data.artist_albums_loading = false;
-        state.data.artist_page_loading = false;
-    }
-}
-
-/// Rebuilds the visible album rows from the discography under the active filter and keeps the
-/// cursor on a row. The desktop cursor counts the Popular rows first, so it clamps against the
-/// combined length.
-pub fn apply_discography_filter(state: &mut AppState) {
+/// Stores a chip's rows; when it is the chip on screen they become the visible album rows.
+/// The desktop cursor counts the Popular rows first, so it clamps against the combined length.
+pub fn handle_albums_loaded(
+    state: &mut AppState,
+    artist_id: String,
+    filter: DiscographyFilter,
+    page: DiscographyPage,
+) {
+    let active = state.ui.artist_discography_filter;
     let Some(data) = state.data.artist_page_data.as_mut() else {
         return;
     };
-    let filter = state.ui.artist_discography_filter;
-    data.albums = data
-        .discography
-        .iter()
-        .filter(|album| filter.matches(album))
-        .cloned()
-        .collect();
-    let rows = data.top_tracks.len() + data.albums.len();
+    if data.artist_id != artist_id {
+        return;
+    }
+    if filter == active {
+        data.albums = page.albums.clone();
+        state.data.artist_albums_loading = false;
+        state.data.artist_page_loading = false;
+    }
+    data.chips.insert(filter, page);
+    let rows = data.top_tracks.len() + data.album_row_count(active);
     state.ui.artist_page_album_index = state.ui.artist_page_album_index.min(rows.saturating_sub(1));
 }
 
@@ -177,17 +172,8 @@ mod tests {
         handle_albums_loaded(
             &mut state,
             "stale".to_string(),
-            vec![Album {
-                id: "album".to_string(),
-                name: "Album".to_string(),
-                artists: "Artist".to_string(),
-                image_url: None,
-                thumb_url: None,
-                release_year: "2024".to_string(),
-                release_date: None,
-                track_count: None,
-                group: None,
-            }],
+            DiscographyFilter::All,
+            one_album_page(),
         );
 
         assert_eq!(
@@ -210,6 +196,52 @@ mod tests {
                 .map(|data| data.albums.len()),
             Some(0)
         );
+    }
+
+    fn one_album_page() -> DiscographyPage {
+        DiscographyPage {
+            albums: vec![crate::models::Album {
+                id: "album".to_string(),
+                name: "Album".to_string(),
+                artists: "Artist".to_string(),
+                image_url: None,
+                thumb_url: None,
+                release_year: "2024".to_string(),
+                release_date: None,
+                track_count: None,
+                group: None,
+            }],
+            has_more: true,
+            total: 2,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_chip_off_screen_is_stored_without_replacing_the_visible_rows() {
+        let mut state = AppState::new();
+        state.begin_artist_page_load("artist".to_string(), "Artist".to_string(), None);
+
+        handle_albums_loaded(
+            &mut state,
+            "artist".to_string(),
+            DiscographyFilter::Singles,
+            one_album_page(),
+        );
+        let data = state.data.artist_page_data.as_ref().unwrap();
+        assert!(data.albums.is_empty());
+        assert!(data.chips.contains_key(&DiscographyFilter::Singles));
+        assert!(state.data.artist_albums_loading);
+
+        handle_albums_loaded(
+            &mut state,
+            "artist".to_string(),
+            DiscographyFilter::All,
+            one_album_page(),
+        );
+        let data = state.data.artist_page_data.as_ref().unwrap();
+        assert_eq!(data.albums.len(), 1);
+        assert_eq!(data.album_row_count(DiscographyFilter::All), 2);
+        assert!(!state.data.artist_albums_loading);
     }
 
     fn sample_track(id: &str) -> crate::models::Track {
@@ -263,17 +295,8 @@ mod tests {
         handle_albums_loaded(
             &mut state,
             "artist".to_string(),
-            vec![Album {
-                id: "album".to_string(),
-                name: "Album".to_string(),
-                artists: "Artist".to_string(),
-                image_url: None,
-                thumb_url: None,
-                release_year: "2024".to_string(),
-                release_date: None,
-                track_count: None,
-                group: None,
-            }],
+            DiscographyFilter::All,
+            one_album_page(),
         );
 
         assert_eq!(
