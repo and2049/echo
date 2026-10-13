@@ -18,9 +18,9 @@ pub(crate) mod panel_layout;
 mod playlist_edit;
 mod search;
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, Div, Hsla, MouseButton, MouseDownEvent,
-    SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px, relative, svg,
-    uniform_list,
+    Animation, AnimationExt, AnyElement, App, Context, Div, Entity, Hsla, MouseButton,
+    MouseDownEvent, SharedString, Stateful, Window, canvas, div, ease_out_quint, prelude::*, px,
+    relative, svg, uniform_list,
 };
 use menu_placement::{MenuAnchor, menu_bounds, menu_placement};
 pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
@@ -163,49 +163,71 @@ pub(crate) struct DraggedPlaylist {
 
 /// Drag payload for track rows: the whole selection when the dragged row is part of it, else
 /// that one row. `source_context` names the tracklist the rows came from, so a drop back into
-/// the same list reorders instead of copying.
+/// the same list reorders instead of copying. `name`, `artist` and `cover` feed the preview
+/// chip: the dragged row's cover with the track's title and artist, or the song count.
 pub(crate) struct DraggedTracks {
     pub tracks: Vec<echo_core::models::Track>,
     pub from_row: usize,
     pub source_context: Option<String>,
     pub name: SharedString,
+    pub artist: SharedString,
+    pub cover: Option<std::sync::Arc<gpui::RenderImage>>,
+}
+
+/// The payload for dragging one `track` from outside any track list (the playback bar, an
+/// artist's Popular rows).
+pub(crate) fn single_drag_payload(
+    track: &echo_core::models::Track,
+    cover: Option<std::sync::Arc<gpui::RenderImage>>,
+) -> DraggedTracks {
+    DraggedTracks {
+        tracks: vec![track.clone()],
+        from_row: 0,
+        source_context: None,
+        name: SharedString::from(track.name.clone()),
+        artist: SharedString::from(track.artist.clone()),
+        cover,
+    }
 }
 
 /// The payload for dragging row `ix` of `view`: every selected track in display order when the
 /// row is one of them, otherwise just `track`.
 fn drag_payload(
-    state: &echo_core::app::AppState,
+    this: &mut EchoApp,
     view: ActiveView,
     ix: usize,
     track: &echo_core::models::Track,
 ) -> DraggedTracks {
+    let cover = thumb_image(this, track.image_url.as_deref(), DRAG_COVER_EDGE);
+    let mut payload = single_drag_payload(track, cover);
+    let state = &this.state;
     let rows = if state.ui.active_view == view {
         echo_core::intent::selected_rows(state)
     } else {
         Vec::new()
     };
-    let (tracks, name) = if rows.len() > 1 && rows.contains(&ix) {
-        let tracks = echo_core::intent::selected_tracks(state);
-        let name = tr(state, "desktop.drag_songs").replace("{}", &tracks.len().to_string());
-        (tracks, SharedString::from(name))
-    } else {
-        (vec![track.clone()], SharedString::from(track.name.clone()))
-    };
-    DraggedTracks {
-        tracks,
-        from_row: ix,
-        source_context: (view == ActiveView::TrackList)
-            .then(|| {
-                state
-                    .data
-                    .active_tracklist_context
-                    .as_ref()
-                    .map(|c| c.id.clone())
-            })
-            .flatten(),
-        name,
+    if rows.len() > 1 && rows.contains(&ix) {
+        payload.tracks = echo_core::intent::selected_tracks(state);
+        payload.name = tr(state, "desktop.drag_songs")
+            .replace("{}", &payload.tracks.len().to_string())
+            .into();
+        payload.artist = SharedString::default();
     }
+    payload.from_row = ix;
+    payload.source_context = (view == ActiveView::TrackList)
+        .then(|| {
+            state
+                .data
+                .active_tracklist_context
+                .as_ref()
+                .map(|c| c.id.clone())
+        })
+        .flatten();
+    payload
 }
+
+/// A queue row cloned out of the state: its row index and either a header or `(track index, track)`.
+type OwnedQueueRow = (usize, Result<(usize, echo_core::models::Track), String>);
 
 /// The picked rows of `view`, when it is the one on screen.
 fn picked_in(
@@ -224,26 +246,99 @@ fn is_pick_click(event: &gpui::ClickEvent) -> bool {
     modifiers.secondary() || modifiers.control
 }
 
-/// The chip that follows the cursor while a playlist is dragged.
-pub(crate) struct DragPreview {
-    name: SharedString,
+const DRAG_COVER_EDGE: f32 = 32.0;
+const DRAG_CHIP_MAX_WIDTH: f32 = 320.0;
+
+/// The colours of the chip that follows the cursor during a drag.
+#[derive(Clone, Copy)]
+pub(crate) struct DragColors {
     fg: gpui::Hsla,
+    muted: gpui::Hsla,
     bg: gpui::Hsla,
     border: gpui::Hsla,
 }
 
+impl DragColors {
+    pub(crate) fn resolve(theme: &echo_core::theme::ResolvedTheme) -> Self {
+        Self {
+            fg: theme.text.gpui(WINDOW_FG()),
+            muted: theme.text_muted.gpui(WINDOW_FG()),
+            bg: theme.surface.gpui(crate::theme::PANEL_BG()),
+            border: DesktopPalette::resolve(theme).menu_border,
+        }
+    }
+}
+
+/// The chip that follows the cursor while something is dragged: a name, or for tracks the
+/// cover with title and artist like a shortened track row.
+pub(crate) struct DragPreview {
+    name: SharedString,
+    artist: SharedString,
+    cover: Option<std::sync::Arc<gpui::RenderImage>>,
+    colors: DragColors,
+}
+
+impl DragPreview {
+    fn label(name: SharedString, colors: DragColors) -> Self {
+        Self {
+            name,
+            artist: SharedString::default(),
+            cover: None,
+            colors,
+        }
+    }
+}
+
+/// The preview entity for a track drag, for `on_drag`.
+pub(crate) fn track_drag_preview(
+    drag: &DraggedTracks,
+    colors: DragColors,
+    cx: &mut App,
+) -> Entity<DragPreview> {
+    let preview = DragPreview {
+        name: drag.name.clone(),
+        artist: drag.artist.clone(),
+        cover: drag.cover.clone(),
+        colors,
+    };
+    cx.new(|_| preview)
+}
+
 impl gpui::Render for DragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = self.colors;
+        let line = |text: SharedString| {
+            div()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .overflow_hidden()
+                .child(text)
+        };
         div()
-            .px_3()
+            .max_w(px(DRAG_CHIP_MAX_WIDTH))
+            .px_2()
             .py_1()
             .rounded_md()
-            .bg(self.bg)
+            .bg(colors.bg)
             .border_1()
-            .border_color(self.border)
-            .text_sm()
-            .text_color(self.fg)
-            .child(self.name.clone())
+            .border_color(colors.border)
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .when_some(self.cover.clone(), |el, image| {
+                el.child(cover_image(image, DRAG_COVER_EDGE, 4.0))
+            })
+            .child(
+                div()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(line(self.name.clone()).text_sm().text_color(colors.fg))
+                    .when(!self.artist.is_empty(), |el| {
+                        el.child(line(self.artist.clone()).text_xs().text_color(colors.muted))
+                    }),
+            )
     }
 }
 
@@ -893,7 +988,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                     } else {
                         palette.row_hover
                     };
-                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
+                    let drag_colors = DragColors::resolve(theme);
                     let tab = this.state.ui.active_library_tab;
                     let selected = this.state.ui.selected_playlist_index;
                     let visual = visual_range_in(&this.state, ActiveView::Library);
@@ -1062,17 +1157,11 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     )
                                 })
                                 .when_some(drag_source, |el, (id, name)| {
-                                    let border = palette.menu_border;
                                     el.on_drag(
                                         DraggedPlaylist { id, name },
                                         move |drag, _offset, _window, cx| {
                                             let name = drag.name.clone();
-                                            cx.new(|_| DragPreview {
-                                                name,
-                                                fg,
-                                                bg: panel_bg,
-                                                border,
-                                            })
+                                            cx.new(|_| DragPreview::label(name, drag_colors))
                                         },
                                     )
                                 })
@@ -2269,7 +2358,7 @@ fn track_list(
                             .is_some_and(|context| {
                                 context.can_modify_playlist(this.state.data.user_id.as_ref())
                             });
-                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
+                    let drag_colors = DragColors::resolve(theme);
 
                     let rows = range
                         .map(|ix| {
@@ -2278,25 +2367,15 @@ fn track_list(
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
                             let is_playing = playing_id.as_deref() == Some(track.id.as_str());
                             let title_color = if is_playing { accent } else { fg };
-                            let payload = drag_payload(&this.state, ActiveView::TrackList, ix, &track);
-                            let border = palette.menu_border;
+                            let payload = drag_payload(this, ActiveView::TrackList, ix, &track);
                             let over_context = context_id.clone();
                             let drop_context = context_id.clone();
 
                             pill_row(ix, TRACK_PILL, row_marked(ix, selected, visual, &picked), selected_bg, palette.row_hover, |row| {
                                 row.gap_3().group("track-row")
-                                .on_drag(
-                                    payload,
-                                    move |drag, _offset, _window, cx| {
-                                        let name = drag.name.clone();
-                                        cx.new(|_| DragPreview {
-                                            name,
-                                            fg,
-                                            bg: panel_bg,
-                                            border,
-                                        })
-                                    },
-                                )
+                                .on_drag(payload, move |drag, _offset, _window, cx| {
+                                    track_drag_preview(drag, drag_colors, cx)
+                                })
                                 .when(reorderable, |row| {
                                     row.drag_over::<DraggedTracks>(move |style, drag, _, _| {
                                         if drag.source_context == over_context {
@@ -2569,30 +2648,39 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                     let visual = visual_range_in(&this.state, ActiveView::Queue);
                     let picked = picked_in(&this.state, ActiveView::Queue);
                     let has_manual = !this.state.data.manual_queue.is_empty();
-                    let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
-                    let border = palette.menu_border;
-                    let rows = this.state.queue_rows();
+                    let drag_colors = DragColors::resolve(theme);
+                    // Cloned out first: the rows borrow the state the drag payload below mutates.
+                    let rows: Vec<OwnedQueueRow> = {
+                        let rows = this.state.queue_rows();
+                        range
+                            .map(|row_ix| {
+                                let row = match &rows[row_ix] {
+                                    QueueRow::Header(text) => Err(text.clone()),
+                                    QueueRow::Track(ix, track) => Ok((*ix, (*track).clone())),
+                                };
+                                (row_ix, row)
+                            })
+                            .collect()
+                    };
 
-                    range
-                        .map(|row_ix| match &rows[row_ix] {
-                            QueueRow::Header(text) => queue_header(
-                                text.clone(),
+                    rows.into_iter()
+                        .map(|(row_ix, row)| match row {
+                            Err(text) => queue_header(
+                                text,
                                 (row_ix == 0 && has_manual).then(|| tr(&this.state, "actions.clear_queue")),
                                 COMPACT_PILL,
                                 fg,
                                 muted,
                                 cx,
                             ),
-                            QueueRow::Track(ix, track) => {
-                            let (ix, track) = (*ix, *track);
+                            Ok((ix, track)) => {
                             let is_liked = this.state.data.liked_tracks.contains(&track.id);
-                            let payload = drag_payload(&this.state, ActiveView::Queue, ix, track);
+                            let payload = drag_payload(this, ActiveView::Queue, ix, &track);
 
                             pill_row(ix, COMPACT_PILL, row_marked(ix, selected, visual, &picked), selected_bg, palette.row_hover, |row| {
                                 row.gap_3()
                                 .on_drag(payload, move |drag, _offset, _window, cx| {
-                                    let name = drag.name.clone();
-                                    cx.new(|_| DragPreview { name, fg, bg: panel_bg, border })
+                                    track_drag_preview(drag, drag_colors, cx)
                                 })
                                 .on_click(cx.listener(move |this: &mut EchoApp, event: &gpui::ClickEvent, _window, cx| {
                                     if event.modifiers().shift {
@@ -2761,29 +2849,25 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                 let selected = this.state.ui.selected_queue_index;
                 let visual = visual_range_in(&this.state, ActiveView::Queue);
                 let picked = picked_in(&this.state, ActiveView::Queue);
-                let panel_bg = theme.surface.gpui(crate::theme::PANEL_BG());
-                let border = palette.menu_border;
-                let ago = |played_at: &str| {
-                    echo_core::context_details::format_added_at_with(
-                        std::time::SystemTime::now().into(),
-                        played_at,
-                        &|key| tr(&this.state, key).to_string(),
-                    )
-                };
-
-                range
+                let drag_colors = DragColors::resolve(theme);
+                let now = std::time::SystemTime::now().into();
+                // Cloned out first: the records borrow the state the drag payload below mutates.
+                let rows: Vec<(usize, echo_core::models::Track, String)> = range
                     .filter_map(|ix| {
-                        this.state
-                            .data
-                            .recent_plays
-                            .get(ix)
-                            .map(|record| (ix, record))
+                        let record = this.state.data.recent_plays.get(ix)?;
+                        let played = echo_core::context_details::format_added_at_with(
+                            now,
+                            &record.played_at,
+                            &|key| tr(&this.state, key).to_string(),
+                        );
+                        Some((ix, record.track.clone(), played))
                     })
-                    .map(|(ix, record)| {
-                        let track = &record.track;
+                    .collect();
+
+                rows.into_iter()
+                    .map(|(ix, track, played)| {
                         let is_liked = this.state.data.liked_tracks.contains(&track.id);
-                        let played = ago(&record.played_at);
-                        let payload = drag_payload(&this.state, ActiveView::Queue, ix, track);
+                        let payload = drag_payload(this, ActiveView::Queue, ix, &track);
 
                         pill_row(
                             ix,
@@ -2794,13 +2878,7 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                             |row| {
                                 row.gap_3()
                                     .on_drag(payload, move |drag, _offset, _window, cx| {
-                                        let name = drag.name.clone();
-                                        cx.new(|_| DragPreview {
-                                            name,
-                                            fg,
-                                            bg: panel_bg,
-                                            border,
-                                        })
+                                        track_drag_preview(drag, drag_colors, cx)
                                     })
                                     .on_click(cx.listener(
                                         move |this: &mut EchoApp,
@@ -3127,6 +3205,22 @@ pub(crate) fn cover_image(
     .size(px(edge))
 }
 
+/// The cached thumbnail for `url` at `edge`, requesting it when missing.
+fn thumb_image(
+    this: &mut EchoApp,
+    url: Option<&str>,
+    edge: f32,
+) -> Option<std::sync::Arc<gpui::RenderImage>> {
+    let url = url?;
+    let tier = tier_for_edge(edge);
+    this.state.ui.thumbnails.request(url, tier);
+    let artwork = match this.state.ui.thumbnails.get(url, tier) {
+        Some(ThumbState::Ready { artwork }) => artwork.clone(),
+        _ => return None,
+    };
+    this.images.get(&artwork)
+}
+
 fn thumb_element(
     this: &mut EchoApp,
     url: Option<&str>,
@@ -3134,15 +3228,7 @@ fn thumb_element(
     round: bool,
     muted: gpui::Hsla,
 ) -> AnyElement {
-    let artwork = url.and_then(|url| {
-        let tier = tier_for_edge(edge);
-        this.state.ui.thumbnails.request(url, tier);
-        match this.state.ui.thumbnails.get(url, tier) {
-            Some(ThumbState::Ready { artwork }) => Some(artwork.clone()),
-            _ => None,
-        }
-    });
-    match artwork.and_then(|artwork| this.images.get(&artwork)) {
+    match thumb_image(this, url, edge) {
         Some(image) => {
             let radius = if round {
                 edge / 2.0
@@ -4058,6 +4144,7 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                             let muted = theme.text_muted.gpui(WINDOW_FG());
                             let accent = theme.primary.gpui(WINDOW_FG());
                             let palette = DesktopPalette::resolve(theme);
+                            let drag_colors = DragColors::resolve(theme);
                             let selected_bg = palette.row_selected;
                             // Combined index space: Popular rows come first, so `ix` compares
                             // against the page cursor directly.
@@ -4089,6 +4176,8 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                         false,
                                         muted,
                                     );
+                                    let cover = thumb_image(this, track.image_url.as_deref(), DRAG_COVER_EDGE);
+                                    let payload = single_drag_payload(&track, cover);
                                     pill_row(
                                         ix,
                                         LIST_PILL,
@@ -4097,6 +4186,9 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                         palette.row_hover,
                                         |row| {
                                             row.gap_3()
+                                        .on_drag(payload, move |drag, _offset, _window, cx| {
+                                            track_drag_preview(drag, drag_colors, cx)
+                                        })
                                         .on_click(cx.listener(
                                             move |this: &mut EchoApp,
                                                   event: &gpui::ClickEvent,

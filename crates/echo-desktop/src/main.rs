@@ -2918,6 +2918,9 @@ impl EchoApp {
             .or(self.state.playback.previous_track_image.as_ref())
             .cloned()
             .and_then(|artwork| self.images.get(&artwork));
+        let drag_colors = views::DragColors::resolve(&self.state.ui.active_theme);
+        let drag_payload = echo_core::history::playing_track(&self.state)
+            .map(|track| views::single_drag_payload(&track, cover.clone()));
 
         // The condensed-lyrics line shows the current lyric accented with the next one below,
         // riding the same playback tick that advances the seek bar.
@@ -2983,12 +2986,18 @@ impl EchoApp {
                     .h(px(PLAYBACK_ROW_HEIGHT))
                     .child(
                         div()
+                            .id("playing-card")
                             .flex_none()
                             .w(px(PLAYBACK_SIDE_WIDTH))
                             .flex()
                             .flex_row()
                             .items_center()
                             .gap_2()
+                            .when_some(drag_payload, |el, payload| {
+                                el.on_drag(payload, move |drag, _offset, _window, cx| {
+                                    views::track_drag_preview(drag, drag_colors, cx)
+                                })
+                            })
                             .child(match cover {
                                 Some(image) => {
                                     views::cover_image(image, 36.0, 6.0).into_any_element()

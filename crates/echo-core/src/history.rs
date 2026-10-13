@@ -140,7 +140,8 @@ pub fn observe(state: &mut AppState, now: Instant) {
     }
 }
 
-fn playing_track(state: &AppState) -> Option<Track> {
+/// The playing track as a [`Track`], for history records and drags out of the playback bar.
+pub fn playing_track(state: &AppState) -> Option<Track> {
     let playback = &state.playback;
     Some(Track {
         explicit: false,
@@ -274,6 +275,25 @@ mod tests {
             observe(state, now);
         }
         now
+    }
+
+    #[test]
+    fn playing_track_mirrors_the_playback_fields() {
+        assert!(playing_track(&AppState::new()).is_none());
+        let mut state = playing("a", 200_000);
+        state.playback.playing_track_artist = "artist".to_string();
+        state.playback.playing_track_image_url = Some("img".to_string());
+        let track = playing_track(&state).unwrap();
+        assert_eq!(
+            (
+                track.id.as_str(),
+                track.name.as_str(),
+                track.artist.as_str(),
+                track.duration_ms,
+                track.image_url.as_deref(),
+            ),
+            ("a", "a", "artist", 200_000, Some("img"))
+        );
     }
 
     #[test]

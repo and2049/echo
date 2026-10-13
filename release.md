@@ -7,3 +7,4 @@
  - The search bar has equal padding above and below, with a divider separating it from scrolling content
  - Opening the library sidebar gives the main content a rounded top-left corner; collapsing it restores the straight top divider
  - Client-drawn window corners align with the outer outline, including the titlebar and immersive backdrop
+ - The playing song in the playback bar and an artist's Popular tracks can be dragged into a sidebar playlist; dragged tracks show their cover, title and artist instead of just the name
