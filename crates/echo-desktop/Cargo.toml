@@ -39,6 +39,14 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "a8cae3bd
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.24"
 
+# Recolours the Dock icon for the active theme (src/dock_icon.rs). objc2 0.6 / AppKit 0.3 are
+# the versions gpui already links, so these add no second copy.
+[target.'cfg(target_os = "macos")'.dependencies]
+echo-icon = { path = "../echo-icon" }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Not ksni's default "tokio" feature: it switches zbus to tokio for the whole build, and
 # GPUI's own zbus users (accessibility, portals, notifications) then panic with "no reactor
@@ -46,6 +54,7 @@ tray-icon = "0.24"
 ksni = { version = "0.3", default-features = false, features = ["async-io"] }
 
 [build-dependencies]
+echo-icon = { path = "../echo-icon" }
 embed-resource = "3"
 
 # Brand is styled all-lowercase everywhere, including installers and shortcuts.

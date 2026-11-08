@@ -12,6 +12,7 @@
 
 mod assets;
 mod backdrop;
+mod dock_icon;
 mod images;
 mod playlist_ui;
 mod single_instance;
@@ -259,6 +260,7 @@ pub(crate) struct EchoApp {
     update_banner_dismissed: bool,
     restarting: bool,
     launch_executable: Option<std::path::PathBuf>,
+    dock_icon: dock_icon::DockIcon,
     pub(crate) help_open: bool,
     pub(crate) help_scroll: ScrollHandle,
     pub(crate) context_menu: Option<ContextMenuState>,
@@ -611,6 +613,7 @@ impl EchoApp {
             update_banner_dismissed: false,
             restarting: false,
             launch_executable: std::env::current_exe().ok(),
+            dock_icon: Default::default(),
             help_open: false,
             help_scroll: ScrollHandle::new(),
             context_menu: None,
@@ -3567,6 +3570,9 @@ impl EchoApp {
 
 impl Render for EchoApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Every theme change re-renders the app, so this is the one place that catches them
+        // all (startup, the theme picker, a hot-reloaded theme file).
+        self.dock_icon.sync(&self.state.ui.active_theme, cx);
         let theme = &self.state.ui.active_theme;
         let bg = theme.background.gpui(WINDOW_BG());
         let muted = theme.text_muted.gpui(WINDOW_FG());

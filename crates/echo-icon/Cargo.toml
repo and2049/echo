@@ -1,0 +1,13 @@
+[package]
+name = "echo-icon"
+version.workspace = true
+edition.workspace = true
+
+# The app icon as code: a sound wave with two fading echoes, recoloured from a theme's base
+# colors. echo-desktop's build script renders the bundled icon files with it, and on macOS the
+# running app renders the Dock icon for the active theme.
+
+[dependencies]
+# Same 0.46 line gpui already pulls in, so this adds no second renderer to the tree. No
+# default features: the icon has no text or embedded raster images.
+resvg = { version = "0.46", default-features = false }
