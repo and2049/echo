@@ -1,6 +1,8 @@
 # Derived colors below the base nine are generated — after changing a base
 # color, refresh them with: python themes/generate_desktop.py
 
+mode = "dark" # Which appearance lists this theme: dark or light.
+
 primary = "#ffc59e" # Accent: active tabs, the seek bar, links, the playing-track marker.
 
 secondary = "#befaed" # Second accent: liked-track hearts, the condensed lyric line's neighbours.

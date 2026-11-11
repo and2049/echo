@@ -1,0 +1,46 @@
+# Derived colors below the base nine are generated — after changing a base
+# color, refresh them with: python themes/generate_desktop.py
+
+mode = "light" # Which appearance lists this theme: dark or light.
+
+primary = "#7a8f0a" # Accent: active tabs, the seek bar, links, the playing-track marker.
+
+secondary = "#8da101" # Second accent: liked-track hearts, the condensed lyric line's neighbours.
+
+background = "#f4f0d9" # The window background.
+
+surface = "#fdf6e3" # Elevated panels: menus, modals, popovers, the titlebar.
+
+text = "#5c6a72" # Main text.
+
+text_muted = "#939f91" # Secondary text: artist/album columns, hints, timestamps, inactive icons.
+
+highlight_bg = "#8da101" # Selection source color; selected rows derive their fill from this.
+
+highlight_fg = "#fdf6e3" # Unused by the desktop app.
+
+error = "#f85552" # Errors: failure messages and the audio-device banner.
+
+row_selected = "#dfe0ae" # Any selected row/chip over the window: lists, sidebar, the command-bar suggestion (highlight_bg 20% over background).
+
+row_hover = "#eae8d2" # Any hovered row over the window: sidebar, lists, tabs, links, range pills (text_muted 10% over background).
+
+wash = "#e5e4ce" # Muted fills: placeholder cover boxes, small button hovers, disabled buttons (text_muted 15% over background).
+
+border = "#d7d8c3" # Window-level borders, pill outlines and the seek/volume bar track (text_muted 30% over background).
+
+drag_target = "#dcddb0" # Drag feedback: drop targets while dragging and the sidebar resize handle (primary 20% over background).
+
+like_dim = "#dadca3" # The faint heart on a not-liked track; hovering shows secondary itself (secondary 25% over background).
+
+error_wash = "#f5d9c5" # The audio-device failure banner fill (error 15% over background).
+
+menu_hover = "#f2eddb" # Any hovered row, button or titlebar caption in menus and modals (text_muted 10% over surface).
+
+menu_selected = "#e7e5b6" # Any selected menu/picker/suggestion row (highlight_bg 20% over surface).
+
+menu_border = "#d8d8c6" # Borders in and around menus, modals, popovers and drag chips (text_muted 35% over surface).
+
+danger_border = "#faa69a" # Confirm-prompt destructive button border (error 50% over surface).
+
+danger_wash = "#fce3d2" # That button's hover fill (error 12% over surface).

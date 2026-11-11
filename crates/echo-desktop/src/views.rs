@@ -5235,13 +5235,23 @@ pub fn immersive_view(
 /// The theme picker: every loaded theme by name, the active one accented.
 /// Theme names in the order the picker lists them. `EchoApp::theme_modal_index` indexes into
 /// this, so keyboard selection and rendering must both go through here or the two drift.
-pub fn sorted_theme_names(state: &echo_core::app::AppState) -> Vec<String> {
-    let mut names: Vec<String> = state.ui.themes.keys().cloned().collect();
-    names.sort();
-    names
+/// The picker's rows for one appearance: its themes, each with its sibling in the other.
+pub fn theme_rows(
+    state: &echo_core::app::AppState,
+    scheme: echo_core::config::Scheme,
+) -> Vec<echo_core::theme::ThemeRow> {
+    echo_core::theme::themes_for(&state.ui.themes, scheme)
 }
 
+/// The theme picker.
+///
+/// A theme is chosen per appearance. The header sets the mode (auto / dark / light); the
+/// list holds the themes of one appearance, so a pinned mode shows just its own and `Auto`
+/// adds a tab for each. A dark/light pair is one row naming both, the listed one first in
+/// weight; a theme with no sibling is only in its own appearance's list.
 pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
+    use echo_core::config::{Scheme, ThemeMode};
+
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
     let fg = theme.text.gpui(WINDOW_FG());
@@ -5249,9 +5259,109 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let surface = theme.surface.gpui(crate::theme::PANEL_BG());
     let accent = theme.primary.gpui(WINDOW_FG());
 
-    let names = sorted_theme_names(&app.state);
-    let active = app.state.ui.library_config.active_theme.clone();
+    let config = &app.state.ui.library_config;
+    let mode = config.theme_mode.unwrap_or(ThemeMode::Auto);
+    let tab = app.theme_modal_tab;
+    let system = app.state.ui.system_scheme;
+    let rows = theme_rows(&app.state, tab);
+    let chosen = echo_core::theme::selected_name(config, &app.state.ui.themes, tab);
     let selected = app.theme_modal_index;
+
+    // Background, accent and second accent of each listed theme. Choosing does not preview,
+    // and under `Auto` one of the two lists is never on screen, so this is how they compare.
+    let swatches: Vec<[gpui::Hsla; 3]> = rows
+        .iter()
+        .map(|row| {
+            let resolved = app
+                .state
+                .ui
+                .themes
+                .get(&row.name)
+                .map(echo_core::theme::ResolvedTheme::from_theme);
+            match resolved {
+                Some(t) => [
+                    t.background.gpui(crate::theme::WINDOW_BG()),
+                    t.primary.gpui(WINDOW_FG()),
+                    t.secondary.gpui(WINDOW_FG()),
+                ],
+                None => [surface; 3],
+            }
+        })
+        .collect();
+
+    let mode_label =
+        |mode: ThemeMode| tr(&app.state, &format!("desktop.theme_mode.{}", mode.name()));
+    let scheme_label =
+        |scheme: Scheme| tr(&app.state, &format!("desktop.theme_mode.{}", scheme.name()));
+
+    let mode_control = div()
+        .flex()
+        .flex_row()
+        .gap_1()
+        .children(ThemeMode::ALL.into_iter().map(|option| {
+            let active = option == mode;
+            div()
+                .id(SharedString::from(format!("theme-mode-{}", option.name())))
+                .px_2()
+                .py_0p5()
+                .rounded_md()
+                .border_1()
+                .border_color(if active { accent } else { palette.menu_border })
+                .text_xs()
+                .text_color(if active { accent } else { muted })
+                .cursor_pointer()
+                .hover(move |style| style.bg(palette.menu_hover))
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    this.set_theme_mode(option, cx);
+                }))
+                .child(mode_label(option))
+        }));
+
+    // Under `Auto` only: one tab per appearance, and a note on the list that is not showing
+    // right now.
+    let tabs = (mode == ThemeMode::Auto).then(|| {
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .pb_1()
+            .children([Scheme::Dark, Scheme::Light].into_iter().map(|scheme| {
+                let active = scheme == tab;
+                div()
+                    .id(SharedString::from(format!("theme-tab-{}", scheme.name())))
+                    .text_sm()
+                    .text_color(if active { fg } else { muted })
+                    .when(active, |el| el.font_weight(gpui::FontWeight::BOLD))
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        this.show_theme_list(scheme, cx);
+                    }))
+                    .child(scheme_label(scheme))
+            }))
+            .when(tab != system, |el| {
+                el.child(
+                    div()
+                        .flex_1()
+                        .text_xs()
+                        .text_color(muted)
+                        .text_right()
+                        .child(tr(
+                            &app.state,
+                            &format!("desktop.theme_used_when.{}", tab.name()),
+                        )),
+                )
+            })
+    });
+
+    let hint = tr(
+        &app.state,
+        if mode == ThemeMode::Auto {
+            "desktop.theme_hint_auto"
+        } else {
+            "desktop.theme_hint"
+        },
+    );
 
     div()
         .id("theme-backdrop")
@@ -5269,8 +5379,8 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
         .child(
             div()
                 .id("theme-panel")
-                .w(px(320.0))
-                .max_h(px(420.0))
+                .w(px(340.0))
+                .max_h(px(480.0))
                 .rounded_lg()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -5284,11 +5394,20 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .child(
                     div()
                         .pb_2()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(tr(&app.state, "desktop.theme")),
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(muted)
+                                .child(tr(&app.state, "desktop.theme")),
+                        )
+                        .child(mode_control),
                 )
-                .child(if names.is_empty() {
+                .when_some(tabs, |el, tabs| el.child(tabs))
+                .child(if rows.is_empty() {
                     div()
                         .py_4()
                         .text_sm()
@@ -5303,41 +5422,78 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .max_h(px(340.0))
                         .overflow_y_scroll()
                         .track_scroll(&app.theme_modal_scroll)
-                        .children(names.into_iter().enumerate().map(|(ix, name)| {
-                            let is_active = active.as_deref() == Some(name.as_str());
-                            let is_selected = ix == selected;
-                            let color = if is_active { accent } else { fg };
-                            let clicked = name.clone();
-                            div()
-                                .id(ix)
-                                .px_2()
-                                .py_1()
-                                .rounded_md()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .justify_between()
-                                .text_sm()
-                                .text_color(color)
-                                .when(is_selected, |el| el.bg(palette.menu_selected))
-                                .when(!is_selected, |el| {
-                                    el.hover(move |style| style.bg(palette.menu_hover))
-                                })
-                                .cursor_pointer()
-                                .on_click(cx.listener(
-                                    move |this: &mut EchoApp, _event, _window, cx| {
-                                        echo_core::intent::apply_theme(&mut this.state, &clicked);
-                                        this.theme_modal_open = false;
-                                        cx.notify();
-                                    },
-                                ))
-                                .child(SharedString::from(name))
-                                .when(is_active, |el| {
-                                    el.child(div().flex_none().text_color(accent).child("●"))
-                                })
-                        }))
+                        .children(rows.into_iter().zip(swatches).enumerate().map(
+                            |(ix, (row, swatch))| {
+                                let is_chosen = row.name == chosen;
+                                let is_selected = ix == selected;
+                                let clicked = row.name.clone();
+                                div()
+                                    .id(ix)
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_md()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_2()
+                                    .text_sm()
+                                    .when(is_selected, |el| el.bg(palette.menu_selected))
+                                    .when(!is_selected, |el| {
+                                        el.hover(move |style| style.bg(palette.menu_hover))
+                                    })
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(
+                                        move |this: &mut EchoApp, _event, _window, cx| {
+                                            echo_core::intent::apply_theme(
+                                                &mut this.state,
+                                                &clicked,
+                                            );
+                                            this.theme_modal_open = false;
+                                            cx.notify();
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_row()
+                                            .gap_1()
+                                            .min_w_0()
+                                            .child(
+                                                div()
+                                                    .text_color(if is_chosen { accent } else { fg })
+                                                    .child(SharedString::from(row.name)),
+                                            )
+                                            .when_some(row.sibling, |el, sibling| {
+                                                el.child(div().text_color(muted).child(
+                                                    SharedString::from(format!("/ {sibling}")),
+                                                ))
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .flex()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap_1()
+                                            .when(is_chosen, |el| {
+                                                el.child(div().pr_1().text_color(accent).child("●"))
+                                            })
+                                            .children(swatch.into_iter().map(|color| {
+                                                div()
+                                                    .size(px(10.0))
+                                                    .rounded_sm()
+                                                    .border_1()
+                                                    .border_color(palette.menu_border)
+                                                    .bg(color)
+                                            })),
+                                    )
+                            },
+                        ))
                         .into_any_element()
-                }),
+                })
+                .child(div().pt_2().text_xs().text_color(muted).child(hint)),
         )
 }
 
@@ -5656,6 +5812,28 @@ pub fn settings_modal(
                 ("English".into(), "lang en".into(), language == "en"),
                 ("简体".into(), "lang zh-CN".into(), language == "zh-CN"),
             ],
+            cx,
+        ),
+    );
+
+    let theme_mode = config
+        .theme_mode
+        .unwrap_or(echo_core::config::ThemeMode::Auto);
+    let mode_row = row(
+        s("desktop.settings.mode"),
+        Some(s("desktop.settings.mode_desc")),
+        choices(
+            "mode",
+            echo_core::config::ThemeMode::ALL
+                .into_iter()
+                .map(|mode| {
+                    (
+                        s(&format!("desktop.theme_mode.{}", mode.name())),
+                        format!("mode {}", mode.name()),
+                        theme_mode == mode,
+                    )
+                })
+                .collect(),
             cx,
         ),
     );
@@ -6159,6 +6337,7 @@ pub fn settings_modal(
                                 .into_any_element(),
                         ))
                         .child(language_row)
+                        .child(mode_row)
                         .child(pixelate_row)
                         .child(backdrop_row)
                         .when(!cfg!(target_os = "macos"), |el| {

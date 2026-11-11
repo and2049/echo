@@ -184,7 +184,8 @@ The `:` command bar accepts the following:
 - `:mute`: Mute playback or restore the previous volume.
 - `:open [spotify-url-or-uri]`: Open a Spotify track, album, artist, or playlist. With no argument, read it from the clipboard.
 - `:relative <on|off|toggle>`: Configure Vim-style relative line numbers in track lists.
-- `:theme <theme_name>`: Switch application theme.
+- `:theme <theme_name>`: Choose a theme for the appearance it belongs to (dark or light).
+- `:mode <auto|dark|light>`: Use the dark theme, the light theme, or follow the system (also in Settings and the theme picker).
 - `:lang <en|zh|zh-CN>`: Switch language.
 - `:album`: Jump to the album of the currently selected track.
 - `:queue`: Open the Queue view.
@@ -205,7 +206,13 @@ Track sorting and navigation operate on already-loaded data. They do not issue S
 
 ## Themes
 
-Themes live in `themes/*.toml` as a flat list: nine base colors followed by the twelve derived colors the app paints, every one explicit with a comment saying what it drives. Edit values freely, or change base colors and run `python themes/generate_desktop.py` to recompute the derived ones. Derived keys are optional — a missing key is computed with the formula named in its comment, and a `[desktop]` table is also accepted for overrides. To iterate visually, `python tools/theme-preview/serve.py` opens a live mock of the desktop window in the browser that repaints on every save — no rebuild needed. Colors can be edited in either direction: change the toml in your editor, or click any color in the preview's legend to adjust it with a picker that writes straight back to the file (its "recompute derived" button re-runs the generator for the current theme).
+echo keeps one theme for dark and one for light, and a mode that decides which is on screen: `dark`, `light`, or `auto`, which follows the system on macOS, Windows and Linux and switches as it changes. The two are chosen independently, so any dark theme can go with any light one. Press `t` for the picker: its header sets the mode, the list shows the themes of one appearance, and under `auto` a tab for each (`tab` switches, `m` cycles the mode).
+
+Several themes come as a dark/light pair under two names — `echo` / `chime`, `nimbus` / `cloud`, `tide` / `wave`, `everforest` / `glade`, `gruvbox` / `parchment` — and share a row in the picker. The rest (`noir`, `sea_foam`, `tokyo_night`; `pink`, `vanilla`) belong to one appearance and are listed only there.
+
+A theme says which appearance it belongs to with `mode = "dark"` or `mode = "light"`. Without it, a name ending in `-dark` or `-light` decides (and pairs `mine-dark` with `mine-light`), otherwise the brightness of the background.
+
+Themes live in `themes/*.toml` as a flat list: nine base colors followed by the twelve derived colors the app paints, every one explicit with a comment saying what it drives. Edit values freely, or change base colors and run `python themes/generate_desktop.py themes/<name>.toml` to recompute that theme's derived ones. Derived keys are optional — a missing key is computed with the formula named in its comment, and a `[desktop]` table is also accepted for overrides. To iterate visually, `python tools/theme-preview/serve.py` opens a live mock of the desktop window in the browser that repaints on every save — no rebuild needed. Colors can be edited in either direction: change the toml in your editor, or click any color in the preview's legend to adjust it with a picker that writes straight back to the file (its "recompute derived" button re-runs the generator for the current theme).
 
 ## Audio Quality
 

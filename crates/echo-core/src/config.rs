@@ -392,8 +392,21 @@ pub struct LibraryConfig {
     /// keep their API order after the listed ones.
     #[serde(default)]
     pub playlist_order: Vec<String>,
+    /// The theme in effect when the config was last saved. Since themes are chosen per
+    /// appearance (`dark_theme` / `light_theme`), this is only read to migrate configs written
+    /// before those existed; it is still written so an older echo opens with the same look.
     #[serde(default)]
     pub active_theme: Option<String>,
+    /// Dark, light, or follow the system. `None` until the first run with this setting, when
+    /// it is filled in from `active_theme` (see `theme::migrate_selection`).
+    #[serde(default)]
+    pub theme_mode: Option<ThemeMode>,
+    /// The theme used while the appearance is dark.
+    #[serde(default)]
+    pub dark_theme: Option<String>,
+    /// The theme used while the appearance is light.
+    #[serde(default)]
+    pub light_theme: Option<String>,
     #[serde(default = "default_track_index_base")]
     pub track_index_base: isize,
     #[serde(default = "default_language")]
@@ -511,6 +524,9 @@ impl Default for LibraryConfig {
             sort_mode: SortMode::default(),
             playlist_order: vec![],
             active_theme: None,
+            theme_mode: None,
+            dark_theme: None,
+            light_theme: None,
             track_index_base: 1,
             language: "en".to_string(),
             cover_img_pixels: 0,
@@ -557,6 +573,73 @@ pub enum SortMode {
 pub enum RightPanel {
     Queue,
     Lyrics,
+}
+
+/// Whether a theme is a dark or a light one, and which of the two the app is showing.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Scheme {
+    Dark,
+    Light,
+}
+
+impl Scheme {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "dark" => Some(Self::Dark),
+            "light" => Some(Self::Light),
+            _ => None,
+        }
+    }
+
+    pub fn other(self) -> Self {
+        match self {
+            Self::Dark => Self::Light,
+            Self::Light => Self::Dark,
+        }
+    }
+}
+
+/// The appearance setting: pinned to one scheme, or following the system's.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    Auto,
+    Dark,
+    Light,
+}
+
+impl ThemeMode {
+    pub const ALL: [ThemeMode; 3] = [Self::Auto, Self::Dark, Self::Light];
+
+    /// The name saved in the config and typed after `:mode`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Dark => "dark",
+            Self::Light => "light",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.name() == name)
+    }
+
+    /// The scheme this mode shows when the system is in `system`.
+    pub fn scheme(self, system: Scheme) -> Scheme {
+        match self {
+            Self::Auto => system,
+            Self::Dark => Scheme::Dark,
+            Self::Light => Scheme::Light,
+        }
+    }
 }
 
 /// The backdrop modes the desktop app's immersive view can paint; the desktop crate owns the
@@ -757,6 +840,11 @@ impl AppConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Theme {
+    /// `"dark"` or `"light"`: which appearance the theme belongs to. Themes without it are
+    /// sorted by a `-dark` / `-light` file-name suffix, then by how bright the background is
+    /// (see `theme::scheme_of`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub primary: String,
     pub secondary: String,
     pub background: String,
@@ -788,6 +876,7 @@ fn default_surface() -> String {
 impl Default for Theme {
     fn default() -> Self {
         Self {
+            mode: None,
             primary: "Cyan".to_string(),
             secondary: "Yellow".to_string(),
             background: "Reset".to_string(),

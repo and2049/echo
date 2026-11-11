@@ -22,6 +22,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("sort <mode>", "Sort the library, or the loaded track list"),
     ("index <n>", "Track numbering base (0 or 1)"),
     ("theme <name>", "Switch theme"),
+    (
+        "mode <auto|dark|light>",
+        "Dark or light appearance, or follow the system",
+    ),
     ("search <query>", "Search Spotify and local tracks"),
     ("queue", "Open the queue"),
     ("clearqueue", "Clear the manually queued tracks"),
@@ -118,6 +122,12 @@ fn generate_command_suggestions(state: &AppState) -> Vec<String> {
                 .map(String::from)
                 .collect(),
             "backdrop" => crate::config::BackdropMode::ALL
+                .into_iter()
+                .map(|mode| mode.name())
+                .filter(|o| o.starts_with(arg_str))
+                .map(String::from)
+                .collect(),
+            "mode" => crate::config::ThemeMode::ALL
                 .into_iter()
                 .map(|mode| mode.name())
                 .filter(|o| o.starts_with(arg_str))
@@ -437,6 +447,13 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     None => set_status(state, format!("Usage: backdrop <{names}>")),
                 }
             }
+            "mode" => match args.next().and_then(crate::config::ThemeMode::parse) {
+                Some(mode) => {
+                    crate::intent::set_theme_mode(state, mode);
+                    set_status(state, format!("Mode: {}", mode.name()));
+                }
+                None => set_status(state, "Usage: mode <auto|dark|light>".to_string()),
+            },
             "newfolder" => {
                 let name = args.collect::<Vec<&str>>().join(" ");
                 if !name.is_empty() {
@@ -533,7 +550,17 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
             "theme" => {
                 if let Some(theme_name) = args.next() {
                     if crate::intent::apply_theme(state, theme_name) {
-                        state.ui.status_message = Some(format!("Theme: {}", theme_name));
+                        // Under `auto`, a theme for the appearance the system is not in is
+                        // saved without showing, so say when it will.
+                        let shown =
+                            state.ui.library_config.active_theme.as_deref() == Some(theme_name);
+                        state.ui.status_message = Some(if shown {
+                            format!("Theme: {}", theme_name)
+                        } else {
+                            let scheme =
+                                crate::theme::scheme_of(theme_name, &state.ui.themes[theme_name]);
+                            format!("Theme: {} (used in {} mode)", theme_name, scheme.name())
+                        });
                     } else {
                         let mut theme_names: Vec<&String> = state.ui.themes.keys().collect();
                         theme_names.sort();
@@ -893,6 +920,44 @@ mod tests {
     fn submit_command(state: &mut AppState, command: &str) -> Option<AppEvent> {
         state.ui.command_buffer = command.to_string();
         submit(state)
+    }
+
+    #[test]
+    fn mode_and_theme_choose_per_appearance() {
+        use crate::config::{Scheme, ThemeMode};
+        let mut state = AppState::new();
+        let active = |state: &AppState| state.ui.library_config.active_theme.clone().unwrap();
+
+        // Pinned dark, a light theme is picked: the pin follows so the choice shows.
+        submit_command(&mut state, "mode dark");
+        submit_command(&mut state, "theme noir");
+        assert_eq!(active(&state), "noir");
+        submit_command(&mut state, "theme cloud");
+        assert_eq!(state.ui.library_config.theme_mode, Some(ThemeMode::Light));
+        assert_eq!(active(&state), "cloud");
+        // The dark choice was kept for when dark comes back.
+        submit_command(&mut state, "mode dark");
+        assert_eq!(active(&state), "noir");
+
+        // Auto follows the system, and a theme for the other appearance waits its turn.
+        submit_command(&mut state, "mode auto");
+        crate::intent::set_system_scheme(&mut state, Scheme::Light);
+        assert_eq!(active(&state), "cloud");
+        submit_command(&mut state, "theme gruvbox");
+        assert_eq!(state.ui.library_config.theme_mode, Some(ThemeMode::Auto));
+        assert_eq!(active(&state), "cloud");
+        assert!(
+            state
+                .ui
+                .status_message
+                .as_deref()
+                .is_some_and(|message| message.contains("dark mode"))
+        );
+        assert!(crate::intent::set_system_scheme(&mut state, Scheme::Dark));
+        assert_eq!(active(&state), "gruvbox");
+
+        submit_command(&mut state, "mode sepia");
+        assert_eq!(state.ui.library_config.theme_mode, Some(ThemeMode::Auto));
     }
 
     #[test]

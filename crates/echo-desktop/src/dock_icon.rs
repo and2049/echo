@@ -9,8 +9,10 @@
 //!   pasting an icon in Finder's Get Info), so the Dock, Finder and Launchpad keep the themed
 //!   icon after quitting.
 //!
-//! Both are redrawn on launch from whatever theme is active then, so a theme changed in the
-//! config file while the app was closed is picked up on the next start. A theme added to
+//! Both are redrawn whenever the theme on screen changes — picked in the app, or swapped by
+//! the system going dark or light under the `auto` mode — and on launch from whatever theme
+//! is active then, so a change made in the config file while the app was closed is picked up
+//! on the next start. A theme added to
 //! `themes/` (or a user's own) gets a matching icon with no extra assets.
 //!
 //! Other platforms are a no-op: Windows reads its taskbar icon from the executable's
@@ -167,10 +169,40 @@ fn persist(
         );
         return;
     }
+    announce_icon_change(bundle);
     if let Some(marker) = marker {
         if let Some(dir) = marker.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(marker, stamp);
+    }
+}
+
+/// Makes the Dock and Finder drop the icon they cached for the bundle.
+///
+/// While echo runs, the Dock shows the live icon; on quit it goes back to the bundle's, which
+/// it reads through the system icon cache. Replacing an icon the bundle already carries
+/// rewrites `Icon\r` in place and leaves the bundle's own modification date alone, so that
+/// cache kept serving the icon from launch: a theme picked in the app only reached the Dock
+/// on the launch after. Bumping the date and re-registering the bundle with Launch Services
+/// is what an app update does, and what the cache watches for.
+#[cfg(target_os = "macos")]
+fn announce_icon_change(bundle: &std::path::Path) {
+    use objc2_foundation::{NSString, NSURL};
+
+    #[link(name = "CoreServices", kind = "framework")]
+    unsafe extern "C" {
+        /// `OSStatus LSRegisterURL(CFURLRef inURL, Boolean inUpdate)`.
+        fn LSRegisterURL(url: *const std::ffi::c_void, update: u8) -> i32;
+    }
+
+    if let Ok(dir) = std::fs::File::open(bundle) {
+        let _ = dir.set_modified(std::time::SystemTime::now());
+    }
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&bundle.to_string_lossy()));
+    // SAFETY: NSURL is toll-free bridged to CFURL, and `url` outlives the call.
+    let status = unsafe { LSRegisterURL(objc2::rc::Retained::as_ptr(&url).cast(), 1) };
+    if status != 0 {
+        eprintln!("echo: Launch Services did not re-register the app icon ({status})");
     }
 }

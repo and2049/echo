@@ -45,7 +45,7 @@ tray-icon = "0.24"
 echo-icon = { path = "../echo-icon" }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString", "NSURL"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Not ksni's default "tokio" feature: it switches zbus to tokio for the whole build, and

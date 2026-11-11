@@ -150,6 +150,17 @@
     "close_panel": "Close panel",
     "theme": "Theme",
     "no_themes": "No themes found",
+    "theme_mode": {
+      "auto": "Auto",
+      "dark": "Dark",
+      "light": "Light"
+    },
+    "theme_used_when": {
+      "dark": "Used when the system is dark",
+      "light": "Used when the system is light"
+    },
+    "theme_hint": "m: switch mode",
+    "theme_hint_auto": "tab: dark / light list · m: switch mode",
     "nothing_playing": "Nothing playing",
     "playing_from": "Playing from {}",
     "playing_from_album": "an album",
@@ -237,6 +248,8 @@
       "bins": "Visualizer bands",
       "pixelate": "Cover pixelation",
       "pixelate_desc": "Retro 8-bit album art; Off is full resolution",
+      "mode": "Mode",
+      "mode_desc": "Auto follows the system; pick a theme for each with t",
       "backdrop": "Immersive backdrop",
       "backdrop_desc": "Behind the fullscreen now-playing view",
       "backdrops": {

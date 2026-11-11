@@ -6,6 +6,7 @@
 //! whatever comes back over `app_tx`.
 
 use crate::app::{ActiveView, AppMode, AppState, SearchTab};
+use crate::config::{Scheme, ThemeMode};
 use crate::events::AppEvent;
 mod playlist;
 use crate::models::{
@@ -941,15 +942,59 @@ pub fn submit_setup_credentials(state: &mut AppState) -> Option<AppEvent> {
     Some(AppEvent::StartAuth)
 }
 
-/// Applies a loaded theme by name and persists the choice. False if the name is unknown.
+/// Re-resolves the theme on screen from the appearance mode, the system's appearance and the
+/// theme chosen for each. Call after changing any of the three.
+pub fn refresh_theme(state: &mut AppState) {
+    let config = &state.ui.library_config;
+    let scheme = crate::theme::active_scheme(config, state.ui.system_scheme);
+    let name = crate::theme::selected_name(config, &state.ui.themes, scheme);
+    if let Some(theme) = state.ui.themes.get(&name) {
+        state.ui.active_theme = crate::theme::ResolvedTheme::from_theme(theme);
+    }
+    state.ui.library_config.active_theme = Some(name);
+}
+
+/// Chooses a loaded theme for the appearance it belongs to and persists the choice. False if
+/// the name is unknown.
+///
+/// With the mode pinned to the other appearance, the pin moves to the theme's own so the
+/// choice shows. Under `Auto` the mode stays: a theme for the appearance the system is not
+/// in is saved for when it is.
 pub fn apply_theme(state: &mut AppState, name: &str) -> bool {
     let Some(theme) = state.ui.themes.get(name) else {
         return false;
     };
-    state.ui.active_theme = crate::theme::ResolvedTheme::from_theme(theme);
-    state.ui.library_config.active_theme = Some(name.to_string());
+    let scheme = crate::theme::scheme_of(name, theme);
+    let config = &mut state.ui.library_config;
+    match scheme {
+        Scheme::Dark => config.dark_theme = Some(name.to_string()),
+        Scheme::Light => config.light_theme = Some(name.to_string()),
+    }
+    if config.theme_mode != Some(ThemeMode::Auto) {
+        config.theme_mode = Some(match scheme {
+            Scheme::Dark => ThemeMode::Dark,
+            Scheme::Light => ThemeMode::Light,
+        });
+    }
+    refresh_theme(state);
     state.save_library_config();
     true
+}
+
+/// Sets the appearance mode (dark, light, or follow the system) and persists it.
+pub fn set_theme_mode(state: &mut AppState, mode: ThemeMode) {
+    state.ui.library_config.theme_mode = Some(mode);
+    refresh_theme(state);
+    state.save_library_config();
+}
+
+/// Records the system's appearance, switching themes when the mode follows it. True when
+/// the theme on screen changed.
+pub fn set_system_scheme(state: &mut AppState, scheme: Scheme) -> bool {
+    state.ui.system_scheme = scheme;
+    let before = state.ui.library_config.active_theme.clone();
+    refresh_theme(state);
+    state.ui.library_config.active_theme != before
 }
 
 // Browse nodes: generated lists that fetch on first use.

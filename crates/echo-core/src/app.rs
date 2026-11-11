@@ -70,6 +70,9 @@ pub struct UIState {
     // Theme / display
     pub themes: HashMap<String, Theme>,
     pub active_theme: ResolvedTheme,
+    /// The system's appearance as the frontend last reported it; what `Auto` follows. Dark
+    /// until a frontend says otherwise.
+    pub system_scheme: crate::config::Scheme,
     pub vis_bins: usize,
     pub condensed_lyrics_enabled: bool,
     // Setup
@@ -143,6 +146,7 @@ impl UIState {
             audio_output_error: None,
             themes,
             active_theme: ResolvedTheme::from_theme(&active_theme_config),
+            system_scheme: crate::config::Scheme::Dark,
             vis_bins,
             condensed_lyrics_enabled,
             setup_client_id: String::new(),
@@ -555,18 +559,20 @@ impl AppState {
             fallback
         });
 
-        let default_theme = crate::config::bundled_default_theme();
-        // "default" was the pre-workspace alias for the bundled echo theme; map configs that
-        // still reference it.
-        let active_theme_name = match config.library.active_theme.clone() {
-            Some(name) if name != "default" => name,
-            _ => "echo".to_string(),
-        };
+        let mut library_config = config.library.clone();
+        crate::theme::migrate_selection(&mut library_config, &themes);
+        // The system's appearance is not known yet; the frontend reports it before its first
+        // frame (`intent::set_system_scheme`), so dark here is only a starting point.
+        let active_theme_name = crate::theme::selected_name(
+            &library_config,
+            &themes,
+            crate::theme::active_scheme(&library_config, crate::config::Scheme::Dark),
+        );
         let active_theme_config = themes
             .get(&active_theme_name)
-            .or_else(|| themes.get("echo"))
-            .unwrap_or(&default_theme)
-            .clone();
+            .cloned()
+            .unwrap_or_else(crate::config::bundled_default_theme);
+        library_config.active_theme = Some(active_theme_name);
 
         Self {
             ui: UIState::new(
@@ -575,7 +581,7 @@ impl AppState {
                 vis_bins,
                 themes,
                 active_theme_config,
-                config.library.clone(),
+                library_config,
             ),
             playback: PlaybackState {
                 volume: config.library.volume,

@@ -118,6 +118,9 @@ DERIVED = [
 ]
 
 
+MODE_COMMENT = "Which appearance lists this theme: dark or light."
+
+
 def regenerate(path):
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
 
@@ -137,6 +140,11 @@ def regenerate(path):
         "# color, refresh them with: python themes/generate_desktop.py",
         "",
     ]
+    # Not a color: which appearance the theme belongs to. Carried over untouched.
+    mode = raw.get("mode")
+    if isinstance(mode, str):
+        lines.append(f'mode = "{mode}" # {MODE_COMMENT}')
+        lines.append("")
     for key, _fallback, _reset, comment in BASE:
         value = raw.get(key)
         if value is None:
@@ -153,7 +161,9 @@ def regenerate(path):
 
 def main():
     here = Path(__file__).parent
-    for path in sorted(here.glob("themes.bak/*.toml")):
+    # Name theme files to regenerate just those: python themes/generate_desktop.py themes/nimbus.toml
+    paths = [Path(arg) for arg in sys.argv[1:]] or sorted(here.glob("themes.bak/*.toml"))
+    for path in paths:
         regenerate(path)
 
 

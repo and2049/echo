@@ -243,6 +243,12 @@ pub(crate) struct EchoApp {
     pub(crate) immersive: bool,
     pub(crate) backdrops: backdrop::BackdropCache,
     pub(crate) theme_modal_index: usize,
+    /// Which appearance's themes the picker lists. Pinned modes list their own; under
+    /// `Auto` either can be shown, to choose a theme for each.
+    pub(crate) theme_modal_tab: echo_core::config::Scheme,
+    /// Keeps the system-appearance observer of the current window alive; replaced when the
+    /// window reopens from the tray.
+    _appearance: Option<gpui::Subscription>,
     pub(crate) sort_menu_open: bool,
     pub(crate) page_menu: Option<(gpui::Point<Pixels>, usize)>,
     pub(crate) sort_menu_top: f32,
@@ -596,6 +602,8 @@ impl EchoApp {
             immersive: false,
             backdrops: backdrop::BackdropCache::default(),
             theme_modal_index: 0,
+            theme_modal_tab: echo_core::config::Scheme::Dark,
+            _appearance: None,
             sort_menu_open: false,
             page_menu: None,
             sort_menu_top: 96.0,
@@ -641,6 +649,13 @@ impl EchoApp {
     fn attach(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.titlebar_should_move = false;
         window.focus(&self.focus_handle, cx);
+        // Read here, before the window's first frame, so `Auto` never flashes the wrong
+        // theme; the observer then follows the system while this window is up. A window
+        // reopened from the tray re-reads it, covering a switch made while it was closed.
+        self.sync_system_appearance(window.appearance(), cx);
+        self._appearance = Some(cx.observe_window_appearance(window, |this, window, cx| {
+            this.sync_system_appearance(window.appearance(), cx)
+        }));
         let this = cx.entity();
         window.on_window_should_close(cx, move |window, cx| {
             this.update(cx, |this: &mut EchoApp, cx| {
@@ -720,7 +735,7 @@ impl EchoApp {
             return self.state.data.devices.len();
         }
         if self.theme_modal_open {
-            return views::sorted_theme_names(&self.state).len();
+            return views::theme_rows(&self.state, self.theme_modal_tab).len();
         }
         if let Some(menu) = self.track_menu.as_ref() {
             // The flyout takes over navigation while it is open, exactly like a nested list.
@@ -1024,8 +1039,10 @@ impl EchoApp {
             let index = self.state.ui.selected_device_index;
             echo_core::intent::transfer_to_device(&mut self.state, index)
         } else if self.theme_modal_open {
-            if let Some(name) = views::sorted_theme_names(&self.state).get(self.theme_modal_index) {
-                echo_core::intent::apply_theme(&mut self.state, name);
+            if let Some(row) =
+                views::theme_rows(&self.state, self.theme_modal_tab).get(self.theme_modal_index)
+            {
+                echo_core::intent::apply_theme(&mut self.state, &row.name);
             }
             self.theme_modal_open = false;
             None
@@ -1155,19 +1172,77 @@ impl EchoApp {
     fn toggle_themes(&mut self, cx: &mut Context<Self>) {
         self.theme_modal_open = !self.theme_modal_open;
         if self.theme_modal_open {
-            // Open on the theme that is already applied, so j/k start from where the user is.
-            let active = self.state.ui.library_config.active_theme.clone();
-            self.theme_modal_index = active
-                .and_then(|name| {
-                    views::sorted_theme_names(&self.state)
-                        .iter()
-                        .position(|n| *n == name)
-                })
-                .unwrap_or(0);
-            self.theme_modal_scroll
-                .scroll_to_item(self.theme_modal_index);
+            // Open on the appearance in use and the theme chosen for it, so j/k start from
+            // where the user is.
+            self.show_theme_list(self.active_scheme(), cx);
         }
         cx.notify();
+    }
+
+    /// Tells the core which appearance the system is in; under `Auto` that swaps the theme.
+    fn sync_system_appearance(
+        &mut self,
+        appearance: gpui::WindowAppearance,
+        cx: &mut Context<Self>,
+    ) {
+        use echo_core::config::Scheme;
+        use gpui::WindowAppearance::*;
+        let scheme = match appearance {
+            Dark | VibrantDark => Scheme::Dark,
+            Light | VibrantLight => Scheme::Light,
+        };
+        if echo_core::intent::set_system_scheme(&mut self.state, scheme) {
+            // An open picker under `Auto` keeps the list the user is looking at.
+            cx.notify();
+        }
+    }
+
+    /// Shows one appearance's themes in the picker, with the cursor on the one chosen for it.
+    pub(crate) fn show_theme_list(
+        &mut self,
+        scheme: echo_core::config::Scheme,
+        cx: &mut Context<Self>,
+    ) {
+        self.theme_modal_tab = scheme;
+        let chosen = echo_core::theme::selected_name(
+            &self.state.ui.library_config,
+            &self.state.ui.themes,
+            scheme,
+        );
+        self.theme_modal_index = views::theme_rows(&self.state, scheme)
+            .iter()
+            .position(|row| row.name == chosen)
+            .unwrap_or(0);
+        self.theme_modal_scroll
+            .scroll_to_item(self.theme_modal_index);
+        cx.notify();
+    }
+
+    /// The appearance in effect right now: the pinned one, or the system's under `Auto`.
+    fn active_scheme(&self) -> echo_core::config::Scheme {
+        echo_core::theme::active_scheme(&self.state.ui.library_config, self.state.ui.system_scheme)
+    }
+
+    /// The picker's mode control: sets dark / light / auto and lists the appearance now on
+    /// screen.
+    pub(crate) fn set_theme_mode(
+        &mut self,
+        mode: echo_core::config::ThemeMode,
+        cx: &mut Context<Self>,
+    ) {
+        echo_core::intent::set_theme_mode(&mut self.state, mode);
+        self.show_theme_list(self.active_scheme(), cx);
+    }
+
+    /// `m` in the picker: auto → dark → light → auto.
+    fn cycle_theme_mode(&mut self, cx: &mut Context<Self>) {
+        use echo_core::config::ThemeMode;
+        let next = match self.state.ui.library_config.theme_mode {
+            Some(ThemeMode::Dark) => ThemeMode::Light,
+            Some(ThemeMode::Light) => ThemeMode::Auto,
+            _ => ThemeMode::Dark,
+        };
+        self.set_theme_mode(next, cx);
     }
 
     /// Escape / `h` / backspace: close whatever is topmost, else go back, checking modals first.
@@ -2272,6 +2347,11 @@ impl EchoApp {
     }
 
     fn toggle_pin(&mut self, cx: &mut Context<Self>) {
+        if self.theme_modal_open {
+            // `m` is the mode key while the theme picker is up.
+            self.cycle_theme_mode(cx);
+            return;
+        }
         echo_core::intent::toggle_pin_selected(&mut self.state);
         cx.notify();
     }
@@ -2308,6 +2388,13 @@ impl EchoApp {
     /// Playlists and Albums.
     fn cycle_tab(&mut self, cx: &mut Context<Self>) {
         self.state.ui.pending_d_press = false;
+        if self.theme_modal_open {
+            // Under `Auto` the picker has a dark and a light list; a pinned mode has one.
+            if self.state.ui.library_config.theme_mode == Some(echo_core::config::ThemeMode::Auto) {
+                self.show_theme_list(self.theme_modal_tab.other(), cx);
+            }
+            return;
+        }
         match self.state.ui.active_view {
             ActiveView::SearchResults => {
                 self.state.ui.active_search_tab = match self.state.ui.active_search_tab {
