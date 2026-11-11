@@ -133,6 +133,8 @@ pub enum WorkerEvent {
     },
     UserIdentityLoaded(String),
     PlaylistsLoaded(Vec<Playlist>),
+    /// The Spotify rootlist, which carries the library's playlist folders.
+    SpotifyRootlistLoaded(Vec<crate::models::RootlistEntry>),
     PlaylistDetailsUpdated {
         id: String,
         name: String,

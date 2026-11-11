@@ -268,6 +268,8 @@ impl PlaybackState {
 
 pub struct DataState {
     pub playlists: Vec<Playlist>,
+    /// The Spotify rootlist, which says which playlists sit in which Spotify folder.
+    pub spotify_rootlist: Vec<crate::models::RootlistEntry>,
     pub local_library: LocalLibrary,
     pub local_playlists: LocalPlaylists,
     pub library_view: Vec<crate::models::LibraryNode>,
@@ -311,6 +313,7 @@ impl DataState {
     fn new() -> Self {
         Self {
             playlists: Vec::new(),
+            spotify_rootlist: Vec::new(),
             local_library: crate::config::AppConfig::load_local_library(),
             local_playlists: crate::config::AppConfig::load_local_playlists(),
             library_view: Vec::new(),
@@ -831,14 +834,65 @@ impl AppState {
             }
         }
 
-        // 2. Folders
+        // 2. Spotify folders, as Spotify nests them. A row shows when every folder above it
+        // is open.
+        let spotify_foldered =
+            crate::models::RootlistEntry::foldered_playlists(&self.data.spotify_rootlist);
+        let open_spotify: HashSet<&str> = self
+            .ui
+            .library_config
+            .open_spotify_folders
+            .iter()
+            .map(String::as_str)
+            .collect();
+        // One flag per enclosing folder: whether its contents are visible.
+        let mut visible_stack: Vec<bool> = Vec::new();
+        for entry in &self.data.spotify_rootlist {
+            let visible = visible_stack.last().copied().unwrap_or(true);
+            match entry {
+                crate::models::RootlistEntry::FolderStart { id, name } => {
+                    let is_open = open_spotify.contains(id.as_str());
+                    if visible {
+                        view.push(LibraryNode::SpotifyFolder {
+                            id: id.clone(),
+                            name: name.clone(),
+                            is_open,
+                            indent: visible_stack.len(),
+                        });
+                    }
+                    visible_stack.push(visible && is_open);
+                }
+                crate::models::RootlistEntry::FolderEnd => {
+                    visible_stack.pop();
+                }
+                crate::models::RootlistEntry::Playlist(pid) => {
+                    if visible
+                        && !visible_stack.is_empty()
+                        && let Some(p) = self.data.playlists.iter().find(|p| &p.id == pid)
+                    {
+                        view.push(LibraryNode::Playlist {
+                            playlist: p.clone(),
+                            indent: visible_stack.len(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // 3. echo's own folders. Spotify's folders win: a playlist Spotify has filed stays
+        // there, whatever an older config says.
         for folder in &self.ui.library_config.folders {
-            for pid in &folder.playlists {
-                folder_playlists.insert(pid.clone());
+            let members: Vec<&String> = folder
+                .playlists
+                .iter()
+                .filter(|pid| !spotify_foldered.contains(*pid))
+                .collect();
+            for pid in &members {
+                folder_playlists.insert((*pid).clone());
             }
             view.push(LibraryNode::Folder(folder.clone()));
             if folder.is_open {
-                for pid in &folder.playlists {
+                for pid in members {
                     if let Some(p) = all.iter().find(|p| &p.id == pid) {
                         view.push(LibraryNode::Playlist {
                             playlist: (*p).clone(),
@@ -849,10 +903,14 @@ impl AppState {
             }
         }
 
-        // 3. Loose playlists
+        // 4. Loose playlists
         let mut loose: Vec<_> = all
             .iter()
-            .filter(|p| !pinned_set.contains(&p.id) && !folder_playlists.contains(&p.id))
+            .filter(|p| {
+                !pinned_set.contains(&p.id)
+                    && !folder_playlists.contains(&p.id)
+                    && !spotify_foldered.contains(&p.id)
+            })
             .map(|p| (*p).clone())
             .collect();
 
@@ -884,6 +942,12 @@ impl AppState {
         }
 
         self.data.library_view = view;
+    }
+
+    /// True when Spotify keeps this playlist inside one of its folders.
+    pub fn in_spotify_folder(&self, playlist_id: &str) -> bool {
+        crate::models::RootlistEntry::foldered_playlists(&self.data.spotify_rootlist)
+            .contains(playlist_id)
     }
 
     pub fn save_library_config(&self) {

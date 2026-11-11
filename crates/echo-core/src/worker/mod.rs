@@ -8,6 +8,7 @@ pub mod local_files;
 pub mod local_playback;
 pub mod media;
 mod playlist_edit;
+mod rootlist;
 pub mod tracks;
 pub mod visualization;
 pub mod volume;
@@ -73,6 +74,7 @@ pub struct Worker {
     artist_page_generation: Arc<AtomicU64>,
     spotify_mixer: Arc<parking_lot::Mutex<Option<Arc<dyn librespot_playback::mixer::Mixer>>>>,
     spotify_spirc: Arc<parking_lot::Mutex<Option<librespot_connect::Spirc>>>,
+    spotify_session: SessionHolder,
     spotify_output_available: Arc<AtomicBool>,
     play_debounce: Option<(PlayDebounceKey, Instant)>,
     play_in_flight: Arc<AtomicBool>,
@@ -80,6 +82,33 @@ pub struct Worker {
 
 fn save_playlists_cache(playlists: Vec<crate::models::Playlist>) {
     AppConfig::update_cache(|cache| cache.set_playlists(playlists));
+}
+
+fn save_rootlist_cache(rootlist: Vec<crate::models::RootlistEntry>) {
+    AppConfig::update_cache(|cache| cache.spotify_rootlist = rootlist);
+}
+
+/// Shared handle to the playback session, which also answers the reads the Web API lacks.
+pub(crate) type SessionHolder = Arc<parking_lot::Mutex<Option<librespot_core::session::Session>>>;
+
+/// Reads the Spotify folders over `session` and publishes them. A failure keeps the folders
+/// already shown.
+pub(crate) async fn refresh_spotify_folders(
+    session: librespot_core::session::Session,
+    tx: mpsc::Sender<WorkerEvent>,
+) {
+    match rootlist::fetch(&session).await {
+        Ok(entries) => {
+            save_rootlist_cache(entries.clone());
+            let _ = tx.send(WorkerEvent::SpotifyRootlistLoaded(entries)).await;
+        }
+        Err(err) => {
+            let _ = std::fs::write(
+                crate::config::debug_log_path("echo-debug-rootlist.log"),
+                format!("Rootlist fetch error: {err:?}"),
+            );
+        }
+    }
 }
 
 fn save_saved_albums_cache(albums: Vec<crate::models::Album>) {
@@ -355,6 +384,13 @@ fn is_folder_artwork_candidate(path: &Path) -> bool {
 
 async fn hydrate_library_lists(sp: &SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
     let cache = AppConfig::load_cache();
+    if !cache.spotify_rootlist.is_empty() {
+        let _ = tx
+            .send(WorkerEvent::SpotifyRootlistLoaded(
+                cache.spotify_rootlist.clone(),
+            ))
+            .await;
+    }
     let playlists_need_refresh = if let Some(entry) = cache.get_playlists_entry() {
         let needs_refresh = crate::config::CacheData::library_list_needs_refresh(&entry);
         let _ = tx.send(WorkerEvent::PlaylistsLoaded(entry.value)).await;
@@ -470,8 +506,15 @@ fn sync_interval_duration(is_playing: bool) -> std::time::Duration {
     }
 }
 
-fn spawn_refresh_library_lists(sp: SpotifyWorker, tx: mpsc::Sender<WorkerEvent>) {
+fn spawn_refresh_library_lists(
+    sp: SpotifyWorker,
+    session: Option<librespot_core::session::Session>,
+    tx: mpsc::Sender<WorkerEvent>,
+) {
     tokio::spawn(async move {
+        if let Some(session) = session {
+            refresh_spotify_folders(session, tx.clone()).await;
+        }
         if let Ok(playlists) = sp.fetch_playlists().await {
             save_playlists_cache(playlists.clone());
             let _ = tx.send(WorkerEvent::PlaylistsLoaded(playlists)).await;
@@ -509,6 +552,7 @@ impl Worker {
             artist_page_generation: Arc::new(AtomicU64::new(0)),
             spotify_mixer: Arc::new(parking_lot::Mutex::new(None)),
             spotify_spirc: Arc::new(parking_lot::Mutex::new(None)),
+            spotify_session: Arc::new(parking_lot::Mutex::new(None)),
             spotify_output_available: Arc::new(AtomicBool::new(true)),
             play_debounce: None,
             play_in_flight: Arc::new(AtomicBool::new(false)),
@@ -825,6 +869,7 @@ impl Worker {
                                             self.tx.clone(),
                                             self.spotify_mixer.clone(),
                                             self.spotify_spirc.clone(),
+                                            self.spotify_session.clone(),
                                             self.spotify_output_available.clone(),
                                             is_playing.clone(),
                                             config.library.bitrate,
@@ -874,7 +919,8 @@ impl Worker {
                             }
                             AppEvent::RefreshLibraryLists => {
                                 if let Some(sp) = spotify_opt.as_ref() {
-                                    spawn_refresh_library_lists(sp.clone(), self.tx.clone());
+                                    let session = self.spotify_session.lock().clone();
+                                    spawn_refresh_library_lists(sp.clone(), session, self.tx.clone());
                                 } else {
                                     let _ = self.tx.send(WorkerEvent::HomeFeedFinished { feed: crate::home::HomeFeed::MadeForYou, range: None, success: false }).await;
                                 }

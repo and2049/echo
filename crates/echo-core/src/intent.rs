@@ -53,6 +53,16 @@ pub fn open_library_entry(state: &mut AppState, index: usize) -> Option<AppEvent
             state.compute_library_view();
             None
         }
+        LibraryNode::SpotifyFolder { id, is_open, .. } => {
+            let open = &mut state.ui.library_config.open_spotify_folders;
+            open.retain(|open_id| open_id != &id);
+            if !is_open {
+                open.push(id);
+            }
+            state.save_library_config();
+            state.compute_library_view();
+            None
+        }
     };
 
     let context = context?;
@@ -1361,6 +1371,9 @@ fn is_fixed_library_row(id: &str) -> bool {
 /// - onto a pinned playlist → pin, inserted before it;
 /// - onto a loose playlist → unpin/unfolder and reorder before it (persisted as
 ///   `playlist_order`, which forces `SortMode::Default`).
+///
+/// Spotify folders are read-only: nothing drops into one, and a playlist that lives in one can
+/// only be pinned, never moved into one of echo's folders or the loose list.
 pub fn move_library_playlist(state: &mut AppState, src_id: &str, dest_index: usize) -> bool {
     if is_fixed_library_row(src_id) {
         return false;
@@ -1375,13 +1388,23 @@ pub fn move_library_playlist(state: &mut AppState, src_id: &str, dest_index: usi
         PinnedBefore(String),
         LooseBefore(String),
     }
+    let src_in_spotify_folder = state.in_spotify_folder(src_id);
     let target = match &dest_node {
+        LibraryNode::SpotifyFolder { .. } => return false,
+        LibraryNode::Folder(_) if src_in_spotify_folder => return false,
         LibraryNode::Folder(folder) => Target::FolderEnd(folder.name.clone()),
         LibraryNode::Playlist { playlist, indent } => {
             if playlist.id == src_id || is_fixed_library_row(&playlist.id) {
                 return false;
             }
+            let pinned_row = *indent == 0 && state.ui.library_config.pinned.contains(&playlist.id);
+            if src_in_spotify_folder && !pinned_row {
+                return false;
+            }
             if *indent >= 1 {
+                if state.in_spotify_folder(&playlist.id) {
+                    return false;
+                }
                 let Some(folder) = state
                     .ui
                     .library_config
@@ -1671,7 +1694,7 @@ fn visual_deletable_playlists(state: &AppState) -> Vec<String> {
                         && Some(&playlist.owner_id) == state.data.user_id.as_ref());
                 deletable.then(|| playlist.id.clone())
             }
-            LibraryNode::Folder(_) => None,
+            LibraryNode::Folder(_) | LibraryNode::SpotifyFolder { .. } => None,
         })
         .collect()
 }
@@ -1941,6 +1964,8 @@ pub fn mark_selected_for_delete(state: &mut AppState) {
                         state.ui.folder_delete_prompt = Some(name.clone());
                     });
                 }
+                // Spotify's folders are not echo's to delete.
+                LibraryNode::SpotifyFolder { .. } => {}
             }
         }
         _ => {}
@@ -2883,6 +2908,157 @@ mod tests {
             node,
             LibraryNode::Playlist { playlist, indent: 1 } if playlist.id == "local-playlist:one"
         )));
+    }
+
+    /// A library with Spotify folder `Mix` holding `a` and nested folder `Deep` holding `b`,
+    /// loose playlist `c`, and an open echo folder `Mine`.
+    fn spotify_folder_state() -> AppState {
+        use crate::models::RootlistEntry;
+        let mut state = AppState::new();
+        state.ui.library_config = crate::config::LibraryConfig::default();
+        state.data.local_playlists = crate::models::LocalPlaylists::default();
+        state.data.local_library = crate::models::LocalLibrary::default();
+        state.data.playlists = vec![
+            library_playlist("a"),
+            library_playlist("b"),
+            library_playlist("c"),
+        ];
+        state.data.spotify_rootlist = vec![
+            RootlistEntry::FolderStart {
+                id: "f1".to_string(),
+                name: "Mix".to_string(),
+            },
+            RootlistEntry::Playlist("a".to_string()),
+            RootlistEntry::FolderStart {
+                id: "f2".to_string(),
+                name: "Deep".to_string(),
+            },
+            RootlistEntry::Playlist("b".to_string()),
+            RootlistEntry::FolderEnd,
+            RootlistEntry::FolderEnd,
+            RootlistEntry::Playlist("c".to_string()),
+        ];
+        state.ui.library_config.folders.push(crate::config::Folder {
+            name: "Mine".to_string(),
+            is_open: true,
+            playlists: vec![],
+        });
+        state.compute_library_view();
+        state
+    }
+
+    /// The sidebar below Liked Songs, as `indent:label` with folders marked.
+    fn sidebar(state: &AppState) -> Vec<String> {
+        state
+            .data
+            .library_view
+            .iter()
+            .filter_map(|node| match node {
+                LibraryNode::Playlist { playlist, indent }
+                    if !is_fixed_library_row(&playlist.id) =>
+                {
+                    Some(format!("{indent}:{}", playlist.id))
+                }
+                LibraryNode::Playlist { .. } => None,
+                LibraryNode::Folder(folder) => Some(format!("0:[{}]", folder.name)),
+                LibraryNode::SpotifyFolder { name, indent, .. } => {
+                    Some(format!("{indent}:<{name}>"))
+                }
+            })
+            .collect()
+    }
+
+    fn row(state: &AppState, label: &str) -> usize {
+        let labels: Vec<String> = state
+            .data
+            .library_view
+            .iter()
+            .map(|node| match node {
+                LibraryNode::Playlist { playlist, .. } => playlist.id.clone(),
+                LibraryNode::Folder(folder) => format!("[{}]", folder.name),
+                LibraryNode::SpotifyFolder { name, .. } => format!("<{name}>"),
+            })
+            .collect();
+        labels
+            .iter()
+            .position(|l| l == label)
+            .unwrap_or_else(|| panic!("no row {label} in {labels:?}"))
+    }
+
+    #[test]
+    fn spotify_folders_come_first_and_open_level_by_level() {
+        let mut state = spotify_folder_state();
+        assert_eq!(sidebar(&state), ["0:<Mix>", "0:[Mine]", "0:c"]);
+
+        let mix = row(&state, "<Mix>");
+        assert!(open_library_entry(&mut state, mix).is_none());
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:a", "1:<Deep>", "0:[Mine]", "0:c"]
+        );
+
+        let deep = row(&state, "<Deep>");
+        open_library_entry(&mut state, deep);
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:a", "1:<Deep>", "2:b", "0:[Mine]", "0:c"]
+        );
+
+        // Closing the outer folder hides the inner one without forgetting it was open.
+        let mix = row(&state, "<Mix>");
+        open_library_entry(&mut state, mix);
+        assert_eq!(sidebar(&state), ["0:<Mix>", "0:[Mine]", "0:c"]);
+        assert_eq!(state.ui.library_config.open_spotify_folders, ["f2"]);
+    }
+
+    #[test]
+    fn a_playlist_in_a_spotify_folder_cannot_move_into_an_echo_folder() {
+        let mut state = spotify_folder_state();
+        state.ui.library_config.open_spotify_folders = vec!["f1".to_string()];
+        state.compute_library_view();
+
+        let mine = row(&state, "[Mine]");
+        assert!(!move_library_playlist(&mut state, "a", mine));
+        let loose = row(&state, "c");
+        assert!(!move_library_playlist(&mut state, "a", loose));
+        assert!(state.ui.library_config.folders[0].playlists.is_empty());
+
+        // A Spotify playlist outside any Spotify folder still can.
+        assert!(move_library_playlist(&mut state, "c", mine));
+        assert_eq!(state.ui.library_config.folders[0].playlists, ["c"]);
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:a", "1:<Deep>", "0:[Mine]", "1:c"]
+        );
+    }
+
+    #[test]
+    fn nothing_drops_into_a_spotify_folder() {
+        let mut state = spotify_folder_state();
+        state.ui.library_config.open_spotify_folders = vec!["f1".to_string()];
+        state.compute_library_view();
+
+        let mix = row(&state, "<Mix>");
+        assert!(!move_library_playlist(&mut state, "c", mix));
+        let inside = row(&state, "a");
+        assert!(!move_library_playlist(&mut state, "c", inside));
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:a", "1:<Deep>", "0:[Mine]", "0:c"]
+        );
+    }
+
+    #[test]
+    fn spotify_folders_win_over_an_older_echo_folder_entry() {
+        let mut state = spotify_folder_state();
+        state.ui.library_config.folders[0].playlists = vec!["a".to_string(), "c".to_string()];
+        state.ui.library_config.open_spotify_folders = vec!["f1".to_string()];
+        state.compute_library_view();
+
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:a", "1:<Deep>", "0:[Mine]", "1:c"]
+        );
     }
 
     #[test]

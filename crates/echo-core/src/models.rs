@@ -224,8 +224,71 @@ mod discography_tests {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LibraryNode {
-    Playlist { playlist: Playlist, indent: usize },
+    Playlist {
+        playlist: Playlist,
+        indent: usize,
+    },
+    /// A folder kept in echo's own config. It holds local playlists and Spotify playlists
+    /// that are not in a Spotify folder.
     Folder(crate::config::Folder),
+    /// A folder from the user's Spotify library. Read-only here: its contents and name come
+    /// from Spotify, and only whether it is expanded is echo's to keep.
+    SpotifyFolder {
+        id: String,
+        name: String,
+        is_open: bool,
+        indent: usize,
+    },
+}
+
+/// One entry of the user's Spotify rootlist, in library order. Folders bracket their contents
+/// and can nest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RootlistEntry {
+    FolderStart { id: String, name: String },
+    FolderEnd,
+    Playlist(String),
+}
+
+impl RootlistEntry {
+    /// Reads a rootlist item URI: `spotify:playlist:<id>`, `spotify:start-group:<id>:<name>`
+    /// (the name form-encoded) or `spotify:end-group:<id>`. Anything else is skipped.
+    pub fn from_uri(uri: &str) -> Option<Self> {
+        let rest = uri.strip_prefix("spotify:")?;
+        if let Some(group) = rest.strip_prefix("start-group:") {
+            let (id, name) = group.split_once(':').unwrap_or((group, ""));
+            let name = urlencoding::decode(&name.replace('+', " "))
+                .map(|name| name.into_owned())
+                .unwrap_or_else(|_| name.to_string());
+            return Some(Self::FolderStart {
+                id: id.to_string(),
+                name,
+            });
+        }
+        if rest.starts_with("end-group:") {
+            return Some(Self::FolderEnd);
+        }
+        // Older rootlists also carry `spotify:user:<name>:playlist:<id>`.
+        let (kind, id) = rest.rsplit_once(':')?;
+        (kind == "playlist" || kind.ends_with(":playlist")).then(|| Self::Playlist(id.to_string()))
+    }
+
+    /// Ids of the playlists that sit inside a folder, at any depth.
+    pub fn foldered_playlists(entries: &[Self]) -> std::collections::HashSet<String> {
+        let mut depth = 0usize;
+        let mut ids = std::collections::HashSet::new();
+        for entry in entries {
+            match entry {
+                Self::FolderStart { .. } => depth += 1,
+                Self::FolderEnd => depth = depth.saturating_sub(1),
+                Self::Playlist(id) if depth > 0 => {
+                    ids.insert(id.clone());
+                }
+                Self::Playlist(_) => {}
+            }
+        }
+        ids
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

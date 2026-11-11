@@ -67,12 +67,10 @@ mod tests {
         let map = TRANSLATIONS.get().unwrap();
         for lang in ["en", "zh-CN"] {
             let desktop = &map[lang]["desktop"];
-            for key in ["tray"] {
-                assert!(
-                    desktop["settings"][key].is_string(),
-                    "{lang} missing desktop.settings.{key}"
-                );
-            }
+            assert!(
+                desktop["settings"]["tray"].is_string(),
+                "{lang} missing desktop.settings.tray"
+            );
             assert!(
                 desktop["tray"]["show"].is_string(),
                 "{lang} missing desktop.tray.show"

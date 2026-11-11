@@ -19,15 +19,19 @@ futures-util = "0.3.32"
 image = "0.25.10"
 # Pinned: librespot has no compatible crates.io release, and an unpinned git dep
 # means any fresh build can break independently of this repo's history.
-# Upstream `dev` at 939dc5e, which includes `Spirc::clear_queue` (#1753).
-librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
-librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
-librespot-discovery = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
-librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061" }
-librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "939dc5ee9d833e1980f9495241219d9d4868a061", features = ["rodio-backend"] }
+# Upstream `dev` at 15e02e8, which includes `Spirc::clear_queue` (#1753) and plain-JSON dealer
+# messages (#1786).
+librespot-connect = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-core = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-discovery = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-oauth = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-protocol = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde" }
+librespot-playback = { git = "https://github.com/librespot-org/librespot", rev = "15e02e86c72d96dd39d548e3749f00abe39ffdde", features = ["rodio-backend"] }
 lofty = "0.24.0"
 notify = "8.2.0"
 parking_lot = "0.12.5"
+# Same major as librespot-protocol, whose generated messages we decode.
+protobuf = "3.7.2"
 reqwest = { version = "0.13.4", features = ["json"] }
 rodio = "0.21.1"
 rspotify = { version = "0.16.1", features = ["cli"] }

@@ -15,9 +15,11 @@ librespot-core = { workspace = true }
 librespot-discovery = { workspace = true }
 librespot-oauth = { workspace = true }
 librespot-playback = { workspace = true }
+librespot-protocol = { workspace = true }
 lofty = { workspace = true }
 notify = { workspace = true }
 parking_lot = { workspace = true }
+protobuf = { workspace = true }
 reqwest = { workspace = true }
 rodio = { workspace = true }
 rspotify = { workspace = true }

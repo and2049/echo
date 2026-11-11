@@ -40,6 +40,9 @@ pub struct CacheData {
     pub liked_tracks: HashSet<String>,
     #[serde(default)]
     pub playlists: Option<CachedEntry<Vec<Playlist>>>,
+    /// The Spotify rootlist (playlist folders), so the sidebar opens with its folders in place.
+    #[serde(default)]
+    pub spotify_rootlist: Vec<crate::models::RootlistEntry>,
     #[serde(default)]
     pub saved_albums: Option<CachedEntry<Vec<Album>>>,
     #[serde(default)]
@@ -381,6 +384,10 @@ pub struct LibraryConfig {
     pub pinned: Vec<String>,
     #[serde(default)]
     pub folders: Vec<Folder>,
+    /// Ids of the Spotify folders left expanded in the sidebar. The folders themselves come
+    /// from Spotify; this is the only part of them echo stores.
+    #[serde(default)]
+    pub open_spotify_folders: Vec<String>,
     #[serde(default)]
     pub sort_mode: SortMode,
     /// Explicit ordering of the loose (unpinned, unfoldered) playlists, written by drag
@@ -515,6 +522,7 @@ impl Default for LibraryConfig {
             recent_searches: Vec::new(),
             pinned: vec![],
             folders: vec![],
+            open_spotify_folders: vec![],
             sort_mode: SortMode::default(),
             playlist_order: vec![],
             active_theme: None,

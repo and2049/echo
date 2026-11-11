@@ -23,7 +23,7 @@ echo is a native desktop music player and Spotify client written in Rust. echo b
 - **Synced lyrics**: Time-synced lyrics inline in the player bar or as a full-screen view.
 - **What's New**: A feed of recent albums and singles from the artists you follow, refreshed at most every 6 hours.
 - **Blazing fast Liked Songs**: Your entire Liked Songs library is cached locally (`~/.config/echo/liked_songs.json`) for zero-latency scrolling, even with thousands of saved tracks. Keeping it current usually takes a single request; a full re-read is paced, resumable, and backs off when Spotify rate-limits.
-- **Library management**: Create, rename, delete, and organize playlists into folders; reorder tracks in your own playlists.
+- **Library management**: Create, rename, delete, and organize playlists into folders; reorder tracks in your own playlists. Folders from your Spotify library are shown too (read-only), above echo's own.
 - **Local music support**: Scan a local music folder, play local files, and create local playlists that can also reference Spotify tracks.
 - **Search**: Fast global search (`ctrl-k`) across the Spotify catalog and your scanned local tracks.
 - **Dynamic theming**: Ship-with themes plus live theme editing — see [Themes](#themes).

@@ -76,6 +76,9 @@ pub fn apply_worker_event(
         WorkerEvent::PlaylistsLoaded(playlists) => {
             library::handle_playlists_loaded(state, playlists)
         }
+        WorkerEvent::SpotifyRootlistLoaded(entries) => {
+            library::handle_spotify_rootlist_loaded(state, entries)
+        }
         WorkerEvent::AlbumsLoaded(albums) => library::handle_albums_loaded(state, albums),
         WorkerEvent::LocalLibraryLoaded { library, report } => {
             library::handle_local_library_loaded(state, library, report)

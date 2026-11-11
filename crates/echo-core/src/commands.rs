@@ -800,6 +800,12 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                             state.ui.status_message_expiry =
                                 Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                         }
+                        crate::models::LibraryNode::SpotifyFolder { .. } => {
+                            state.ui.status_message =
+                                Some("Spotify folders are renamed in Spotify".to_string());
+                            state.ui.status_message_expiry =
+                                Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+                        }
                     }
                 }
             }

@@ -1389,6 +1389,7 @@ impl EchoApp {
                         playlist.name.clone()
                     }
                     echo_core::models::LibraryNode::Folder(folder) => folder.name.clone(),
+                    echo_core::models::LibraryNode::SpotifyFolder { .. } => return,
                 };
                 self.state.ui.selected_playlist_index = index;
                 self.open_command(&format!("rename {name}"), window, cx);
@@ -2208,6 +2209,8 @@ impl EchoApp {
         let name = match node {
             echo_core::models::LibraryNode::Playlist { playlist, .. } => playlist.name.clone(),
             echo_core::models::LibraryNode::Folder(f) => f.name.clone(),
+            // Spotify's folders keep the name Spotify gives them.
+            echo_core::models::LibraryNode::SpotifyFolder { .. } => return,
         };
         self.open_command(&format!("rename {name}"), window, cx);
     }

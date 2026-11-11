@@ -1043,6 +1043,20 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                         false,
                                         false,
                                     ),
+                                    LibraryNode::SpotifyFolder { name, is_open, indent, .. } => (
+                                        name.clone().into(),
+                                        accent,
+                                        *indent as f32 * 14.0,
+                                        None,
+                                        false,
+                                        Some(if *is_open {
+                                            "icons/arrow-down.svg"
+                                        } else {
+                                            "icons/arrow-right.svg"
+                                        }),
+                                        false,
+                                        false,
+                                    ),
                                     LibraryNode::Playlist { playlist, indent } => {
                                         let pinned = this
                                             .state
@@ -1105,15 +1119,17 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 }
                             });
 
-                            // Local playlists look like Spotify ones in the sidebar, so they are
-                            // tagged to keep the distinction visible.
+                            // Local playlists and echo's own folders look like Spotify's in the
+                            // sidebar, so they are tagged to keep the distinction visible.
                             let local_badge: Option<SharedString> = (tab
                                 == LibraryTab::Playlists
-                                && matches!(
-                                    &this.state.data.library_view[ix],
-                                    LibraryNode::Playlist { playlist, .. }
-                                        if playlist.id.starts_with("local-playlist:")
-                                ))
+                                && match &this.state.data.library_view[ix] {
+                                    LibraryNode::Playlist { playlist, .. } => {
+                                        playlist.id.starts_with("local-playlist:")
+                                    }
+                                    LibraryNode::Folder(_) => true,
+                                    LibraryNode::SpotifyFolder { .. } => false,
+                                })
                             .then(|| tr(&this.state, "desktop.local_badge"));
 
                             // Playlists can be dragged between folders, the pinned block and the
@@ -1148,6 +1164,19 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             this.state.ui.selected_playlist_index = ix;
                                             this.track_menu = None;
                                             this.state.ui.playlist_add_filter.clear();
+                                            // Spotify's folders are read-only, so they have no
+                                            // row actions to offer.
+                                            if this.state.ui.active_library_tab
+                                                == LibraryTab::Playlists
+                                                && matches!(
+                                                    this.state.data.library_view.get(ix),
+                                                    Some(LibraryNode::SpotifyFolder { .. })
+                                                )
+                                            {
+                                                this.context_menu = None;
+                                                cx.notify();
+                                                return;
+                                            }
                                             this.context_menu = Some(crate::ContextMenuState {
                                                 index: ix,
                                                 position: event.position,
@@ -7323,6 +7352,7 @@ pub fn context_menu(
                     true,
                 ));
             }
+            LibraryNode::SpotifyFolder { .. } => {}
             LibraryNode::Playlist { playlist, indent } => {
                 items.push((tr(&app.state, "desktop.menu.open"), MenuAction::Open, false));
                 let special = playlist.id == "LIKED_SONGS" || playlist.id == "local-library";
@@ -7355,7 +7385,7 @@ pub fn context_menu(
                         false,
                     ));
                 }
-                if *indent >= 1 {
+                if *indent >= 1 && !app.state.in_spotify_folder(&playlist.id) {
                     items.push((
                         tr(&app.state, "desktop.menu.remove_folder"),
                         MenuAction::RemoveFromFolder,

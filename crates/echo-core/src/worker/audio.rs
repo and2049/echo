@@ -249,6 +249,7 @@ pub async fn spawn_librespot_daemon(
     tx: mpsc::Sender<WorkerEvent>,
     mixer_holder: Arc<parking_lot::Mutex<Option<Arc<dyn Mixer>>>>,
     spirc_holder: Arc<parking_lot::Mutex<Option<Spirc>>>,
+    session_holder: super::SessionHolder,
     output_available: Arc<AtomicBool>,
     playback_is_playing: Arc<AtomicBool>,
     bitrate: u32,
@@ -266,6 +267,8 @@ pub async fn spawn_librespot_daemon(
             let tx = tx.clone();
             // The async block below moves its `tx`, so the give-up path needs its own handle.
             let err_tx = tx.clone();
+            let folders_tx = tx.clone();
+            let session_holder = session_holder.clone();
             let output_available = output_available.clone();
             let playback_is_playing = playback_is_playing.clone();
             let browser_auth_used = browser_auth_used.clone();
@@ -416,11 +419,16 @@ pub async fn spawn_librespot_daemon(
                 };
 
                 *spirc_holder.lock() = Some(spirc);
+                // The session is logged in now, so it can read what the Web API cannot: the
+                // library's folders.
+                *session_holder.lock() = Some(session.clone());
+                tokio::spawn(super::refresh_spotify_folders(session.clone(), folders_tx));
                 log_daemon(&format!(
                     "Spirc Daemon initialized successfully, awaiting task... bitrate={bitrate} normalisation={normalisation}"
                 ));
                 spirc_task.await;
                 *spirc_holder.lock() = None;
+                *session_holder.lock() = None;
                 log_daemon("Spirc Daemon task exited!");
 
                 Ok(())

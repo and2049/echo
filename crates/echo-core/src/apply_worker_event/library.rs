@@ -10,6 +10,33 @@ pub fn handle_playlists_loaded(state: &mut AppState, playlists: Vec<crate::model
     state.compute_library_view();
 }
 
+pub fn handle_spotify_rootlist_loaded(
+    state: &mut AppState,
+    entries: Vec<crate::models::RootlistEntry>,
+) {
+    if state.data.spotify_rootlist == entries {
+        return;
+    }
+    // Keep the cursor on the row it was on: folders arriving reshuffle the sidebar.
+    let selected = state
+        .data
+        .library_view
+        .get(state.ui.selected_playlist_index)
+        .and_then(|node| match node {
+            crate::models::LibraryNode::Playlist { playlist, .. } => Some(playlist.id.clone()),
+            _ => None,
+        });
+    state.data.spotify_rootlist = entries;
+    state.compute_library_view();
+    if let Some(id) = selected
+        && let Some(index) = state.data.library_view.iter().position(|node| {
+            matches!(node, crate::models::LibraryNode::Playlist { playlist, .. } if playlist.id == id)
+        })
+    {
+        state.ui.selected_playlist_index = index;
+    }
+}
+
 pub fn handle_albums_loaded(state: &mut AppState, albums: Vec<crate::models::Album>) {
     state.data.saved_albums = albums;
 }
