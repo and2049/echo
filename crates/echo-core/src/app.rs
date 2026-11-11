@@ -309,6 +309,49 @@ pub struct DataState {
     pub artist_top_tracks_loading: bool,
 }
 
+/// Adds a Spotify folder and, while it is open, what it holds, in the user's order.
+fn push_spotify_node(
+    view: &mut Vec<crate::models::LibraryNode>,
+    node: &crate::models::RootlistNode,
+    indent: usize,
+    open: &std::collections::HashSet<&str>,
+    position: &std::collections::HashMap<&str, usize>,
+    playlists: &[Playlist],
+) {
+    use crate::models::{LibraryNode, RootlistNode};
+    match node {
+        RootlistNode::Playlist(id) => {
+            if let Some(playlist) = playlists.iter().find(|p| &p.id == id) {
+                view.push(LibraryNode::Playlist {
+                    playlist: playlist.clone(),
+                    indent,
+                });
+            }
+        }
+        RootlistNode::Folder { id, name, children } => {
+            let is_open = open.contains(id.as_str());
+            view.push(LibraryNode::SpotifyFolder {
+                id: id.clone(),
+                name: name.clone(),
+                is_open,
+                indent,
+            });
+            if is_open {
+                let mut children: Vec<&RootlistNode> = children.iter().collect();
+                children.sort_by_key(|child| {
+                    position
+                        .get(child.key().as_str())
+                        .copied()
+                        .unwrap_or(usize::MAX)
+                });
+                for child in children {
+                    push_spotify_node(view, child, indent + 1, open, position, playlists);
+                }
+            }
+        }
+    }
+}
+
 impl DataState {
     fn new() -> Self {
         Self {
@@ -834,8 +877,9 @@ impl AppState {
             }
         }
 
-        // 2. Spotify folders, as Spotify nests them. A row shows when every folder above it
-        // is open.
+        // 2. Folders: Spotify's, nested as Spotify nests them, then echo's own, unless the
+        // user has dragged them into another order. Spotify's folders win a playlist: one
+        // Spotify has filed stays there, whatever an older config says.
         let spotify_foldered =
             crate::models::RootlistEntry::foldered_playlists(&self.data.spotify_rootlist);
         let open_spotify: HashSet<&str> = self
@@ -845,59 +889,54 @@ impl AppState {
             .iter()
             .map(String::as_str)
             .collect();
-        // One flag per enclosing folder: whether its contents are visible.
-        let mut visible_stack: Vec<bool> = Vec::new();
-        for entry in &self.data.spotify_rootlist {
-            let visible = visible_stack.last().copied().unwrap_or(true);
-            match entry {
-                crate::models::RootlistEntry::FolderStart { id, name } => {
-                    let is_open = open_spotify.contains(id.as_str());
-                    if visible {
-                        view.push(LibraryNode::SpotifyFolder {
-                            id: id.clone(),
-                            name: name.clone(),
-                            is_open,
-                            indent: visible_stack.len(),
-                        });
-                    }
-                    visible_stack.push(visible && is_open);
-                }
-                crate::models::RootlistEntry::FolderEnd => {
-                    visible_stack.pop();
-                }
-                crate::models::RootlistEntry::Playlist(pid) => {
-                    if visible
-                        && !visible_stack.is_empty()
-                        && let Some(p) = self.data.playlists.iter().find(|p| &p.id == pid)
-                    {
-                        view.push(LibraryNode::Playlist {
-                            playlist: p.clone(),
-                            indent: visible_stack.len(),
-                        });
-                    }
-                }
-            }
+        let position = self.library_order_positions();
+        let tree = crate::models::RootlistEntry::tree(&self.data.spotify_rootlist);
+        enum Block<'a> {
+            Spotify(&'a crate::models::RootlistNode),
+            Echo(&'a crate::config::Folder),
         }
+        let mut blocks: Vec<(String, Block)> = tree
+            .iter()
+            .filter(|node| matches!(node, crate::models::RootlistNode::Folder { .. }))
+            .map(|node| (node.key(), Block::Spotify(node)))
+            .chain(self.ui.library_config.folders.iter().map(|folder| {
+                (
+                    crate::models::echo_folder_key(&folder.name),
+                    Block::Echo(folder),
+                )
+            }))
+            .collect();
+        blocks.sort_by_key(|(key, _)| position.get(key.as_str()).copied().unwrap_or(usize::MAX));
 
-        // 3. echo's own folders. Spotify's folders win: a playlist Spotify has filed stays
-        // there, whatever an older config says.
-        for folder in &self.ui.library_config.folders {
-            let members: Vec<&String> = folder
-                .playlists
-                .iter()
-                .filter(|pid| !spotify_foldered.contains(*pid))
-                .collect();
-            for pid in &members {
-                folder_playlists.insert((*pid).clone());
-            }
-            view.push(LibraryNode::Folder(folder.clone()));
-            if folder.is_open {
-                for pid in members {
-                    if let Some(p) = all.iter().find(|p| &p.id == pid) {
-                        view.push(LibraryNode::Playlist {
-                            playlist: (*p).clone(),
-                            indent: 1,
-                        });
+        for (_, block) in blocks {
+            match block {
+                Block::Spotify(node) => push_spotify_node(
+                    &mut view,
+                    node,
+                    0,
+                    &open_spotify,
+                    &position,
+                    &self.data.playlists,
+                ),
+                Block::Echo(folder) => {
+                    let members: Vec<&String> = folder
+                        .playlists
+                        .iter()
+                        .filter(|pid| !spotify_foldered.contains(*pid))
+                        .collect();
+                    for pid in &members {
+                        folder_playlists.insert((*pid).clone());
+                    }
+                    view.push(LibraryNode::Folder(folder.clone()));
+                    if folder.is_open {
+                        for pid in members {
+                            if let Some(p) = all.iter().find(|p| &p.id == pid) {
+                                view.push(LibraryNode::Playlist {
+                                    playlist: (*p).clone(),
+                                    indent: 1,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -942,6 +981,61 @@ impl AppState {
         }
 
         self.data.library_view = view;
+    }
+
+    fn library_order_positions(&self) -> std::collections::HashMap<&str, usize> {
+        self.ui
+            .library_config
+            .library_order
+            .iter()
+            .enumerate()
+            .map(|(index, key)| (key.as_str(), index))
+            .collect()
+    }
+
+    /// Every set of rows that can be reordered among themselves, in displayed order and by
+    /// key, with the key of the folder holding them: the folders at the top level (`None`),
+    /// then the contents of each Spotify folder.
+    pub fn library_sibling_groups(&self) -> Vec<(Option<String>, Vec<String>)> {
+        use crate::models::RootlistNode;
+        fn walk(
+            nodes: &[RootlistNode],
+            parent: Option<String>,
+            position: &std::collections::HashMap<&str, usize>,
+            out: &mut Vec<(Option<String>, Vec<String>)>,
+        ) {
+            let mut keys: Vec<String> = nodes.iter().map(RootlistNode::key).collect();
+            keys.sort_by_key(|key| position.get(key.as_str()).copied().unwrap_or(usize::MAX));
+            out.push((parent, keys));
+            for node in nodes {
+                if let RootlistNode::Folder { children, .. } = node {
+                    walk(children, Some(node.key()), position, out);
+                }
+            }
+        }
+
+        let position = self.library_order_positions();
+        let tree = crate::models::RootlistEntry::tree(&self.data.spotify_rootlist);
+        let mut top: Vec<String> = tree
+            .iter()
+            .filter(|node| matches!(node, RootlistNode::Folder { .. }))
+            .map(RootlistNode::key)
+            .chain(
+                self.ui
+                    .library_config
+                    .folders
+                    .iter()
+                    .map(|folder| crate::models::echo_folder_key(&folder.name)),
+            )
+            .collect();
+        top.sort_by_key(|key| position.get(key.as_str()).copied().unwrap_or(usize::MAX));
+        let mut groups = vec![(None, top)];
+        for node in &tree {
+            if let RootlistNode::Folder { children, .. } = node {
+                walk(children, Some(node.key()), &position, &mut groups);
+            }
+        }
+        groups
     }
 
     /// True when Spotify keeps this playlist inside one of its folders.

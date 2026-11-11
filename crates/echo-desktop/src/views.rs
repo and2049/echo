@@ -155,7 +155,8 @@ const ECHO_LOGO: [&str; 6] = [
     "╚══════╝ ╚═════╝╚═╝  ╚═╝ ╚═════╝               ╚═╝  ╚═╝╚══════╝",
 ];
 
-/// Drag payload for a sidebar playlist row.
+/// Drag payload for a sidebar playlist or folder row. `id` is the row's key: a playlist id, or
+/// a folder key.
 pub(crate) struct DraggedPlaylist {
     pub id: String,
     pub name: SharedString,
@@ -1133,8 +1134,8 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                             .then(|| tr(&this.state, "desktop.local_badge"));
 
                             // Playlists can be dragged between folders, the pinned block and the
-                            // loose list; every playlist-tab row is a drop target (the intent
-                            // rejects invalid ones).
+                            // loose list, and folders among themselves; every playlist-tab row
+                            // is a drop target (the intent rejects invalid ones).
                             let drag_source: Option<(String, SharedString)> =
                                 if tab == LibraryTab::Playlists {
                                     match &this.state.data.library_view[ix] {
@@ -1146,7 +1147,15 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                                 playlist.name.clone().into(),
                                             ))
                                         }
-                                        _ => None,
+                                        LibraryNode::Playlist { .. } => None,
+                                        LibraryNode::Folder(folder) => Some((
+                                            echo_core::models::echo_folder_key(&folder.name),
+                                            folder.name.clone().into(),
+                                        )),
+                                        LibraryNode::SpotifyFolder { id, name, .. } => Some((
+                                            echo_core::models::spotify_folder_key(id),
+                                            name.clone().into(),
+                                        )),
                                     }
                                 } else {
                                     None
@@ -1200,7 +1209,7 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                     })
                                     .on_drop(cx.listener(
                                         move |this: &mut EchoApp, drag: &DraggedPlaylist, _window, cx| {
-                                            if echo_core::intent::move_library_playlist(
+                                            if echo_core::intent::move_library_row(
                                                 &mut this.state,
                                                 &drag.id,
                                                 ix,

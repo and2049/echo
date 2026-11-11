@@ -250,7 +250,69 @@ pub enum RootlistEntry {
     Playlist(String),
 }
 
+/// The rootlist as a tree: what each Spotify folder holds, in Spotify's order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RootlistNode {
+    Folder {
+        id: String,
+        name: String,
+        children: Vec<RootlistNode>,
+    },
+    Playlist(String),
+}
+
+/// Key of a Spotify folder in `LibraryConfig::library_order`.
+pub fn spotify_folder_key(id: &str) -> String {
+    format!("spotify-folder:{id}")
+}
+
+/// Key of one of echo's own folders in `LibraryConfig::library_order`.
+pub fn echo_folder_key(name: &str) -> String {
+    format!("folder:{name}")
+}
+
+impl RootlistNode {
+    /// The key this row is ordered by; a playlist's is its id.
+    pub fn key(&self) -> String {
+        match self {
+            Self::Folder { id, .. } => spotify_folder_key(id),
+            Self::Playlist(id) => id.clone(),
+        }
+    }
+}
+
 impl RootlistEntry {
+    pub fn tree(entries: &[Self]) -> Vec<RootlistNode> {
+        // The innermost open folder is last; the root list sits at the bottom.
+        type Open = (Option<(String, String)>, Vec<RootlistNode>);
+        let mut stack: Vec<Open> = vec![(None, vec![])];
+        let close = |stack: &mut Vec<Open>| {
+            if stack.len() > 1
+                && let Some((Some((id, name)), children)) = stack.pop()
+                && let Some((_, parent)) = stack.last_mut()
+            {
+                parent.push(RootlistNode::Folder { id, name, children });
+            }
+        };
+        for entry in entries {
+            match entry {
+                Self::FolderStart { id, name } => {
+                    stack.push((Some((id.clone(), name.clone())), vec![]));
+                }
+                Self::FolderEnd => close(&mut stack),
+                Self::Playlist(id) => {
+                    if let Some((_, children)) = stack.last_mut() {
+                        children.push(RootlistNode::Playlist(id.clone()));
+                    }
+                }
+            }
+        }
+        while stack.len() > 1 {
+            close(&mut stack);
+        }
+        stack.pop().map(|(_, nodes)| nodes).unwrap_or_default()
+    }
+
     /// Reads a rootlist item URI: `spotify:playlist:<id>`, `spotify:start-group:<id>:<name>`
     /// (the name form-encoded) or `spotify:end-group:<id>`. Anything else is skipped.
     pub fn from_uri(uri: &str) -> Option<Self> {

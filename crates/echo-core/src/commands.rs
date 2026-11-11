@@ -523,6 +523,8 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                 {
                     let name = f.name.clone();
                     state.ui.library_config.folders.retain(|fd| fd.name != name);
+                    let key = crate::models::echo_folder_key(&name);
+                    state.ui.library_config.library_order.retain(|k| k != &key);
                     state.save_library_config();
                     state.compute_library_view();
                 }
@@ -793,6 +795,12 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                                 .position(|fd| fd.name == old_name)
                             {
                                 state.ui.library_config.folders[idx].name = name.clone();
+                                let old_key = crate::models::echo_folder_key(&old_name);
+                                for key in &mut state.ui.library_config.library_order {
+                                    if *key == old_key {
+                                        *key = crate::models::echo_folder_key(&name);
+                                    }
+                                }
                             }
                             state.save_library_config();
                             state.compute_library_view();

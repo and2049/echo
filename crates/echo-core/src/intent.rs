@@ -1365,6 +1365,74 @@ fn is_fixed_library_row(id: &str) -> bool {
     id == "LIKED_SONGS" || id == "local-library"
 }
 
+/// Drops the row keyed `src_key` (a playlist id, or a folder key) onto visible row
+/// `dest_index`. Folders, and the rows inside a Spotify folder, reorder among the rows beside
+/// them; that order is echo's alone and Spotify never hears of it. Anything else is a playlist
+/// changing container, which `move_library_playlist` decides.
+pub fn move_library_row(state: &mut AppState, src_key: &str, dest_index: usize) -> bool {
+    if reorder_library_siblings(state, src_key, dest_index) {
+        return true;
+    }
+    let is_folder = src_key.starts_with(&crate::models::echo_folder_key(""))
+        || src_key.starts_with(&crate::models::spotify_folder_key(""));
+    !is_folder && move_library_playlist(state, src_key, dest_index)
+}
+
+/// Moves `src_key` next to the row at `dest_index` when the two sit side by side, or next to
+/// whichever folder around that row does. It lands past a row below it and ahead of a row
+/// above it, so either end of the list can be reached.
+fn reorder_library_siblings(state: &mut AppState, src_key: &str, dest_index: usize) -> bool {
+    let groups = state.library_sibling_groups();
+    let parent_of = |key: &str| -> Option<String> {
+        groups
+            .iter()
+            .find(|(_, keys)| keys.iter().any(|k| k == key))
+            .and_then(|(parent, _)| parent.clone())
+    };
+    let mut candidate = match state.data.library_view.get(dest_index) {
+        Some(LibraryNode::SpotifyFolder { id, .. }) => Some(crate::models::spotify_folder_key(id)),
+        Some(LibraryNode::Folder(folder)) => Some(crate::models::echo_folder_key(&folder.name)),
+        Some(LibraryNode::Playlist { playlist, indent }) if *indent >= 1 => {
+            if state.in_spotify_folder(&playlist.id) {
+                Some(playlist.id.clone())
+            } else {
+                state
+                    .ui
+                    .library_config
+                    .folders
+                    .iter()
+                    .find(|folder| folder.playlists.contains(&playlist.id))
+                    .map(|folder| crate::models::echo_folder_key(&folder.name))
+            }
+        }
+        _ => None,
+    };
+
+    while let Some(dest_key) = candidate {
+        if dest_key != src_key
+            && let Some((_, keys)) = groups.iter().find(|(_, keys)| {
+                keys.iter().any(|k| k == src_key) && keys.iter().any(|k| k == &dest_key)
+            })
+        {
+            let from = keys.iter().position(|k| k == src_key).unwrap_or(0);
+            let to = keys.iter().position(|k| k == &dest_key).unwrap_or(0);
+            let mut keys = keys.clone();
+            let moved = keys.remove(from);
+            // With the source gone, the destination's old index is the slot after it when the
+            // source came from above, and the slot before it otherwise.
+            keys.insert(to, moved);
+            let order = &mut state.ui.library_config.library_order;
+            order.retain(|key| !keys.contains(key));
+            order.extend(keys);
+            state.save_library_config();
+            state.compute_library_view();
+            return true;
+        }
+        candidate = parent_of(&dest_key);
+    }
+    false
+}
+
 /// Drops the playlist `src_id` onto visible row `dest_index`:
 /// - onto a folder header → append to that folder;
 /// - onto a playlist inside a folder → insert into that folder before it;
@@ -1373,7 +1441,8 @@ fn is_fixed_library_row(id: &str) -> bool {
 ///   `playlist_order`, which forces `SortMode::Default`).
 ///
 /// Spotify folders are read-only: nothing drops into one, and a playlist that lives in one can
-/// only be pinned, never moved into one of echo's folders or the loose list.
+/// only be pinned, never moved into one of echo's folders or the loose list. (Reordering it
+/// inside its folder is `move_library_row`'s job.)
 pub fn move_library_playlist(state: &mut AppState, src_id: &str, dest_index: usize) -> bool {
     if is_fixed_library_row(src_id) {
         return false;
@@ -1998,6 +2067,8 @@ pub fn confirm_prompt(state: &mut AppState) -> Option<AppEvent> {
             .library_config
             .folders
             .retain(|folder| folder.name != folder_name);
+        let key = crate::models::echo_folder_key(&folder_name);
+        state.ui.library_config.library_order.retain(|k| k != &key);
         state.save_library_config();
         state.compute_library_view();
         if state.ui.selected_playlist_index >= state.data.library_view.len() {
@@ -3059,6 +3130,60 @@ mod tests {
             sidebar(&state),
             ["0:<Mix>", "1:a", "1:<Deep>", "0:[Mine]", "1:c"]
         );
+    }
+
+    #[test]
+    fn folders_reorder_among_themselves_in_either_direction() {
+        let mut state = spotify_folder_state();
+        // Down: the echo folder is below, so the Spotify folder lands after it.
+        let mine = row(&state, "[Mine]");
+        assert!(move_library_row(&mut state, "spotify-folder:f1", mine));
+        assert_eq!(sidebar(&state), ["0:[Mine]", "0:<Mix>", "0:c"]);
+        // Up again, dropping onto the row above.
+        let mine = row(&state, "[Mine]");
+        assert!(move_library_row(&mut state, "spotify-folder:f1", mine));
+        assert_eq!(sidebar(&state), ["0:<Mix>", "0:[Mine]", "0:c"]);
+        // A folder is not a playlist: it cannot land in the loose list.
+        let loose = row(&state, "c");
+        assert!(!move_library_row(&mut state, "folder:Mine", loose));
+        assert_eq!(sidebar(&state), ["0:<Mix>", "0:[Mine]", "0:c"]);
+    }
+
+    #[test]
+    fn a_folder_dropped_inside_another_folder_lands_beside_it() {
+        let mut state = spotify_folder_state();
+        state.ui.library_config.open_spotify_folders = vec!["f1".to_string()];
+        state.compute_library_view();
+
+        let inside = row(&state, "a");
+        assert!(move_library_row(&mut state, "folder:Mine", inside));
+        assert_eq!(
+            sidebar(&state),
+            ["0:[Mine]", "0:<Mix>", "1:a", "1:<Deep>", "0:c"]
+        );
+    }
+
+    #[test]
+    fn rows_in_a_spotify_folder_reorder_without_leaving_it() {
+        let mut state = spotify_folder_state();
+        state.ui.library_config.open_spotify_folders = vec!["f1".to_string()];
+        state.compute_library_view();
+
+        let deep = row(&state, "<Deep>");
+        assert!(move_library_row(&mut state, "a", deep));
+        assert_eq!(
+            sidebar(&state),
+            ["0:<Mix>", "1:<Deep>", "1:a", "0:[Mine]", "0:c"]
+        );
+        // The rootlist is untouched: this order is echo's alone.
+        assert!(state.in_spotify_folder("a"));
+        assert_eq!(
+            state.ui.library_config.library_order,
+            ["spotify-folder:f2", "a"]
+        );
+        // It still cannot leave for an echo folder.
+        let mine = row(&state, "[Mine]");
+        assert!(!move_library_row(&mut state, "a", mine));
     }
 
     #[test]

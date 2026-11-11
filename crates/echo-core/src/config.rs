@@ -388,6 +388,11 @@ pub struct LibraryConfig {
     /// from Spotify; this is the only part of them echo stores.
     #[serde(default)]
     pub open_spotify_folders: Vec<String>,
+    /// Order the user dragged folders, and the rows inside Spotify folders, into. Rows are
+    /// compared with the rows beside them only; ones not listed follow in their usual order.
+    /// Purely echo's: nothing here is sent to Spotify.
+    #[serde(default)]
+    pub library_order: Vec<String>,
     #[serde(default)]
     pub sort_mode: SortMode,
     /// Explicit ordering of the loose (unpinned, unfoldered) playlists, written by drag
@@ -523,6 +528,7 @@ impl Default for LibraryConfig {
             pinned: vec![],
             folders: vec![],
             open_spotify_folders: vec![],
+            library_order: vec![],
             sort_mode: SortMode::default(),
             playlist_order: vec![],
             active_theme: None,
