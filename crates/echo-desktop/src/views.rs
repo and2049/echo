@@ -2155,7 +2155,7 @@ fn track_index_cell(
     muted: Hsla,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
-    let number = row_number(&app.state, ix, selected).unwrap_or_default();
+    let number = row_number(&app.state, ix, selected);
     let animate = playing && app.state.playback.is_playing && !cx.reduce_motion();
     let bars = if animate {
         div()
@@ -2717,15 +2717,11 @@ fn queue_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement 
                                         cx.notify();
                                     }),
                                 )
-                                .when_some(row_number(&this.state, ix, selected), |row, number| {
-                                    row.child(
-                                        div()
+                                .child(div()
                                             .flex_none()
                                             .w(px(32.0))
                                             .text_color(muted)
-                                            .child(number),
-                                    )
-                                })
+                                            .child(row_number(&this.state, ix, selected)),)
                                 .child(
                                     div()
                                         .flex_grow(2.0)
@@ -2931,17 +2927,12 @@ fn recent_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             },
                                         ),
                                     )
-                                    .when_some(
-                                        row_number(&this.state, ix, selected),
-                                        |row, number| {
-                                            row.child(
-                                                div()
-                                                    .flex_none()
-                                                    .w(px(32.0))
-                                                    .text_color(muted)
-                                                    .child(number),
-                                            )
-                                        },
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .w(px(32.0))
+                                            .text_color(muted)
+                                            .child(row_number(&this.state, ix, selected)),
                                     )
                                     .child(
                                         div()
@@ -3113,26 +3104,17 @@ pub(crate) fn playing_context_label(state: &echo_core::app::AppState) -> Option<
     Some(tr(state, "desktop.playing_from").replace("{}", &name))
 }
 
-/// Index-column text for a list row, honoring `track_index_base` (negative hides the column —
-/// the caller omits the div) and `relative_line_numbers`.
-fn row_number(
-    state: &echo_core::app::AppState,
-    ix: usize,
-    selected: usize,
-) -> Option<SharedString> {
-    let config = &state.ui.library_config;
-    if config.track_index_base < 0 {
-        return None;
-    }
-    Some(SharedString::from(
+/// Index-column text for a list row: numbered from 1, or vim-style distances from the
+/// selected row under `relative_line_numbers`.
+fn row_number(state: &echo_core::app::AppState, ix: usize, selected: usize) -> SharedString {
+    SharedString::from(
         echo_core::app::displayed_track_number(
             ix,
             selected,
-            config.track_index_base,
-            config.relative_line_numbers,
+            state.ui.library_config.relative_line_numbers,
         )
         .to_string(),
-    ))
+    )
 }
 
 /// A fixed-width heart slot ahead of the duration column: filled when the track is in
@@ -3827,18 +3809,13 @@ fn artist_list(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                                     cx.notify();
                                                 },
                                             ))
-                                            .when_some(
-                                                row_number(&this.state, ix, selected),
-                                                |row, number| {
-                                                    row.child(
-                                                        div()
-                                                            .flex_none()
-                                                            .w(px(24.0))
-                                                            .text_xs()
-                                                            .text_color(muted)
-                                                            .child(number),
-                                                    )
-                                                },
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .w(px(24.0))
+                                                    .text_xs()
+                                                    .text_color(muted)
+                                                    .child(row_number(&this.state, ix, selected)),
                                             )
                                             .child(thumb)
                                             .child(
@@ -4228,19 +4205,12 @@ fn artist_page(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> AnyElement {
                                                 cx.notify();
                                             }),
                                         )
-                                        .when_some(
-                                            row_number(&this.state, ix, selected),
-                                            |row, number| {
-                                                row.child(
-                                                    div()
+                                        .child(div()
                                                         .flex_none()
                                                         .w(px(24.0))
                                                         .text_xs()
                                                         .text_color(muted)
-                                                        .child(number),
-                                                )
-                                            },
-                                        )
+                                                        .child(row_number(&this.state, ix, selected)),)
                                         .child(thumb)
                                         .child(
                                             div()
@@ -5262,7 +5232,6 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let config = &app.state.ui.library_config;
     let mode = config.theme_mode.unwrap_or(ThemeMode::Auto);
     let tab = app.theme_modal_tab;
-    let system = app.state.ui.system_scheme;
     let rows = theme_rows(&app.state, tab);
     let chosen = echo_core::theme::selected_name(config, &app.state.ui.themes, tab);
     let selected = app.theme_modal_index;
@@ -5294,74 +5263,69 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let scheme_label =
         |scheme: Scheme| tr(&app.state, &format!("desktop.theme_mode.{}", scheme.name()));
 
+    // One joined bar, the same control as the Mode row in Settings.
     let mode_control = div()
+        .flex_none()
+        .h(px(24.0))
         .flex()
         .flex_row()
-        .gap_1()
-        .children(ThemeMode::ALL.into_iter().map(|option| {
+        .rounded_md()
+        .border_1()
+        .border_color(palette.menu_border)
+        .overflow_hidden()
+        .children(ThemeMode::ALL.into_iter().enumerate().map(|(ix, option)| {
             let active = option == mode;
             div()
                 .id(SharedString::from(format!("theme-mode-{}", option.name())))
-                .px_2()
-                .py_0p5()
-                .rounded_md()
-                .border_1()
-                .border_color(if active { accent } else { palette.menu_border })
+                .h_full()
+                .px_3()
+                .flex()
+                .items_center()
                 .text_xs()
-                .text_color(if active { accent } else { muted })
-                .cursor_pointer()
-                .hover(move |style| style.bg(palette.menu_hover))
+                .text_color(if active { fg } else { muted })
+                .when(ix > 0, |el| {
+                    el.border_l_1().border_color(palette.menu_border)
+                })
+                .when(active, |el| el.bg(palette.menu_selected))
+                .when(!active, |el| {
+                    el.cursor_pointer()
+                        .hover(move |style| style.bg(palette.menu_hover))
+                })
                 .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                     this.set_theme_mode(option, cx);
                 }))
                 .child(mode_label(option))
         }));
 
-    // Under `Auto` only: one tab per appearance, and a note on the list that is not showing
-    // right now.
+    // Under `Auto` only: one tab per appearance, the listed one underlined.
     let tabs = (mode == ThemeMode::Auto).then(|| {
         div()
+            .flex_none()
             .flex()
             .flex_row()
-            .items_center()
-            .gap_3()
-            .pb_1()
+            .gap_4()
+            .px_2()
+            .pt_1()
             .children([Scheme::Dark, Scheme::Light].into_iter().map(|scheme| {
                 let active = scheme == tab;
                 div()
                     .id(SharedString::from(format!("theme-tab-{}", scheme.name())))
+                    .pb_1()
+                    .border_b_2()
+                    .border_color(if active {
+                        accent
+                    } else {
+                        gpui::transparent_black()
+                    })
                     .text_sm()
                     .text_color(if active { fg } else { muted })
-                    .when(active, |el| el.font_weight(gpui::FontWeight::BOLD))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
                         this.show_theme_list(scheme, cx);
                     }))
                     .child(scheme_label(scheme))
             }))
-            .when(tab != system, |el| {
-                el.child(
-                    div()
-                        .flex_1()
-                        .text_xs()
-                        .text_color(muted)
-                        .text_right()
-                        .child(tr(
-                            &app.state,
-                            &format!("desktop.theme_used_when.{}", tab.name()),
-                        )),
-                )
-            })
     });
-
-    let hint = tr(
-        &app.state,
-        if mode == ThemeMode::Auto {
-            "desktop.theme_hint_auto"
-        } else {
-            "desktop.theme_hint"
-        },
-    );
 
     div()
         .id("theme-backdrop")
@@ -5388,20 +5352,25 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                 .p_3()
                 .flex()
                 .flex_col()
-                .gap_1()
+                .gap_2()
                 .overflow_hidden()
                 .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
                 .child(
                     div()
-                        .pb_2()
+                        .flex_none()
+                        .px_1()
+                        .pb_3()
+                        .border_b_1()
+                        .border_color(palette.menu_border)
                         .flex()
                         .flex_row()
                         .items_center()
                         .justify_between()
                         .child(
                             div()
-                                .text_sm()
-                                .text_color(muted)
+                                .text_base()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(fg)
                                 .child(tr(&app.state, "desktop.theme")),
                         )
                         .child(mode_control),
@@ -5419,7 +5388,8 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .id("theme-list")
                         .flex()
                         .flex_col()
-                        .max_h(px(340.0))
+                        // Sized by its rows, shrinking (and scrolling) once the panel is full.
+                        .min_h_0()
                         .overflow_y_scroll()
                         .track_scroll(&app.theme_modal_scroll)
                         .children(rows.into_iter().zip(swatches).enumerate().map(
@@ -5430,13 +5400,13 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                 div()
                                     .id(ix)
                                     .px_2()
-                                    .py_1()
+                                    .h(px(30.0))
+                                    .flex_none()
                                     .rounded_md()
                                     .flex()
                                     .flex_row()
                                     .items_center()
-                                    .justify_between()
-                                    .gap_2()
+                                    .gap_3()
                                     .text_sm()
                                     .when(is_selected, |el| el.bg(palette.menu_selected))
                                     .when(!is_selected, |el| {
@@ -5454,11 +5424,27 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                         },
                                     ))
                                     .child(
+                                        // The theme's background, accent and second accent
+                                        // as one joined chip.
                                         div()
+                                            .flex_none()
+                                            .flex()
+                                            .flex_row()
+                                            .rounded_sm()
+                                            .border_1()
+                                            .border_color(palette.menu_border)
+                                            .overflow_hidden()
+                                            .children(swatch.into_iter().map(|color| {
+                                                div().w(px(12.0)).h(px(14.0)).bg(color)
+                                            })),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
                                             .flex()
                                             .flex_row()
                                             .gap_1()
-                                            .min_w_0()
                                             .child(
                                                 div()
                                                     .text_color(if is_chosen { accent } else { fg })
@@ -5470,30 +5456,13 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                                                 ))
                                             }),
                                     )
-                                    .child(
-                                        div()
-                                            .flex_none()
-                                            .flex()
-                                            .flex_row()
-                                            .items_center()
-                                            .gap_1()
-                                            .when(is_chosen, |el| {
-                                                el.child(div().pr_1().text_color(accent).child("●"))
-                                            })
-                                            .children(swatch.into_iter().map(|color| {
-                                                div()
-                                                    .size(px(10.0))
-                                                    .rounded_sm()
-                                                    .border_1()
-                                                    .border_color(palette.menu_border)
-                                                    .bg(color)
-                                            })),
-                                    )
+                                    .when(is_chosen, |el| {
+                                        el.child(div().flex_none().text_color(accent).child("✓"))
+                                    })
                             },
                         ))
                         .into_any_element()
-                })
-                .child(div().pt_2().text_xs().text_color(muted).child(hint)),
+                }),
         )
 }
 
@@ -5723,9 +5692,9 @@ pub fn help_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElem
 
 /// The settings sheet.
 ///
-/// Every control here runs a `:` command through `echo_core::commands::run` rather than
-/// touching the config itself, so the GUI and the command bar cannot drift apart. The three
-/// audio-quality keys are the exception — they have no command — and write the config directly.
+/// Booleans are switches, a choice among several is a dropdown (the appearance mode, three
+/// short options switched often, is a segmented bar), and rows carry a hint only where the
+/// label cannot say it. What each control does is a `SettingChange`.
 pub fn settings_modal(
     app: &mut EchoApp,
     window: &mut Window,
@@ -5747,82 +5716,374 @@ pub fn settings_modal(
         move |key: &str| SharedString::from(echo_core::i18n::t(key, &lang))
     };
 
-    // A labelled row with its control on the right. Labels and hints arrive translated.
-    let row = |label: SharedString, hint: Option<SharedString>, control: AnyElement| {
+    const ROW_HEIGHT: f32 = 34.0;
+    const CONTROL_HEIGHT: f32 = 24.0;
+    let open_dropdown = app.settings_dropdown;
+
+    // A labelled row with its control on the right. Labels and hints arrive translated. A
+    // disabled row is dimmed: its setting has no effect until another one is turned on.
+    let row =
+        |label: SharedString, hint: Option<SharedString>, enabled: bool, control: AnyElement| {
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .min_h(px(ROW_HEIGHT))
+                .py_0p5()
+                .when(!enabled, |el| el.opacity(0.4))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w_0()
+                        .child(div().text_sm().text_color(fg).child(label))
+                        .when_some(hint, |el, hint| {
+                            el.child(div().text_xs().text_color(muted).child(hint))
+                        }),
+                )
+                .child(control)
+        };
+
+    // A section title over a rule, with an optional note that applies to the whole section.
+    let heading = |label: SharedString, note: Option<SharedString>| {
         div()
             .flex()
             .flex_row()
             .items_center()
             .justify_between()
             .gap_4()
-            .py_1p5()
+            .mt_4()
+            .mb_1()
+            .pb_1()
+            .border_b_1()
+            .border_color(palette.menu_border)
             .child(
                 div()
-                    .flex()
-                    .flex_col()
-                    .child(div().text_sm().text_color(fg).child(label))
-                    .when_some(hint, |el, hint| {
-                        el.child(div().text_xs().text_color(muted).child(hint))
-                    }),
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(muted)
+                    .child(label),
             )
-            .child(control)
+            .when_some(note, |el, note| {
+                el.child(div().text_xs().text_color(muted).child(note))
+            })
     };
 
-    let heading =
-        |label: SharedString| div().pt_3().pb_1().text_xs().text_color(muted).child(label);
-
-    // A segmented control: one button per option, the active one accented.
-    let choices = |id: &'static str,
-                   options: Vec<(SharedString, String, bool)>,
-                   cx: &mut Context<EchoApp>| {
+    // An on/off switch.
+    let toggle = |id: &'static str, on: bool, change: SettingChange, cx: &mut Context<EchoApp>| {
         div()
             .id(id)
+            .flex_none()
+            .w(px(34.0))
+            .h(px(20.0))
+            .p(px(2.0))
+            .rounded_full()
             .flex()
             .flex_row()
-            .flex_wrap()
-            .justify_end()
-            .gap_1()
-            .children(options.into_iter().map(|(label, cmd, active)| {
-                div()
-                    .id(SharedString::from(format!("{id}-{label}")))
-                    .px_2()
-                    .py_0p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if active { accent } else { palette.menu_border })
-                    .text_xs()
-                    .text_color(if active { accent } else { muted })
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_hover))
-                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                        this.run_setting(cmd.clone(), cx);
-                    }))
-                    .child(label)
+            .items_center()
+            .when(on, |el| el.justify_end())
+            .bg(if on { accent } else { palette.menu_border })
+            .cursor_pointer()
+            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                change.apply(this, cx);
             }))
+            .child(
+                div()
+                    .size(px(16.0))
+                    .rounded_full()
+                    .bg(if on { surface } else { muted }),
+            )
             .into_any_element()
     };
 
-    let language = config.language.clone();
+    // A segmented control: one joined bar, the active segment filled.
+    let segmented = |id: &'static str,
+                     options: Vec<(SharedString, String, bool)>,
+                     cx: &mut Context<EchoApp>| {
+        div()
+            .id(id)
+            .flex_none()
+            .h(px(CONTROL_HEIGHT))
+            .flex()
+            .flex_row()
+            .rounded_md()
+            .border_1()
+            .border_color(palette.menu_border)
+            .overflow_hidden()
+            .children(
+                options
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ix, (label, cmd, active))| {
+                        div()
+                            .id(SharedString::from(format!("{id}-{ix}")))
+                            .h_full()
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .text_xs()
+                            .text_color(if active { fg } else { muted })
+                            .when(ix > 0, |el| {
+                                el.border_l_1().border_color(palette.menu_border)
+                            })
+                            .when(active, |el| el.bg(palette.menu_selected))
+                            .when(!active, |el| {
+                                el.cursor_pointer()
+                                    .hover(move |style| style.bg(palette.menu_hover))
+                            })
+                            .on_click(cx.listener(
+                                move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.run_setting(cmd.clone(), cx);
+                                },
+                            ))
+                            .child(label)
+                    }),
+            )
+            .into_any_element()
+    };
+
+    // A dropdown: a button showing the current option, and while open a menu of all of them
+    // hanging under it. The menu is drawn deferred so the scrolling list does not clip it.
+    let dropdown = |id: &'static str,
+                    options: Vec<(SharedString, SettingChange, bool)>,
+                    enabled: bool,
+                    cx: &mut Context<EchoApp>| {
+        let current = options
+            .iter()
+            .find(|option| option.2)
+            .map(|option| option.0.clone())
+            .unwrap_or_default();
+        let is_open = enabled && open_dropdown == Some(id);
+        let menu = is_open.then(|| {
+            let items: Vec<_> = options
+                .into_iter()
+                .enumerate()
+                .map(|(ix, (label, change, active))| {
+                    div()
+                        .id(SharedString::from(format!("{id}-option-{ix}")))
+                        .px_2()
+                        .py_1()
+                        .rounded_sm()
+                        .text_xs()
+                        .text_color(if active { accent } else { fg })
+                        .when(active, |el| el.bg(palette.menu_selected))
+                        .cursor_pointer()
+                        .hover(move |style| style.bg(palette.menu_hover))
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            this.settings_dropdown = None;
+                            change.apply(this, cx);
+                            cx.stop_propagation();
+                        }))
+                        .child(label)
+                })
+                .collect();
+            div().absolute().top_full().right_0().child(
+                gpui::deferred(
+                    gpui::anchored()
+                        .anchor(gpui::Anchor::TopRight)
+                        .snap_to_window()
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("{id}-menu")))
+                                .occlude()
+                                .mt_1()
+                                .min_w(px(DROPDOWN_WIDTH))
+                                .p_1()
+                                .flex()
+                                .flex_col()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(palette.menu_border)
+                                .bg(surface)
+                                .shadow_md()
+                                .on_click(
+                                    cx.listener(|_this, _event, _window, cx| cx.stop_propagation()),
+                                )
+                                .children(items),
+                        ),
+                )
+                .with_priority(1),
+            )
+        });
+        div()
+            .relative()
+            .flex_none()
+            .child(
+                div()
+                    .id(id)
+                    .h(px(CONTROL_HEIGHT))
+                    .min_w(px(DROPDOWN_WIDTH))
+                    .pl_2()
+                    .pr_1p5()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if is_open { accent } else { palette.menu_border })
+                    .text_xs()
+                    .text_color(fg)
+                    .when(enabled, |el| {
+                        el.cursor_pointer()
+                            .hover(move |style| style.bg(palette.menu_hover))
+                            .on_click(cx.listener(
+                                move |this: &mut EchoApp, _event, _window, cx| {
+                                    this.settings_dropdown =
+                                        (this.settings_dropdown != Some(id)).then_some(id);
+                                    // The panel behind closes any open dropdown on a click.
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                },
+                            ))
+                    })
+                    .child(current)
+                    .child(
+                        svg()
+                            .path("icons/arrow-down.svg")
+                            .size(px(8.0))
+                            .text_color(muted),
+                    ),
+            )
+            .when_some(menu, |el, menu| el.child(menu))
+            .into_any_element()
+    };
+
+    // A plain push button; the caller adds the click. `strong` accents the one that matters.
+    let button = |id: &'static str, label: SharedString, strong: bool| {
+        div()
+            .id(id)
+            .flex_none()
+            .h(px(CONTROL_HEIGHT))
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded_md()
+            .border_1()
+            .border_color(if strong { accent } else { palette.menu_border })
+            .text_xs()
+            .text_color(if strong { accent } else { fg })
+            .child(label)
+    };
+
+    let command = |cmd: String| SettingChange::Command(cmd);
+    let on_off = |on: bool| if on { "on" } else { "off" };
+
+    // --- General ---------------------------------------------------------------------
     let language_row = row(
         s("desktop.settings.language"),
         None,
-        choices(
+        true,
+        dropdown(
             "lang",
-            vec![
-                ("English".into(), "lang en".into(), language == "en"),
-                ("简体".into(), "lang zh-CN".into(), language == "zh-CN"),
-            ],
+            [("English", "en"), ("简体中文", "zh-CN")]
+                .into_iter()
+                .map(|(label, code)| {
+                    (
+                        label.into(),
+                        command(format!("lang {code}")),
+                        config.language == code,
+                    )
+                })
+                .collect(),
+            true,
             cx,
         ),
     );
 
+    let tray_row = row(
+        s("desktop.settings.tray"),
+        None,
+        true,
+        toggle(
+            "tray",
+            config.close_to_tray,
+            command(format!("tray {}", on_off(!config.close_to_tray))),
+            cx,
+        ),
+    );
+
+    let sort_row = row(
+        s("desktop.settings.order"),
+        None,
+        true,
+        dropdown(
+            "libsort",
+            {
+                use echo_core::config::SortMode;
+                [
+                    // The manual drag-and-drop order.
+                    ("order_custom", "default", SortMode::Default),
+                    ("order_alpha", "alpha", SortMode::Alphabetical),
+                    ("order_creator", "creator", SortMode::Creator),
+                ]
+                .into_iter()
+                .map(|(key, name, mode)| {
+                    (
+                        s(&format!("desktop.settings.{key}")),
+                        command(format!("sort {name}")),
+                        config.sort_mode == mode,
+                    )
+                })
+                .collect()
+            },
+            true,
+            cx,
+        ),
+    );
+
+    let relative_row = row(
+        s("desktop.settings.relative"),
+        None,
+        true,
+        toggle(
+            "relative",
+            config.relative_line_numbers,
+            command(format!(
+                "relative {}",
+                on_off(!config.relative_line_numbers)
+            )),
+            cx,
+        ),
+    );
+
+    // --- Appearance ------------------------------------------------------------------
     let theme_mode = config
         .theme_mode
         .unwrap_or(echo_core::config::ThemeMode::Auto);
+    // The theme in use, or under `Auto` the dark and the light one.
+    let theme_label = {
+        use echo_core::config::{Scheme, ThemeMode};
+        let chosen =
+            |scheme| echo_core::theme::selected_name(&config, &app.state.ui.themes, scheme);
+        match theme_mode {
+            ThemeMode::Auto => format!("{} / {}", chosen(Scheme::Dark), chosen(Scheme::Light)),
+            ThemeMode::Dark => chosen(Scheme::Dark),
+            ThemeMode::Light => chosen(Scheme::Light),
+        }
+    };
+    let theme_row = row(
+        s("desktop.theme"),
+        None,
+        true,
+        button("settings-theme", theme_label.into(), false)
+            .cursor_pointer()
+            .hover(move |style| style.bg(palette.menu_hover))
+            .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                this.settings_open = false;
+                this.toggle_themes(cx);
+            }))
+            .into_any_element(),
+    );
+
     let mode_row = row(
         s("desktop.settings.mode"),
-        Some(s("desktop.settings.mode_desc")),
-        choices(
+        None,
+        true,
+        segmented(
             "mode",
             echo_core::config::ThemeMode::ALL
                 .into_iter()
@@ -5838,215 +6099,125 @@ pub fn settings_modal(
         ),
     );
 
-    let backdrop_row = row(
-        s("desktop.settings.backdrop"),
-        Some(s("desktop.settings.backdrop_desc")),
-        choices(
-            "backdrop",
-            echo_core::config::BackdropMode::ALL
-                .into_iter()
-                .map(|mode| {
-                    (
-                        s(&format!("desktop.settings.backdrops.{}", mode.name())),
-                        format!("backdrop {}", mode.name()),
-                        config.immersive_backdrop == mode,
-                    )
-                })
-                .collect(),
-            cx,
-        ),
-    );
-
-    let visualizer_row = row(
-        s("desktop.settings.visualizer"),
-        Some(s("desktop.settings.visualizer_desc")),
-        choices(
-            "vis",
-            vec![
-                (s("ui.on"), "vis".into(), config.enable_visualizer),
-                (s("ui.off"), "vis".into(), !config.enable_visualizer),
-            ],
-            cx,
-        ),
-    );
-
-    let bins_row = row(
-        s("desktop.settings.bins"),
-        Some("5–32".into()),
-        choices(
-            "visbins",
-            [7usize, 9, 16, 24, 32]
-                .into_iter()
-                .map(|n| {
-                    (
-                        SharedString::from(n.to_string()),
-                        format!("visbins {n}"),
-                        config.vis_bins == n,
-                    )
-                })
-                .collect(),
-            cx,
-        ),
-    );
+    // The offered sizes, plus whatever `:pixelate` / `:visbins` set outside them, so the
+    // button never shows blank.
+    let with_current = |offered: &[usize], current: usize| {
+        let mut values = offered.to_vec();
+        if !values.contains(&current) {
+            values.push(current);
+            values.sort_unstable();
+        }
+        values
+    };
 
     let pixelate_row = row(
         s("desktop.settings.pixelate"),
-        Some(s("desktop.settings.pixelate_desc")),
-        choices(
+        None,
+        true,
+        dropdown(
             "pixelate",
-            [0u32, 8, 16, 32]
+            with_current(&[0, 8, 16, 32], config.cover_img_pixels as usize)
                 .into_iter()
                 .map(|n| {
                     (
                         if n == 0 {
                             s("ui.off")
                         } else {
-                            SharedString::from(n.to_string())
+                            SharedString::from(format!("{n} px"))
                         },
-                        format!("pixelate {n}"),
-                        config.cover_img_pixels == n,
+                        command(format!("pixelate {n}")),
+                        config.cover_img_pixels as usize == n,
                     )
                 })
                 .collect(),
+            true,
             cx,
         ),
     );
 
-    let index_row = row(
-        s("desktop.settings.numbering"),
-        Some(s("desktop.settings.numbering_desc")),
-        choices(
-            "index",
-            vec![
-                ("1".into(), "index 1".into(), config.track_index_base == 1),
-                ("0".into(), "index 0".into(), config.track_index_base == 0),
-            ],
+    let backdrop_row = row(
+        s("desktop.settings.backdrop"),
+        None,
+        true,
+        dropdown(
+            "backdrop",
+            echo_core::config::BackdropMode::ALL
+                .into_iter()
+                .map(|mode| {
+                    (
+                        s(&format!("desktop.settings.backdrops.{}", mode.name())),
+                        command(format!("backdrop {}", mode.name())),
+                        config.immersive_backdrop == mode,
+                    )
+                })
+                .collect(),
+            true,
             cx,
         ),
     );
 
-    let relative_row = row(
-        s("desktop.settings.relative"),
-        Some(s("desktop.settings.relative_desc")),
-        choices(
-            "relative",
-            vec![
-                (
-                    s("ui.on"),
-                    "relative on".into(),
-                    config.relative_line_numbers,
-                ),
-                (
-                    s("ui.off"),
-                    "relative off".into(),
-                    !config.relative_line_numbers,
-                ),
-            ],
+    let visualizer_row = row(
+        s("desktop.settings.visualizer"),
+        None,
+        true,
+        // `:vis` flips the visualizer; it takes no argument.
+        toggle("vis", config.enable_visualizer, command("vis".into()), cx),
+    );
+
+    let bins_row = row(
+        s("desktop.settings.bins"),
+        None,
+        config.enable_visualizer,
+        dropdown(
+            "visbins",
+            with_current(&[7, 9, 16, 24, 32], config.vis_bins)
+                .into_iter()
+                .map(|n| {
+                    (
+                        SharedString::from(n.to_string()),
+                        command(format!("visbins {n}")),
+                        config.vis_bins == n,
+                    )
+                })
+                .collect(),
+            config.enable_visualizer,
             cx,
         ),
     );
 
-    let tray_row = row(
-        s("desktop.settings.tray"),
-        Some(s("desktop.settings.tray_desc")),
-        choices(
-            "tray",
-            vec![
-                (s("ui.on"), "tray on".into(), config.close_to_tray),
-                (s("ui.off"), "tray off".into(), !config.close_to_tray),
-            ],
-            cx,
-        ),
-    );
-
-    let sort_row = row(
-        s("desktop.settings.order"),
-        Some(s("desktop.settings.order_desc")),
-        choices(
-            "libsort",
-            vec![
-                (
-                    // The manual drag-and-drop order.
-                    s("desktop.settings.order_custom"),
-                    "sort default".into(),
-                    config.sort_mode == echo_core::config::SortMode::Default,
-                ),
-                (
-                    s("desktop.settings.order_alpha"),
-                    "sort alpha".into(),
-                    config.sort_mode == echo_core::config::SortMode::Alphabetical,
-                ),
-                (
-                    s("desktop.settings.order_creator"),
-                    "sort creator".into(),
-                    config.sort_mode == echo_core::config::SortMode::Creator,
-                ),
-            ],
-            cx,
-        ),
-    );
-
+    // --- Audio quality ---------------------------------------------------------------
     let bitrate_row = row(
         s("desktop.settings.quality"),
-        Some(s("desktop.settings.quality_desc")),
-        div()
-            .flex()
-            .flex_row()
-            .gap_1()
-            .children([96u32, 160, 320].into_iter().map(|rate| {
-                let active = config.bitrate == rate;
-                div()
-                    .id(SharedString::from(format!("bitrate-{rate}")))
-                    .px_2()
-                    .py_0p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if active { accent } else { palette.menu_border })
-                    .text_xs()
-                    .text_color(if active { accent } else { muted })
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_hover))
-                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                        this.set_audio_quality(|config| config.bitrate = rate, cx);
-                    }))
-                    .child(SharedString::from(rate.to_string()))
-            }))
-            .into_any_element(),
+        None,
+        true,
+        dropdown(
+            "bitrate",
+            [96u32, 160, 320]
+                .into_iter()
+                .map(|rate| {
+                    (
+                        SharedString::from(format!("{rate} kbps")),
+                        SettingChange::Bitrate(rate),
+                        config.bitrate == rate,
+                    )
+                })
+                .collect(),
+            true,
+            cx,
+        ),
     );
 
     let normalisation = config.normalisation;
-    let norm_on_label = s("ui.on");
-    let norm_off_label = s("ui.off");
     let normalisation_row = row(
         s("desktop.settings.normalisation"),
-        Some(s("desktop.settings.normalisation_desc")),
-        div()
-            .flex()
-            .flex_row()
-            .gap_1()
-            .children([true, false].into_iter().map(|on| {
-                let active = normalisation == on;
-                div()
-                    .id(if on { "norm-on" } else { "norm-off" })
-                    .px_2()
-                    .py_0p5()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(if active { accent } else { palette.menu_border })
-                    .text_xs()
-                    .text_color(if active { accent } else { muted })
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(palette.menu_hover))
-                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                        this.set_audio_quality(|config| config.normalisation = on, cx);
-                    }))
-                    .child(if on {
-                        norm_on_label.clone()
-                    } else {
-                        norm_off_label.clone()
-                    })
-            }))
-            .into_any_element(),
+        None,
+        true,
+        toggle(
+            "normalisation",
+            normalisation,
+            SettingChange::Normalisation(!normalisation),
+            cx,
+        ),
     );
 
     let pregain = config.normalisation_pregain;
@@ -6054,7 +6225,7 @@ pub fn settings_modal(
         |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
             div()
                 .id(id)
-                .w(px(22.0))
+                .size(px(CONTROL_HEIGHT))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -6062,25 +6233,30 @@ pub fn settings_modal(
                 .border_1()
                 .border_color(palette.menu_border)
                 .text_xs()
-                .text_color(muted)
-                .cursor_pointer()
-                .hover(move |style| style.bg(palette.menu_hover))
-                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                    this.set_audio_quality(
-                        |config| {
-                            // Matches librespot's usable range; beyond this the limiter dominates.
-                            config.normalisation_pregain =
-                                (config.normalisation_pregain + delta).clamp(-10.0, 10.0);
-                        },
-                        cx,
-                    );
-                }))
+                .text_color(fg)
+                .when(normalisation, |el| {
+                    el.cursor_pointer()
+                        .hover(move |style| style.bg(palette.menu_hover))
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            this.set_audio_quality(
+                                |config| {
+                                    // Matches librespot's usable range; beyond this the
+                                    // limiter dominates.
+                                    config.normalisation_pregain =
+                                        (config.normalisation_pregain + delta).clamp(-10.0, 10.0);
+                                },
+                                cx,
+                            );
+                        }))
+                })
                 .child(label)
         };
     let pregain_row = row(
         s("desktop.settings.pregain"),
         Some(s("desktop.settings.pregain_desc")),
+        normalisation,
         div()
+            .flex_none()
             .flex()
             .flex_row()
             .items_center()
@@ -6088,7 +6264,7 @@ pub fn settings_modal(
             .child(step_button("pregain-down", "−", -0.5, cx))
             .child(
                 div()
-                    .w(px(52.0))
+                    .w(px(56.0))
                     .text_xs()
                     .text_color(fg)
                     .text_center()
@@ -6098,6 +6274,7 @@ pub fn settings_modal(
             .into_any_element(),
     );
 
+    // --- Local music -----------------------------------------------------------------
     let local_field = div()
         .id("settings-localpath")
         .key_context(crate::SEARCH_CONTEXT)
@@ -6105,9 +6282,12 @@ pub fn settings_modal(
         .on_key_down(cx.listener(|this: &mut EchoApp, event, window, cx| {
             this.handle_settings_path_key(event, window, cx)
         }))
-        .w_full()
+        .flex_1()
+        .min_w_0()
+        .h(px(CONTROL_HEIGHT))
         .px_2()
-        .py_1()
+        .flex()
+        .items_center()
         .rounded_md()
         .border_1()
         .border_color(if path_focused {
@@ -6132,26 +6312,21 @@ pub fn settings_modal(
         } else {
             path_value
         }));
-
-    let small_button =
-        |id: &'static str, label: SharedString, cmd: &'static str, cx: &mut Context<EchoApp>| {
-            div()
-                .id(id)
-                .flex_none()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .border_1()
-                .border_color(palette.menu_border)
-                .text_xs()
-                .text_color(muted)
+    let local_row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .min_h(px(ROW_HEIGHT))
+        .child(local_field)
+        .child(
+            button("settings-rescan", s("desktop.settings.rescan"), false)
                 .cursor_pointer()
                 .hover(move |style| style.bg(palette.menu_hover))
-                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                    this.run_setting(cmd.to_string(), cx);
-                }))
-                .child(label)
-        };
+                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                    this.run_setting("rescanlocal".to_string(), cx);
+                })),
+        );
 
     // --- Updates ---------------------------------------------------------------------
     // The one control here that is neither a `:` command nor a config write: it runs a network
@@ -6159,6 +6334,7 @@ pub fn settings_modal(
     let version_row = row(
         s("desktop.settings.updates.version"),
         None,
+        true,
         div()
             .text_xs()
             .text_color(muted)
@@ -6179,16 +6355,17 @@ pub fn settings_modal(
     };
     let auto_update_row = row(
         s("desktop.settings.updates.auto"),
-        Some(s("desktop.settings.updates.auto_desc")),
-        choices(
+        None,
+        true,
+        toggle(
             "autoupdate",
-            vec![
-                (s("ui.on"), "autoupdate on".into(), config.auto_update),
-                (s("ui.off"), "autoupdate off".into(), !config.auto_update),
-            ],
+            config.auto_update,
+            command(format!("autoupdate {}", on_off(!config.auto_update))),
             cx,
         ),
     );
+    // The hint only appears when there is something to report: an installed update waiting
+    // for a restart, or why the last attempt failed.
     let (update_label, update_hint, update_active) = match &app.update_state {
         UpdateState::Idle => (s("desktop.settings.updates.check"), None, true),
         UpdateState::Checking => (s("desktop.settings.updates.checking"), None, false),
@@ -6221,20 +6398,8 @@ pub fn settings_modal(
         ),
     };
 
-    let update_button = div()
-        .id("settings-update")
-        .flex_none()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .border_1()
-        .border_color(if update_active {
-            accent
-        } else {
-            palette.menu_border
-        })
-        .text_xs()
-        .text_color(if update_active { accent } else { muted })
+    let update_button = button("settings-update", update_label, update_active)
+        .when(!update_active, |el| el.text_color(muted))
         .when(update_active, |el| {
             el.cursor_pointer()
                 .hover(move |style| style.bg(palette.menu_hover))
@@ -6248,12 +6413,12 @@ pub fn settings_modal(
                     }
                 }))
         })
-        .child(update_label)
         .into_any_element();
 
     let update_row = row(
         s("desktop.settings.updates.label"),
-        update_hint.or_else(|| Some(s("desktop.settings.updates.desc"))),
+        update_hint,
+        true,
         update_button,
     );
 
@@ -6267,14 +6432,18 @@ pub fn settings_modal(
         .justify_center()
         .occlude()
         .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-            this.settings_open = false;
+            // A click outside first closes an open dropdown, then the sheet.
+            if this.settings_dropdown.take().is_none() {
+                this.settings_open = false;
+            }
             cx.notify();
         }))
         .child(
             div()
                 .id("settings-panel")
-                .w(px(520.0))
-                .max_h(px(560.0))
+                .w(px(480.0))
+                // Never taller than the window: the list below takes what is left and scrolls.
+                .max_h(px(580.0).min(window.viewport_size().height - px(32.0)))
                 .rounded_lg()
                 .border_1()
                 .border_color(palette.menu_border)
@@ -6283,106 +6452,95 @@ pub fn settings_modal(
                 .flex()
                 .flex_col()
                 .overflow_hidden()
-                .on_click(cx.listener(|_this, _event, _window, cx| cx.stop_propagation()))
+                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                    if this.settings_dropdown.take().is_some() {
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }))
                 .child(
+                    // The rule is where scrolled rows disappear, so they never run up
+                    // under the title.
                     div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .justify_between()
-                        .pb_2()
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(fg)
-                                .child(s("desktop.settings.title")),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(muted)
-                                .child(s("desktop.settings.subtitle")),
-                        ),
+                        .flex_none()
+                        .pb_3()
+                        .border_b_1()
+                        .border_color(palette.menu_border)
+                        .text_base()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(fg)
+                        .child(s("desktop.settings.title")),
                 )
                 .child(
                     div()
                         .id("settings-list")
                         .flex()
                         .flex_col()
-                        .max_h(px(470.0))
+                        // Sized by its rows, shrinking (and scrolling) once the panel is full.
+                        .min_h_0()
                         .overflow_y_scroll()
                         .track_scroll(&app.settings_scroll)
-                        .child(heading(s("desktop.settings.appearance")))
-                        .child(row(
-                            s("desktop.theme"),
-                            None,
-                            div()
-                                .id("settings-theme")
-                                .px_2()
-                                .py_0p5()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(palette.menu_border)
-                                .text_xs()
-                                .text_color(muted)
-                                .cursor_pointer()
-                                .hover(move |style| style.bg(palette.menu_hover))
-                                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                                    this.settings_open = false;
-                                    this.toggle_themes(cx);
-                                }))
-                                .child(SharedString::from(
-                                    config.active_theme.clone().unwrap_or_else(|| "echo".into()),
-                                ))
-                                .into_any_element(),
-                        ))
-                        .child(language_row)
-                        .child(mode_row)
-                        .child(pixelate_row)
-                        .child(backdrop_row)
-                        .when(!cfg!(target_os = "macos"), |el| {
-                            el.child(heading(s("desktop.settings.window")))
-                                .child(tray_row)
-                        })
-                        .child(heading(s("desktop.settings.library")))
-                        .child(sort_row)
-                        .child(index_row)
-                        .child(relative_row)
-                        .child(heading(s("desktop.settings.playback")))
-                        .child(visualizer_row)
-                        .child(bins_row)
-                        .child(heading(s("desktop.settings.audio")))
-                        .child(bitrate_row)
-                        .child(normalisation_row)
-                        .child(pregain_row)
-                        .child(heading(s("desktop.settings.local")))
+                        // One child holding every row: the scroll extent is measured across the list's children and
+                        // skips the first one's top margin, which left the last row short of fully scrolling in.
                         .child(
                             div()
+                                .flex_none()
                                 .flex()
                                 .flex_col()
-                                .gap_1()
-                                .py_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(s("desktop.settings.folder_desc")),
-                                )
-                                .child(local_field)
-                                .child(div().flex().flex_row().gap_1().child(small_button(
-                                    "settings-rescan",
-                                    s("desktop.settings.rescan"),
-                                    "rescanlocal",
-                                    cx,
-                                ))),
-                        )
-                        .child(heading(s("desktop.settings.updates.section")))
-                        .child(version_row)
-                        .child(auto_update_row)
-                        .child(update_row),
+                                .child(heading(s("desktop.settings.general"), None))
+                                .child(language_row)
+                                .when(!cfg!(target_os = "macos"), |el| el.child(tray_row))
+                                .child(sort_row)
+                                .child(relative_row)
+                                .child(heading(s("desktop.settings.appearance"), None))
+                                .child(theme_row)
+                                .child(mode_row)
+                                .child(pixelate_row)
+                                .child(backdrop_row)
+                                .child(visualizer_row)
+                                .child(bins_row)
+                                .child(heading(
+                                    s("desktop.settings.audio"),
+                                    Some(s("desktop.settings.next_launch")),
+                                ))
+                                .child(bitrate_row)
+                                .child(normalisation_row)
+                                .child(pregain_row)
+                                .child(heading(s("desktop.settings.local"), None))
+                                .child(local_row)
+                                .child(heading(s("desktop.settings.updates.section"), None))
+                                .child(version_row)
+                                .child(auto_update_row)
+                                .child(update_row),
+                        ),
                 ),
         )
 }
+
+/// What a settings control does when used: nearly always a `:` command, so the sheet and the
+/// command bar cannot drift apart. The audio-quality keys have no command and write the
+/// config directly.
+#[derive(Clone)]
+enum SettingChange {
+    Command(String),
+    Bitrate(u32),
+    Normalisation(bool),
+}
+
+impl SettingChange {
+    fn apply(&self, app: &mut EchoApp, cx: &mut Context<EchoApp>) {
+        match *self {
+            Self::Command(ref cmd) => app.run_setting(cmd.clone(), cx),
+            Self::Bitrate(rate) => app.set_audio_quality(|config| config.bitrate = rate, cx),
+            Self::Normalisation(on) => {
+                app.set_audio_quality(|config| config.normalisation = on, cx)
+            }
+        }
+    }
+}
+
+/// Every settings dropdown is this wide at least, so their right and left edges line up.
+const DROPDOWN_WIDTH: f32 = 124.0;
 
 /// The Spotify Connect device picker, painted over everything else.
 pub fn device_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {

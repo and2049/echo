@@ -367,10 +367,6 @@ fn context_refresh_ttl(context: &TrackListContext) -> Duration {
     }
 }
 
-fn default_track_index_base() -> isize {
-    1
-}
-
 fn default_language() -> String {
     "en".to_string()
 }
@@ -407,8 +403,6 @@ pub struct LibraryConfig {
     /// The theme used while the appearance is light.
     #[serde(default)]
     pub light_theme: Option<String>,
-    #[serde(default = "default_track_index_base")]
-    pub track_index_base: isize,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -527,7 +521,6 @@ impl Default for LibraryConfig {
             theme_mode: None,
             dark_theme: None,
             light_theme: None,
-            track_index_base: 1,
             language: "en".to_string(),
             cover_img_pixels: 0,
             condensed_lyrics_enabled: false,

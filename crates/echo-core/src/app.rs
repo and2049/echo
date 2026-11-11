@@ -1051,13 +1051,13 @@ impl AppState {
     }
 }
 
-/// The number shown in a list's index column: `base` shifts the count (0- or 1-based), while
-/// `relative` shows vim-style distances from the selected row (which keeps its absolute number).
-pub fn displayed_track_number(index: usize, selected: usize, base: isize, relative: bool) -> isize {
+/// The number shown in a list's index column: rows count from 1, while `relative` shows
+/// vim-style distances from the selected row (which keeps its absolute number).
+pub fn displayed_track_number(index: usize, selected: usize, relative: bool) -> usize {
     if relative && index != selected {
-        index.abs_diff(selected) as isize
+        index.abs_diff(selected)
     } else {
-        index as isize + base
+        index + 1
     }
 }
 
@@ -1068,10 +1068,10 @@ mod tests {
 
     #[test]
     fn relative_numbers_keep_current_absolute_and_show_distance_elsewhere() {
-        assert_eq!(displayed_track_number(4, 4, 1, true), 5);
-        assert_eq!(displayed_track_number(1, 4, 1, true), 3);
-        assert_eq!(displayed_track_number(7, 4, 1, true), 3);
-        assert_eq!(displayed_track_number(1, 4, 1, false), 2);
+        assert_eq!(displayed_track_number(4, 4, true), 5);
+        assert_eq!(displayed_track_number(1, 4, true), 3);
+        assert_eq!(displayed_track_number(7, 4, true), 3);
+        assert_eq!(displayed_track_number(1, 4, false), 2);
     }
 
     #[test]

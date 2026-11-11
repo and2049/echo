@@ -199,7 +199,6 @@ The `:` command bar accepts the following:
 - `:backdrop <lights|mesh|aurora|vinyl|nebula>`: Pick the moving picture behind the immersive view (also in Settings).
 - `:tray [on|off]`: Whether the close button hides echo to the tray instead of quitting (also in Settings).
 - `:autoupdate [on|off]`: Install new releases automatically (also in Settings).
-- `:index <number>`: Set track index base (1-indexed vs 0-indexed).
 - `:quit`, `:q`, `:qa`, `:wq`: Exit the application.
 
 Track sorting and navigation operate on already-loaded data. They do not issue Spotify requests. Navigation history retains up to 20 in-memory views so returning to a previous track list normally does not refetch it.

@@ -1,6 +1,8 @@
 # Changelog
 
 ### Desktop App
+ - Redesigned Settings: switches for on/off options, dropdowns for choices, a segmented Mode control, far fewer hints, and sections regrouped into General, Appearance, Audio quality, Local music and Updates. Visualizer bands and pregain dim while the setting they depend on is off
+ - Removed the track numbering base setting and the `:index` command; lists always number from 1
  - Dark, light and auto modes: echo keeps one theme for dark and one for light, and `auto` follows the system on macOS, Windows and Linux. Set the mode in the theme picker (`t`), in Settings, or with `:mode auto|dark|light`; a theme you had already picked keeps its look
  - New themes pairing existing ones: chime (light echo), nimbus (dark cloud), tide (dark wave), glade (light everforest) and parchment (light gruvbox). The theme picker lists one appearance at a time, with a pair on one row and color swatches for every theme
  - Removed the crimson, cyber_citrus and neon themes; a config still naming one opens on echo

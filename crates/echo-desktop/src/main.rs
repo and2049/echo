@@ -254,6 +254,8 @@ pub(crate) struct EchoApp {
     pub(crate) sort_menu_top: f32,
     pub(crate) sort_menu_index: usize,
     pub(crate) settings_open: bool,
+    /// The settings dropdown whose menu is showing, by its control id.
+    pub(crate) settings_dropdown: Option<&'static str>,
     pub(crate) settings_path_input: String,
     pub(crate) settings_path_cursor: usize,
     pub(crate) settings_path_focus: FocusHandle,
@@ -609,6 +611,7 @@ impl EchoApp {
             sort_menu_top: 96.0,
             sort_menu_index: 0,
             settings_open: false,
+            settings_dropdown: None,
             settings_path_input: String::new(),
             settings_path_cursor: 0,
             settings_path_focus: cx.focus_handle(),
@@ -1284,7 +1287,10 @@ impl EchoApp {
         } else if self.sort_menu_open {
             self.sort_menu_open = false;
         } else if self.settings_open {
-            self.settings_open = false;
+            // An open dropdown is the topmost layer of the sheet.
+            if self.settings_dropdown.take().is_none() {
+                self.settings_open = false;
+            }
         } else if self.help_open {
             self.help_open = false;
         } else if self.immersive {
@@ -1825,6 +1831,7 @@ impl EchoApp {
     /// Open or close the settings sheet, seeding the folder field from the saved config.
     pub(crate) fn toggle_settings(&mut self, cx: &mut Context<Self>) {
         self.settings_open = !self.settings_open;
+        self.settings_dropdown = None;
         if self.settings_open {
             self.settings_path_input = self
                 .state

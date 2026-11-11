@@ -20,7 +20,6 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("newfolder <name>", "Create a folder to organise playlists"),
     ("delfolder", "Delete the selected folder"),
     ("sort <mode>", "Sort the library, or the loaded track list"),
-    ("index <n>", "Track numbering base (0 or 1)"),
     ("theme <name>", "Switch theme"),
     (
         "mode <auto|dark|light>",
@@ -514,25 +513,6 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     state.save_library_config();
                     state.compute_library_view();
                 }
-            }
-            "index" => {
-                if let Some(base_str) = args.next() {
-                    if let Ok(base) = base_str.parse::<isize>() {
-                        state.ui.library_config.track_index_base = base;
-                        state.save_library_config();
-                        state.ui.status_message = Some(format!("Track index base set to {}", base));
-                    } else {
-                        state.ui.status_message =
-                            Some("Invalid index base, must be a number".to_string());
-                    }
-                } else {
-                    state.ui.status_message = Some(format!(
-                        "Current index base: {}",
-                        state.ui.library_config.track_index_base
-                    ));
-                }
-                state.ui.status_message_expiry =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
             }
             "delfolder" => {
                 // Deletes currently selected folder
