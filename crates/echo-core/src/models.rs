@@ -471,7 +471,7 @@ impl TrackListContext {
     pub fn local_library() -> Self {
         Self {
             id: "local-library".to_string(),
-            title: "📁 Local Music".to_string(),
+            title: "Local Music".to_string(),
             subtitle: String::new(),
             owner_id: None,
             image_url: None,

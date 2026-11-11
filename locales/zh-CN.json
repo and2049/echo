@@ -258,8 +258,9 @@
       "normalisation": "音量均衡",
       "pregain": "均衡预增益",
       "pregain_desc": "均衡后补偿的 dB — 播放偏轻时可调高",
-      "folder_empty": "音乐文件夹的绝对路径 — 回车应用",
+      "folder_empty": "音乐文件夹的路径",
       "rescan": "立即重新扫描",
+      "set_folder": "设置",
       "updates": {
         "auto": "自动更新",
         "auto_on": "自动更新已开启",

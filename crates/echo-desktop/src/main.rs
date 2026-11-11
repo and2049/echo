@@ -2093,6 +2093,45 @@ impl EchoApp {
         .detach();
     }
 
+    /// True when the folder field holds something other than the saved folder, including when
+    /// none is saved yet.
+    pub(crate) fn local_folder_unsaved(&self) -> bool {
+        let saved = self
+            .state
+            .ui
+            .library_config
+            .local_music_dir
+            .as_ref()
+            .map(|path| path.display().to_string());
+        saved.as_deref() != Some(self.settings_path_input.trim())
+    }
+
+    /// Enter in the folder field, or its button: save and scan what was typed, or rescan when
+    /// the field already matches the saved folder.
+    pub(crate) fn apply_or_rescan_local_folder(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.local_folder_unsaved() {
+            let path = self.settings_path_input.trim().to_string();
+            if !path.is_empty() {
+                self.run_setting(format!("localpath {path}"), cx);
+                // Show the folder as saved: `~` expanded, and the button back to rescan.
+                if let Some(saved) = &self.state.ui.library_config.local_music_dir
+                    && echo_core::commands::expand_home(&path) == *saved
+                {
+                    self.settings_path_input = saved.display().to_string();
+                    self.settings_path_cursor = self.settings_path_input.len();
+                }
+            }
+        } else {
+            self.run_setting("rescanlocal".to_string(), cx);
+        }
+        window.focus(&self.focus_handle.clone(), cx);
+        cx.notify();
+    }
+
     /// Typing in the settings sheet's local-folder field. Enter submits it as `:localpath`.
     fn handle_settings_path_key(
         &mut self,
@@ -2101,13 +2140,7 @@ impl EchoApp {
         cx: &mut Context<Self>,
     ) {
         match event.keystroke.key.as_str() {
-            "enter" => {
-                let path = self.settings_path_input.trim().to_string();
-                if !path.is_empty() {
-                    self.run_setting(format!("localpath {path}"), cx);
-                }
-                window.focus(&self.focus_handle.clone(), cx);
-            }
+            "enter" => self.apply_or_rescan_local_folder(window, cx),
             "escape" => window.focus(&self.focus_handle.clone(), cx),
             "v" if is_paste_chord(&event.keystroke.modifiers) => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {

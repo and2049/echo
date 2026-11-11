@@ -213,6 +213,19 @@ fn unquote_path(text: &str) -> &str {
     unquoted.trim()
 }
 
+/// Reads `~` and `~/…` as the home directory, the way a shell would. `~user` is left alone.
+pub fn expand_home(text: &str) -> std::path::PathBuf {
+    let rest = match text.strip_prefix('~') {
+        Some("") => Some(""),
+        Some(rest) => rest.strip_prefix(['/', '\\']),
+        None => None,
+    };
+    match (rest, dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => std::path::PathBuf::from(text),
+    }
+}
+
 fn command_remainder<'a>(command: &'a str, command_name: &str) -> &'a str {
     command
         .trim()
@@ -736,7 +749,7 @@ fn execute(state: &mut AppState, cmd: &str) -> Option<AppEvent> {
                     state.ui.status_message_expiry =
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
                 } else {
-                    let path = std::path::PathBuf::from(path_text);
+                    let path = expand_home(path_text);
                     if !path.is_absolute() {
                         state.ui.status_message = Some("Local path must be absolute".to_string());
                         state.ui.status_message_expiry =
@@ -1044,6 +1057,21 @@ mod tests {
                 "{name} is documented but never completes"
             );
         }
+    }
+
+    #[test]
+    fn a_leading_tilde_is_the_home_directory() {
+        let home = dirs::home_dir().expect("home directory");
+        assert_eq!(expand_home("~"), home);
+        assert_eq!(expand_home("~/Music/"), home.join("Music/"));
+        assert_eq!(
+            expand_home("/srv/music"),
+            std::path::Path::new("/srv/music")
+        );
+        assert_eq!(
+            expand_home("~other/Music"),
+            std::path::Path::new("~other/Music")
+        );
     }
 
     #[test]

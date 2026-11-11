@@ -1083,6 +1083,15 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                 }
                             };
 
+                            // Liked Songs has no cover, so its box holds the heart icon, which
+                            // takes the theme's accent. (An emoji in the name would not: macOS
+                            // draws those in full colour.)
+                            let liked_row = tab == LibraryTab::Playlists
+                                && matches!(
+                                    &this.state.data.library_view[ix],
+                                    LibraryNode::Playlist { playlist, .. }
+                                        if playlist.id == "LIKED_SONGS"
+                                );
                             let thumb: Option<AnyElement> = has_thumb.then(|| {
                                 let artwork = thumb_url.as_deref().and_then(|url| {
                                     this.state.ui.thumbnails.request(url, ThumbTier::Small);
@@ -1109,10 +1118,14 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
                                             .justify_center()
                                             .child(
                                                 svg()
-                                                    .path("icons/music-note.svg")
+                                                    .path(if liked_row {
+                                                        "icons/heart.svg"
+                                                    } else {
+                                                        "icons/music-note.svg"
+                                                    })
                                                     .w(px(12.0))
                                                     .h(px(12.0))
-                                                    .text_color(muted),
+                                                    .text_color(if liked_row { accent } else { muted }),
                                             );
                                         if round_thumb { el.rounded_full() } else { el.rounded_sm() }
                                             .into_any_element()
@@ -6313,6 +6326,7 @@ pub fn settings_modal(
     );
 
     // --- Local music -----------------------------------------------------------------
+    let path_unsaved = app.local_folder_unsaved();
     let local_field = div()
         .id("settings-localpath")
         .key_context(crate::SEARCH_CONTEXT)
@@ -6358,12 +6372,22 @@ pub fn settings_modal(
         .min_h(px(ROW_HEIGHT))
         .child(local_field)
         .child(
-            button("settings-rescan", s("desktop.settings.rescan"), false)
-                .cursor_pointer()
-                .hover(move |style| style.bg(palette.menu_hover))
-                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                    this.run_setting("rescanlocal".to_string(), cx);
-                })),
+            // With no folder saved, or a different one typed, the button applies the field;
+            // otherwise there is nothing to set and it rescans.
+            button(
+                "settings-rescan",
+                s(if path_unsaved {
+                    "desktop.settings.set_folder"
+                } else {
+                    "desktop.settings.rescan"
+                }),
+                false,
+            )
+            .cursor_pointer()
+            .hover(move |style| style.bg(palette.menu_hover))
+            .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
+                this.apply_or_rescan_local_folder(window, cx);
+            })),
         );
 
     // --- Updates ---------------------------------------------------------------------

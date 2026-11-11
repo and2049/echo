@@ -258,8 +258,9 @@
       "normalisation": "Volume normalisation",
       "pregain": "Normalisation pregain",
       "pregain_desc": "dB added back after normalisation — raise if playback is quiet",
-      "folder_empty": "Absolute path to a music folder — Enter to apply",
+      "folder_empty": "Path to a music folder",
       "rescan": "Rescan now",
+      "set_folder": "Set",
       "updates": {
         "auto": "Automatic updates",
         "auto_on": "Automatic updates on",
