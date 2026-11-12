@@ -15,6 +15,7 @@ mod backdrop;
 mod dock_icon;
 mod images;
 mod playlist_ui;
+mod regions;
 mod single_instance;
 mod theme;
 mod tray;
@@ -234,6 +235,8 @@ pub(crate) struct EchoApp {
     pub(crate) drag_scroll: Option<(DragList, f32)>,
     pub(crate) drag_scroll_ticking: bool,
     playing_bars: Cell<PlayingBars>,
+    regions: regions::Regions,
+    _regions_follow_app: gpui::Subscription,
     pub(crate) playlist_modal_scroll: ScrollHandle,
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
@@ -350,7 +353,7 @@ enum PlayingBars {
 
 /// One bounce of the playing row's bars.
 const PLAYING_BARS_LOOP: Duration = Duration::from_millis(900);
-/// How often the bars repaint. Every frame re-renders the whole window, so this stays well
+/// How often the bars repaint. Every frame re-renders the track list, so this stays well
 /// under the display's refresh rate.
 const PLAYING_BARS_FRAME: Duration = Duration::from_millis(33);
 
@@ -507,11 +510,19 @@ impl EchoApp {
                         &event,
                         echo_core::events::WorkerEvent::AuthenticationComplete
                     );
+                    // Arrives ten times a second during playback and only moves the position.
+                    let position_only = matches!(&event, echo_core::events::WorkerEvent::Tick);
                     apply_worker_event(event, &mut app.state, &app.app_tx, &app.worker_tx);
                     if signed_in {
                         app.open_home(cx);
                     }
-                    cx.notify();
+                    // A tick that reaches the end of the track stops playback, which every
+                    // pane shows.
+                    if position_only && app.state.playback.is_playing {
+                        app.notify_playback_position(cx);
+                    } else {
+                        cx.notify();
+                    }
                 });
                 if applied.is_err() {
                     break; // entity dropped — app is shutting down
@@ -529,8 +540,10 @@ impl EchoApp {
                 let interval = this.update(cx, |app: &mut EchoApp, cx| {
                     app.maybe_auto_update(cx);
                     let animating = app.immersive && !cx.reduce_motion();
-                    if app.state.playback.is_playing || animating {
+                    if animating {
                         cx.notify();
+                    } else if app.state.playback.is_playing {
+                        app.notify_playback_position(cx);
                     }
                     // Status messages carry an expiry; the periodic tick retires them.
                     if app
@@ -615,6 +628,8 @@ impl EchoApp {
             drag_scroll: None,
             drag_scroll_ticking: false,
             playing_bars: Cell::new(PlayingBars::Hidden),
+            regions: regions::Regions::new(cx),
+            _regions_follow_app: cx.observe_self(|app, cx| app.regions.notify_all(cx)),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
@@ -1723,8 +1738,21 @@ impl EchoApp {
         echo_core::intent::has_multi_selection(&self.state)
     }
 
+    /// Redraws only what shows the playback position or the volume: the playback bar, the
+    /// lyrics panel, and the immersive view, which is drawn by the app itself.
+    fn notify_playback_position(&mut self, cx: &mut Context<Self>) {
+        if self.immersive {
+            cx.notify();
+            return;
+        }
+        self.regions.notify(regions::Region::PlaybackBar, cx);
+        if self.right_panel == Some(RightPanel::Lyrics) {
+            self.regions.notify(regions::Region::RightPanel, cx);
+        }
+    }
+
     /// The phase, in `0..1`, to draw the playing row's bars at. Calling this from a render
-    /// keeps the window repainting every [`PLAYING_BARS_FRAME`] for as long as renders keep
+    /// keeps the track list repainting every [`PLAYING_BARS_FRAME`] for as long as renders keep
     /// calling it.
     pub(crate) fn animate_playing_bars(&self, cx: &mut Context<Self>) -> f32 {
         if self.playing_bars.replace(PlayingBars::Drawn) == PlayingBars::Hidden {
@@ -1734,7 +1762,7 @@ impl EchoApp {
                     let keep_going = this.update(cx, |app, cx| match app.playing_bars.get() {
                         PlayingBars::Drawn => {
                             app.playing_bars.set(PlayingBars::Stale);
-                            cx.notify();
+                            app.regions.notify(regions::Region::Main, cx);
                             true
                         }
                         PlayingBars::Stale | PlayingBars::Hidden => {
@@ -2840,7 +2868,7 @@ impl EchoApp {
                 self.state.playback.volume = (fraction * 100.0).round() as u32;
             }
         }
-        cx.notify();
+        self.notify_playback_position(cx);
     }
 
     fn finish_scrub(&mut self, x: Pixels, cx: &mut Context<Self>) {
@@ -3027,7 +3055,7 @@ impl EchoApp {
         let _ = self.app_tx.send(event);
     }
 
-    fn render_playback_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn render_playback_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let palette = DesktopPalette::resolve(theme);
         let fg = theme.text.gpui(WINDOW_FG());
@@ -3158,7 +3186,7 @@ impl EchoApp {
             .flex_col()
             .justify_center()
             .gap_1()
-            .h(px(108.0))
+            .h(px(regions::PLAYBACK_BAR_HEIGHT))
             .px_4()
             .border_t_1()
             .border_color(palette.border)
@@ -4190,11 +4218,12 @@ impl Render for EchoApp {
                             .flex_row()
                             .overflow_hidden()
                             .when(!self.sidebar_collapsed, |el| {
-                                el.child(views::sidebar(self, cx))
+                                el.child(self.regions.sidebar(self.sidebar_width))
                             })
-                            .child(views::main_area(self, window, cx))
-                            .when_some(self.right_panel, |el, panel| {
-                                el.child(views::right_panel(self, panel, window, cx))
+                            .child(self.regions.main())
+                            .when(self.right_panel.is_some(), |el| {
+                                let width = self.effective_right_panel_width(window);
+                                el.child(self.regions.right_panel(width))
                             }),
                     )
                     .when_some(status_line, |el, line| el.child(line))
@@ -4203,7 +4232,7 @@ impl Render for EchoApp {
             .when_some(command_bar, |el, bar| el.child(bar))
             .when_some(audio_banner, |el, banner| el.child(banner))
             .when_some(update_banner, |el, banner| el.child(banner))
-            .when(!self.immersive, |el| el.child(self.render_playback_bar(cx)))
+            .when(!self.immersive, |el| el.child(self.regions.playback_bar()))
             .when_some(theme_modal, |el, modal| el.child(modal))
             .when_some(device_modal, |el, modal| el.child(modal))
             .when_some(playlist_add_modal, |el, modal| el.child(modal))
