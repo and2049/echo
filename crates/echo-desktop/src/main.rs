@@ -333,16 +333,6 @@ fn mac_menus() -> Vec<gpui::Menu> {
     ]
 }
 
-/// Whether a keystroke's modifiers mean "paste" for the hand-rolled text fields.
-///
-/// `Modifiers::secondary` is cmd on macOS and ctrl elsewhere; a Mac that only matched `control`
-/// ignored cmd-v, which made the setup card — the first thing a new install shows, and a place
-/// where credentials are pasted rather than typed — impossible to paste into. ctrl-v is still
-/// accepted everywhere as an alternative shortcut.
-fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
-    modifiers.secondary() || modifiers.control
-}
-
 /// The animation of the playing row's bars. A render that draws them moves this to `Drawn`
 /// and each tick of the animation's task moves it one step back, so the task ends itself one
 /// tick after the row leaves the screen.
@@ -356,23 +346,12 @@ enum PlayingBars {
     Stale,
 }
 
-/// One bounce of the playing row's bars.
-const PLAYING_BARS_LOOP: Duration = Duration::from_millis(900);
-/// How often the bars repaint. Every frame re-renders the track list, so this stays well
-/// under the display's refresh rate.
-const PLAYING_BARS_FRAME: Duration = Duration::from_millis(33);
-
 /// The lists a drag can scroll by hovering near their edges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DragList {
     Tracks,
     Library,
 }
-
-/// How close to a list edge, in pixels, a drag starts scrolling it.
-const DRAG_EDGE: f32 = 48.0;
-/// Pixels per frame at the very edge.
-const DRAG_SCROLL_MAX: f32 = 14.0;
 
 /// Picks a fixed-pitch family that is actually installed. gpui matches families by exact name
 /// against the system font database — there is no generic "monospace" alias and no substitution

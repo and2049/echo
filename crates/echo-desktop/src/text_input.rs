@@ -84,6 +84,16 @@ pub(crate) fn text_with_cursor(value: &str, cursor: usize) -> String {
     format!("{}▏{}", &value[..cursor], &value[cursor..])
 }
 
+/// Whether a keystroke's modifiers mean "paste" for the hand-rolled text fields.
+///
+/// `Modifiers::secondary` is cmd on macOS and ctrl elsewhere; a Mac that only matched `control`
+/// ignored cmd-v, which made the setup card — the first thing a new install shows, and a place
+/// where credentials are pasted rather than typed — impossible to paste into. ctrl-v is still
+/// accepted everywhere as an alternative shortcut.
+pub(crate) fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
+    modifiers.secondary() || modifiers.control
+}
+
 #[cfg(test)]
 mod text_edit_tests {
     use super::{insert_at_cursor, next_char_boundary, prev_char_boundary, text_with_cursor};

@@ -1,5 +1,11 @@
 use super::*;
 
+/// How close to a list edge, in pixels, a drag starts scrolling it.
+pub(crate) const DRAG_EDGE: f32 = 48.0;
+
+/// Pixels per frame at the very edge.
+pub(crate) const DRAG_SCROLL_MAX: f32 = 14.0;
+
 impl EchoApp {
     /// Rows in whatever currently has keyboard focus: the device modal when open, else the
     /// `active_view` list.

@@ -1,5 +1,12 @@
 use super::*;
 
+/// One bounce of the playing row's bars.
+pub(crate) const PLAYING_BARS_LOOP: Duration = Duration::from_millis(900);
+
+/// How often the bars repaint. Every frame re-renders the track list, so this stays well
+/// under the display's refresh rate.
+pub(crate) const PLAYING_BARS_FRAME: Duration = Duration::from_millis(33);
+
 impl EchoApp {
     /// Redraws only what shows the playback position or the volume: the playback bar, the
     /// lyrics panel, and the immersive view, which is drawn by the app itself.
