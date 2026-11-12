@@ -18,7 +18,7 @@ pub fn theme_rows(
 /// adds a tab for each. A dark/light pair is one row naming both, the listed one first in
 /// weight; a theme with no sibling is only in its own appearance's list.
 pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    use echo_core::config::{Scheme, ThemeMode};
+    use echo_core::config::ThemeMode;
 
     let theme = &app.state.ui.active_theme;
     let palette = DesktopPalette::resolve(theme);
@@ -34,96 +34,9 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
     let chosen = echo_core::theme::selected_name(config, &app.state.ui.themes, tab);
     let selected = app.theme_modal_index;
 
-    // Background, accent and second accent of each listed theme. Choosing does not preview,
-    // and under `Auto` one of the two lists is never on screen, so this is how they compare.
-    let swatches: Vec<[gpui::Hsla; 3]> = rows
-        .iter()
-        .map(|row| {
-            let resolved = app
-                .state
-                .ui
-                .themes
-                .get(&row.name)
-                .map(echo_core::theme::ResolvedTheme::from_theme);
-            match resolved {
-                Some(t) => [
-                    t.background.gpui(crate::theme::WINDOW_BG()),
-                    t.primary.gpui(WINDOW_FG()),
-                    t.secondary.gpui(WINDOW_FG()),
-                ],
-                None => [surface; 3],
-            }
-        })
-        .collect();
-
-    let mode_label =
-        |mode: ThemeMode| tr(&app.state, &format!("desktop.theme_mode.{}", mode.name()));
-    let scheme_label =
-        |scheme: Scheme| tr(&app.state, &format!("desktop.theme_mode.{}", scheme.name()));
-
-    // One joined bar, the same control as the Mode row in Settings.
-    let mode_control = div()
-        .flex_none()
-        .h(px(24.0))
-        .flex()
-        .flex_row()
-        .rounded_md()
-        .border_1()
-        .border_color(palette.menu_border)
-        .overflow_hidden()
-        .children(ThemeMode::ALL.into_iter().enumerate().map(|(ix, option)| {
-            let active = option == mode;
-            div()
-                .id(SharedString::from(format!("theme-mode-{}", option.name())))
-                .h_full()
-                .px_3()
-                .flex()
-                .items_center()
-                .text_xs()
-                .text_color(if active { fg } else { muted })
-                .when(ix > 0, |el| {
-                    el.border_l_1().border_color(palette.menu_border)
-                })
-                .when(active, |el| el.bg(palette.menu_selected))
-                .when(!active, |el| {
-                    el.cursor_pointer()
-                        .hover(move |style| style.bg(palette.menu_hover))
-                })
-                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                    this.set_theme_mode(option, cx);
-                }))
-                .child(mode_label(option))
-        }));
-
-    // Under `Auto` only: one tab per appearance, the listed one underlined.
-    let tabs = (mode == ThemeMode::Auto).then(|| {
-        div()
-            .flex_none()
-            .flex()
-            .flex_row()
-            .gap_4()
-            .px_2()
-            .pt_1()
-            .children([Scheme::Dark, Scheme::Light].into_iter().map(|scheme| {
-                let active = scheme == tab;
-                div()
-                    .id(SharedString::from(format!("theme-tab-{}", scheme.name())))
-                    .pb_1()
-                    .border_b_2()
-                    .border_color(if active {
-                        accent
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .text_sm()
-                    .text_color(if active { fg } else { muted })
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                        this.show_theme_list(scheme, cx);
-                    }))
-                    .child(scheme_label(scheme))
-            }))
-    });
+    let swatches = theme_swatches(app, &rows, surface);
+    let mode_control = theme_mode_control(app, mode, cx);
+    let tabs = theme_scheme_tabs(app, mode, tab, cx);
 
     div()
         .id("theme-backdrop")
@@ -182,6 +95,14 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .child(tr(&app.state, "desktop.no_themes"))
                         .into_any_element()
                 } else {
+                    let row_colors = ThemeRowColors {
+                        palette,
+                        fg,
+                        muted,
+                        accent,
+                        chosen: chosen.clone(),
+                        selected,
+                    };
                     div()
                         .id("theme-list")
                         .flex()
@@ -191,75 +112,220 @@ pub fn theme_modal(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoEle
                         .overflow_y_scroll()
                         .track_scroll(&app.theme_modal_scroll)
                         .children(rows.into_iter().zip(swatches).enumerate().map(
-                            |(ix, (row, swatch))| {
-                                let is_chosen = row.name == chosen;
-                                let is_selected = ix == selected;
-                                let clicked = row.name.clone();
-                                div()
-                                    .id(ix)
-                                    .px_2()
-                                    .h(px(30.0))
-                                    .flex_none()
-                                    .rounded_md()
-                                    .flex()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap_3()
-                                    .text_sm()
-                                    .when(is_selected, |el| el.bg(palette.menu_selected))
-                                    .when(!is_selected, |el| {
-                                        el.hover(move |style| style.bg(palette.menu_hover))
-                                    })
-                                    .cursor_pointer()
-                                    .on_click(cx.listener(
-                                        move |this: &mut EchoApp, _event, _window, cx| {
-                                            echo_core::intent::apply_theme(
-                                                &mut this.state,
-                                                &clicked,
-                                            );
-                                            this.theme_modal_open = false;
-                                            cx.notify();
-                                        },
-                                    ))
-                                    .child(
-                                        // The theme's background, accent and second accent
-                                        // as one joined chip.
-                                        div()
-                                            .flex_none()
-                                            .flex()
-                                            .flex_row()
-                                            .rounded_sm()
-                                            .border_1()
-                                            .border_color(palette.menu_border)
-                                            .overflow_hidden()
-                                            .children(swatch.into_iter().map(|color| {
-                                                div().w(px(12.0)).h(px(14.0)).bg(color)
-                                            })),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .flex()
-                                            .flex_row()
-                                            .gap_1()
-                                            .child(
-                                                div()
-                                                    .text_color(if is_chosen { accent } else { fg })
-                                                    .child(SharedString::from(row.name)),
-                                            )
-                                            .when_some(row.sibling, |el, sibling| {
-                                                el.child(div().text_color(muted).child(
-                                                    SharedString::from(format!("/ {sibling}")),
-                                                ))
-                                            }),
-                                    )
-                                    .when(is_chosen, |el| {
-                                        el.child(div().flex_none().text_color(accent).child("✓"))
-                                    })
-                            },
+                            |(ix, (row, swatch))| theme_list_row(ix, row, swatch, &row_colors, cx),
                         ))
                         .into_any_element()
                 }),
         )
+}
+
+/// Background, accent and second accent of each listed theme. Choosing does not preview,
+/// and under `Auto` one of the two lists is never on screen, so this is how they compare.
+fn theme_swatches(
+    app: &EchoApp,
+    rows: &[echo_core::theme::ThemeRow],
+    surface: Hsla,
+) -> Vec<[Hsla; 3]> {
+    rows.iter()
+        .map(|row| {
+            let resolved = app
+                .state
+                .ui
+                .themes
+                .get(&row.name)
+                .map(echo_core::theme::ResolvedTheme::from_theme);
+            match resolved {
+                Some(t) => [
+                    t.background.gpui(crate::theme::WINDOW_BG()),
+                    t.primary.gpui(WINDOW_FG()),
+                    t.secondary.gpui(WINDOW_FG()),
+                ],
+                None => [surface; 3],
+            }
+        })
+        .collect()
+}
+
+/// One joined bar, the same control as the Mode row in Settings.
+fn theme_mode_control(
+    app: &EchoApp,
+    mode: echo_core::config::ThemeMode,
+    cx: &mut Context<EchoApp>,
+) -> Div {
+    use echo_core::config::ThemeMode;
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let mode_label =
+        |mode: ThemeMode| tr(&app.state, &format!("desktop.theme_mode.{}", mode.name()));
+
+    div()
+        .flex_none()
+        .h(px(24.0))
+        .flex()
+        .flex_row()
+        .rounded_md()
+        .border_1()
+        .border_color(palette.menu_border)
+        .overflow_hidden()
+        .children(ThemeMode::ALL.into_iter().enumerate().map(|(ix, option)| {
+            let active = option == mode;
+            div()
+                .id(SharedString::from(format!("theme-mode-{}", option.name())))
+                .h_full()
+                .px_3()
+                .flex()
+                .items_center()
+                .text_xs()
+                .text_color(if active { fg } else { muted })
+                .when(ix > 0, |el| {
+                    el.border_l_1().border_color(palette.menu_border)
+                })
+                .when(active, |el| el.bg(palette.menu_selected))
+                .when(!active, |el| {
+                    el.cursor_pointer()
+                        .hover(move |style| style.bg(palette.menu_hover))
+                })
+                .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                    this.set_theme_mode(option, cx);
+                }))
+                .child(mode_label(option))
+        }))
+}
+
+/// Under `Auto` only: one tab per appearance, the listed one underlined.
+fn theme_scheme_tabs(
+    app: &EchoApp,
+    mode: echo_core::config::ThemeMode,
+    tab: echo_core::config::Scheme,
+    cx: &mut Context<EchoApp>,
+) -> Option<Div> {
+    use echo_core::config::{Scheme, ThemeMode};
+    let theme = &app.state.ui.active_theme;
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let scheme_label =
+        |scheme: Scheme| tr(&app.state, &format!("desktop.theme_mode.{}", scheme.name()));
+
+    (mode == ThemeMode::Auto).then(|| {
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .gap_4()
+            .px_2()
+            .pt_1()
+            .children([Scheme::Dark, Scheme::Light].into_iter().map(|scheme| {
+                let active = scheme == tab;
+                div()
+                    .id(SharedString::from(format!("theme-tab-{}", scheme.name())))
+                    .pb_1()
+                    .border_b_2()
+                    .border_color(if active {
+                        accent
+                    } else {
+                        gpui::transparent_black()
+                    })
+                    .text_sm()
+                    .text_color(if active { fg } else { muted })
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                        this.show_theme_list(scheme, cx);
+                    }))
+                    .child(scheme_label(scheme))
+            }))
+    })
+}
+
+/// What every row of the theme list shares.
+struct ThemeRowColors {
+    palette: DesktopPalette,
+    fg: Hsla,
+    muted: Hsla,
+    accent: Hsla,
+    chosen: String,
+    selected: usize,
+}
+
+fn theme_list_row(
+    ix: usize,
+    row: echo_core::theme::ThemeRow,
+    swatch: [Hsla; 3],
+    colors: &ThemeRowColors,
+    cx: &mut Context<EchoApp>,
+) -> Stateful<Div> {
+    let ThemeRowColors {
+        palette,
+        fg,
+        muted,
+        accent,
+        ref chosen,
+        selected,
+    } = *colors;
+    let is_chosen = row.name == *chosen;
+    let is_selected = ix == selected;
+    let clicked = row.name.clone();
+    div()
+        .id(ix)
+        .px_2()
+        .h(px(30.0))
+        .flex_none()
+        .rounded_md()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_3()
+        .text_sm()
+        .when(is_selected, |el| el.bg(palette.menu_selected))
+        .when(!is_selected, |el| {
+            el.hover(move |style| style.bg(palette.menu_hover))
+        })
+        .cursor_pointer()
+        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+            echo_core::intent::apply_theme(&mut this.state, &clicked);
+            this.theme_modal_open = false;
+            cx.notify();
+        }))
+        .child(
+            // The theme's background, accent and second accent
+            // as one joined chip.
+            div()
+                .flex_none()
+                .flex()
+                .flex_row()
+                .rounded_sm()
+                .border_1()
+                .border_color(palette.menu_border)
+                .overflow_hidden()
+                .children(
+                    swatch
+                        .into_iter()
+                        .map(|color| div().w(px(12.0)).h(px(14.0)).bg(color)),
+                ),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_row()
+                .gap_1()
+                .child(
+                    div()
+                        .text_color(if is_chosen { accent } else { fg })
+                        .child(SharedString::from(row.name)),
+                )
+                .when_some(row.sibling, |el, sibling| {
+                    el.child(
+                        div()
+                            .text_color(muted)
+                            .child(SharedString::from(format!("/ {sibling}"))),
+                    )
+                }),
+        )
+        .when(is_chosen, |el| {
+            el.child(div().flex_none().text_color(accent).child("✓"))
+        })
 }
