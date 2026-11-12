@@ -114,10 +114,90 @@ impl EchoApp {
     pub(crate) fn render_playback_bar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = &self.state.ui.active_theme;
         let palette = DesktopPalette::resolve(theme);
-        let fg = theme.text.gpui(WINDOW_FG());
         let muted = theme.text_muted.gpui(WINDOW_FG());
         let accent = theme.primary.gpui(WINDOW_FG());
+        let controls = ControlColors {
+            fg: theme.text.gpui(WINDOW_FG()),
+            muted,
+            accent,
+            hover: palette.wash,
+            track: palette.border,
+        };
+        let lyrics_color = if self.right_panel == Some(RightPanel::Lyrics) {
+            accent
+        } else {
+            muted
+        };
 
+        div()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap_1()
+            .h(px(regions::PLAYBACK_BAR_HEIGHT))
+            .px_4()
+            .border_t_1()
+            .border_color(palette.border)
+            .child(
+                // Top row: song card, condensed lyric line, visualizer. Its contents come and go;
+                // its height doesn't, so nothing here can move the row below.
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .h(px(PLAYBACK_ROW_HEIGHT))
+                    .child(self.playing_card(controls, cx))
+                    .child(self.playing_caption(controls))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(PLAYBACK_SIDE_WIDTH))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_end()
+                            .gap_3()
+                            .children(self.playing_on_pill(controls, cx))
+                            .children(self.visualizer(accent)),
+                    ),
+            )
+            .child(
+                // Bottom row: transport, seek and volume on one line, so the seek bar sits on the
+                // buttons' baseline no matter what the row above is doing.
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap_3()
+                    .h(px(PLAYBACK_ROW_HEIGHT))
+                    .child(
+                        self.transport_controls(controls, cx)
+                            .flex_none()
+                            .w(px(PLAYBACK_SIDE_WIDTH))
+                            .child(icon_button(
+                                "lyrics",
+                                "icons/mic.svg",
+                                lyrics_color,
+                                palette.wash,
+                                cx,
+                                |this, cx| this.toggle_lyrics(cx),
+                            )),
+                    )
+                    .child(self.seek_bar(controls, cx))
+                    .child(self.output_controls(controls, cx)),
+            )
+    }
+
+    /// The playing track's cover, title and artist, draggable like a track row.
+    fn playing_card(
+        &mut self,
+        colors: ControlColors,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<Div> {
+        let theme = &self.state.ui.active_theme;
+        let palette = DesktopPalette::resolve(theme);
+        let ControlColors { fg, muted, .. } = colors;
         let playback = &self.state.playback;
         let title: SharedString = if playback.playing_track_title.is_empty() {
             views::tr(&self.state, "desktop.nothing_playing")
@@ -126,31 +206,6 @@ impl EchoApp {
         };
         let artist: SharedString = playback.playing_track_artist.clone().into();
         let has_track = playback.playing_track_id.is_some();
-
-        let controls = ControlColors {
-            fg,
-            muted,
-            accent,
-            hover: palette.wash,
-            track: palette.border,
-        };
-        let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
-        let volume_label: SharedString = format!("{}%", playback.volume).into();
-        let mute_icon = if playback.volume == 0 {
-            "icons/volume-off.svg"
-        } else {
-            "icons/volume-high.svg"
-        };
-        let queue_color = if self.right_panel == Some(RightPanel::Queue) {
-            accent
-        } else {
-            muted
-        };
-        let lyrics_color = if self.right_panel == Some(RightPanel::Lyrics) {
-            accent
-        } else {
-            muted
-        };
         let secondary = theme.secondary.gpui(WINDOW_FG());
         let liked_button = playback
             .playing_track_id
@@ -162,22 +217,6 @@ impl EchoApp {
                 let liked = self.state.data.liked_tracks.contains(&track_id);
                 playing_like_button(track_id, liked, secondary, palette.like_dim, cx)
             });
-        // Playback on another Connect device (a phone, a speaker) gets a pill naming it;
-        // echo's own device and local files are the norm and stay unlabelled.
-        let playing_on: Option<SharedString> = (has_track
-            && playback.device_name != echo_core::worker::audio::DEVICE_NAME
-            && playback.device_name != "Local"
-            && !playback.device_name.is_empty())
-        .then(|| {
-            views::tr(&self.state, "desktop.playing_on")
-                .replace("{}", &playback.device_name)
-                .into()
-        });
-        let visualizer_bands = (self.state.ui.library_config.enable_visualizer
-            && self.state.playback.is_playing)
-            .then(|| self.state.playback.audio_visualization.clone())
-            .flatten();
-        let vis_bins = self.state.ui.vis_bins.clamp(5, 32);
 
         // Keep showing the previous cover while the current one refetches after a pixelate
         // change.
@@ -193,10 +232,74 @@ impl EchoApp {
         let drag_payload = echo_core::history::playing_track(&self.state)
             .map(|track| views::single_drag_payload(&track, cover.clone()));
 
-        // The condensed-lyrics line shows the current lyric accented with the next one below,
-        // riding the same playback tick that advances the seek bar.
-        let inline_lyrics = self
-            .state
+        div()
+            .id("playing-card")
+            .flex_none()
+            .w(px(PLAYBACK_SIDE_WIDTH))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .when_some(drag_payload, |el, payload| {
+                el.on_drag(payload, move |drag, _offset, _window, cx| {
+                    views::track_drag_preview(drag, drag_colors, cx)
+                })
+            })
+            .child(match cover {
+                Some(image) => views::cover_image(image, 36.0, 6.0).into_any_element(),
+                None => div()
+                    .flex_none()
+                    .w(px(36.0))
+                    .h(px(36.0))
+                    .rounded_md()
+                    .bg(palette.wash)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        svg()
+                            .path("icons/music-note.svg")
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .text_color(muted),
+                    )
+                    .into_any_element(),
+            })
+            .child(
+                div()
+                    .flex_col()
+                    .flex_grow(1.0)
+                    .overflow_hidden()
+                    .child(
+                        playing_track_link(
+                            "playing-title",
+                            title,
+                            fg,
+                            has_track,
+                            echo_core::models::ActionMenuAction::GoToAlbum,
+                            cx,
+                        )
+                        .text_sm(),
+                    )
+                    .child(
+                        playing_track_link(
+                            "playing-artist",
+                            artist,
+                            muted,
+                            has_track,
+                            echo_core::models::ActionMenuAction::GoToArtist,
+                            cx,
+                        )
+                        .text_xs(),
+                    ),
+            )
+            .children(liked_button)
+    }
+
+    // The condensed-lyrics line shows the current lyric accented with the next one below,
+    // riding the same playback tick that advances the seek bar.
+    fn inline_lyrics(&self) -> Option<(String, String)> {
+        self.state
             .ui
             .condensed_lyrics_enabled
             .then(|| {
@@ -226,8 +329,14 @@ impl EchoApp {
                     (String::new(), String::new())
                 }
             })
-            .filter(|(current, _)| !current.is_empty());
+            .filter(|(current, _)| !current.is_empty())
+    }
 
+    /// The top row's centre slot: the condensed lyric line, or where playback started from.
+    fn playing_caption(&self, colors: ControlColors) -> Div {
+        let ControlColors { muted, accent, .. } = colors;
+        let has_track = self.state.playback.playing_track_id.is_some();
+        let inline_lyrics = self.inline_lyrics();
         // Inline lyrics keep the top-row center slot; "Playing from X" fills it otherwise.
         let playing_from = if inline_lyrics.is_none() && has_track {
             views::playing_context_label(&self.state)
@@ -235,335 +344,247 @@ impl EchoApp {
             None
         };
 
+        div()
+            .flex_grow(1.0)
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .overflow_hidden()
+            .when_some(inline_lyrics, |el, (current, next)| {
+                el.child(
+                    div()
+                        .text_sm()
+                        .text_color(accent)
+                        .whitespace_nowrap()
+                        .max_w_full()
+                        .overflow_hidden()
+                        .child(SharedString::from(current)),
+                )
+                .when(!next.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .whitespace_nowrap()
+                            .max_w_full()
+                            .overflow_hidden()
+                            .child(SharedString::from(next)),
+                    )
+                })
+            })
+            .when_some(playing_from, |el, label| {
+                el.child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .whitespace_nowrap()
+                        .max_w_full()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .child(SharedString::from(label)),
+                )
+            })
+    }
+
+    // Playback on another Connect device (a phone, a speaker) gets a pill naming it;
+    // echo's own device and local files are the norm and stay unlabelled.
+    fn playing_on_pill(
+        &self,
+        colors: ControlColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Stateful<Div>> {
+        let ControlColors { accent, hover, .. } = colors;
+        let playback = &self.state.playback;
+        let has_track = playback.playing_track_id.is_some();
+        let playing_on: Option<SharedString> = (has_track
+            && playback.device_name != echo_core::worker::audio::DEVICE_NAME
+            && playback.device_name != "Local"
+            && !playback.device_name.is_empty())
+        .then(|| {
+            views::tr(&self.state, "desktop.playing_on")
+                .replace("{}", &playback.device_name)
+                .into()
+        });
+        playing_on.map(|label| {
+            div()
+                .id("playing-on")
+                .flex_none()
+                .max_w(px(160.0))
+                .px_2()
+                .py_1()
+                .rounded_full()
+                .border_1()
+                .border_color(accent)
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_1()
+                .cursor_pointer()
+                .hover(move |style| style.bg(hover))
+                .on_click(cx.listener(|this, _event, _window, cx| this.open_devices(cx)))
+                .child(
+                    svg()
+                        .path("icons/computer.svg")
+                        .size(px(12.0))
+                        .text_color(accent),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(accent)
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .overflow_hidden()
+                        .child(label),
+                )
+        })
+    }
+
+    /// The engine always fills 32 bands, 0–100; they are averaged down to the configured bin
+    /// count (`:visbins`) and painted as bottom-anchored bars. Repaints ride the fast tick.
+    fn visualizer(&self, accent: Hsla) -> Option<Div> {
+        let visualizer_bands = (self.state.ui.library_config.enable_visualizer
+            && self.state.playback.is_playing)
+            .then(|| self.state.playback.audio_visualization.clone())
+            .flatten();
+        let vis_bins = self.state.ui.vis_bins.clamp(5, 32);
+        visualizer_bands.map(|bands| {
+            div().flex_none().w(px(120.0)).h(px(32.0)).child(
+                canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        let bands = bands.lock();
+                        let chunk = bands.len() as f32 / vis_bins as f32;
+                        let band_width = bounds.size.width / vis_bins as f32;
+                        for index in 0..vis_bins {
+                            let start = (index as f32 * chunk) as usize;
+                            let end = if index == vis_bins - 1 {
+                                bands.len()
+                            } else {
+                                ((index + 1) as f32 * chunk) as usize
+                            };
+                            let slice = &bands[start..end.max(start + 1)];
+                            let value = slice.iter().sum::<f32>() / slice.len() as f32;
+                            let ratio = (value / 100.0).clamp(0.0, 1.0);
+                            let bar_height = bounds.size.height * ratio;
+                            let origin = gpui::point(
+                                bounds.origin.x + band_width * index as f32,
+                                bounds.origin.y + bounds.size.height - bar_height,
+                            );
+                            let bar = Bounds {
+                                origin,
+                                size: size(band_width * 0.8, bar_height),
+                            };
+                            window.paint_quad(gpui::fill(bar, accent));
+                        }
+                    },
+                )
+                .size_full(),
+            )
+        })
+    }
+
+    /// The queue and device buttons, mute, and the volume bar.
+    fn output_controls(&self, colors: ControlColors, cx: &mut Context<Self>) -> Div {
+        let ControlColors {
+            fg,
+            muted,
+            accent,
+            hover,
+            track,
+        } = colors;
+        let playback = &self.state.playback;
+        let volume_fraction = (playback.volume as f32 / 100.0).clamp(0.0, 1.0);
+        let volume_label: SharedString = format!("{}%", playback.volume).into();
+        let mute_icon = if playback.volume == 0 {
+            "icons/volume-off.svg"
+        } else {
+            "icons/volume-high.svg"
+        };
+        let queue_color = if self.right_panel == Some(RightPanel::Queue) {
+            accent
+        } else {
+            muted
+        };
         let volume_bounds = self.volume_bounds.clone();
 
         div()
+            .flex_none()
+            .w(px(PLAYBACK_SIDE_WIDTH))
             .flex()
-            .flex_col()
-            .justify_center()
+            .flex_row()
+            .items_center()
+            .justify_end()
             .gap_1()
-            .h(px(regions::PLAYBACK_BAR_HEIGHT))
-            .px_4()
-            .border_t_1()
-            .border_color(palette.border)
+            .child(icon_button(
+                "queue",
+                "icons/playlist.svg",
+                queue_color,
+                hover,
+                cx,
+                |this, cx| this.toggle_right_panel(RightPanel::Queue, cx),
+            ))
+            .child(icon_button(
+                "devices",
+                "icons/computer.svg",
+                muted,
+                hover,
+                cx,
+                |this, cx| this.open_devices(cx),
+            ))
+            .child(icon_button(
+                "mute",
+                mute_icon,
+                muted,
+                hover,
+                cx,
+                |this, cx| this.toggle_mute(cx),
+            ))
             .child(
-                // Top row: song card, condensed lyric line, visualizer. Its contents come and go;
-                // its height doesn't, so nothing here can move the row below.
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .h(px(PLAYBACK_ROW_HEIGHT))
+                    .id("volume-bar")
+                    .flex_none()
+                    .w(px(90.0))
+                    .py_2()
+                    .cursor_pointer()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, cx| {
+                            this.begin_scrub(Scrub::Volume, event.position.x, cx);
+                        }),
+                    )
                     .child(
                         div()
-                            .id("playing-card")
-                            .flex_none()
-                            .w(px(PLAYBACK_SIDE_WIDTH))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap_2()
-                            .when_some(drag_payload, |el, payload| {
-                                el.on_drag(payload, move |drag, _offset, _window, cx| {
-                                    views::track_drag_preview(drag, drag_colors, cx)
-                                })
-                            })
-                            .child(match cover {
-                                Some(image) => {
-                                    views::cover_image(image, 36.0, 6.0).into_any_element()
-                                }
-                                None => div()
-                                    .flex_none()
-                                    .w(px(36.0))
-                                    .h(px(36.0))
-                                    .rounded_md()
-                                    .bg(palette.wash)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        svg()
-                                            .path("icons/music-note.svg")
-                                            .w(px(16.0))
-                                            .h(px(16.0))
-                                            .text_color(muted),
-                                    )
-                                    .into_any_element(),
-                            })
+                            .relative()
+                            .w_full()
+                            .h(px(6.0))
+                            .rounded_full()
+                            .bg(track)
+                            .child(
+                                canvas(
+                                    move |bounds, _window, _cx| volume_bounds.set(bounds),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
                             .child(
                                 div()
-                                    .flex_col()
-                                    .flex_grow(1.0)
-                                    .overflow_hidden()
-                                    .child(
-                                        playing_track_link(
-                                            "playing-title",
-                                            title,
-                                            fg,
-                                            has_track,
-                                            echo_core::models::ActionMenuAction::GoToAlbum,
-                                            cx,
-                                        )
-                                        .text_sm(),
-                                    )
-                                    .child(
-                                        playing_track_link(
-                                            "playing-artist",
-                                            artist,
-                                            muted,
-                                            has_track,
-                                            echo_core::models::ActionMenuAction::GoToArtist,
-                                            cx,
-                                        )
-                                        .text_xs(),
-                                    ),
-                            )
-                            .children(liked_button),
-                    )
-                    .child(
-                        div()
-                            .flex_grow(1.0)
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
-                            .overflow_hidden()
-                            .when_some(inline_lyrics, |el, (current, next)| {
-                                el.child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(accent)
-                                        .whitespace_nowrap()
-                                        .max_w_full()
-                                        .overflow_hidden()
-                                        .child(SharedString::from(current)),
-                                )
-                                .when(!next.is_empty(), |el| {
-                                    el.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(muted)
-                                            .whitespace_nowrap()
-                                            .max_w_full()
-                                            .overflow_hidden()
-                                            .child(SharedString::from(next)),
-                                    )
-                                })
-                            })
-                            .when_some(playing_from, |el, label| {
-                                el.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .whitespace_nowrap()
-                                        .max_w_full()
-                                        .overflow_hidden()
-                                        .text_ellipsis()
-                                        .child(SharedString::from(label)),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(PLAYBACK_SIDE_WIDTH))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_end()
-                            .gap_3()
-                            .when_some(playing_on, |el, label| {
-                                el.child(
-                                    div()
-                                        .id("playing-on")
-                                        .flex_none()
-                                        .max_w(px(160.0))
-                                        .px_2()
-                                        .py_1()
-                                        .rounded_full()
-                                        .border_1()
-                                        .border_color(accent)
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap_1()
-                                        .cursor_pointer()
-                                        .hover(move |style| style.bg(palette.wash))
-                                        .on_click(cx.listener(|this, _event, _window, cx| {
-                                            this.open_devices(cx)
-                                        }))
-                                        .child(
-                                            svg()
-                                                .path("icons/computer.svg")
-                                                .size(px(12.0))
-                                                .text_color(accent),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(accent)
-                                                .whitespace_nowrap()
-                                                .text_ellipsis()
-                                                .overflow_hidden()
-                                                .child(label),
-                                        ),
-                                )
-                            })
-                            .when_some(visualizer_bands, |el, bands| {
-                                // The engine always fills 32 bands, 0–100; they are averaged down
-                                // to the configured bin count (`:visbins`) and painted as
-                                // bottom-anchored bars. Repaints ride the fast tick.
-                                el.child(
-                                    div().flex_none().w(px(120.0)).h(px(32.0)).child(
-                                        canvas(
-                                            |_, _, _| (),
-                                            move |bounds, _, window, _| {
-                                                let bands = bands.lock();
-                                                let chunk = bands.len() as f32 / vis_bins as f32;
-                                                let band_width =
-                                                    bounds.size.width / vis_bins as f32;
-                                                for index in 0..vis_bins {
-                                                    let start = (index as f32 * chunk) as usize;
-                                                    let end = if index == vis_bins - 1 {
-                                                        bands.len()
-                                                    } else {
-                                                        ((index + 1) as f32 * chunk) as usize
-                                                    };
-                                                    let slice = &bands[start..end.max(start + 1)];
-                                                    let value = slice.iter().sum::<f32>()
-                                                        / slice.len() as f32;
-                                                    let ratio = (value / 100.0).clamp(0.0, 1.0);
-                                                    let bar_height = bounds.size.height * ratio;
-                                                    let origin = gpui::point(
-                                                        bounds.origin.x + band_width * index as f32,
-                                                        bounds.origin.y + bounds.size.height
-                                                            - bar_height,
-                                                    );
-                                                    let bar = Bounds {
-                                                        origin,
-                                                        size: size(band_width * 0.8, bar_height),
-                                                    };
-                                                    window.paint_quad(gpui::fill(bar, accent));
-                                                }
-                                            },
-                                        )
-                                        .size_full(),
-                                    ),
-                                )
-                            }),
+                                    .h_full()
+                                    .rounded_full()
+                                    .bg(fg)
+                                    .w(gpui::relative(volume_fraction)),
+                            ),
                     ),
             )
             .child(
-                // Bottom row: transport, seek and volume on one line, so the seek bar sits on the
-                // buttons' baseline no matter what the row above is doing.
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap_3()
-                    .h(px(PLAYBACK_ROW_HEIGHT))
-                    .child(
-                        self.transport_controls(controls, cx)
-                            .flex_none()
-                            .w(px(PLAYBACK_SIDE_WIDTH))
-                            .child(icon_button(
-                                "lyrics",
-                                "icons/mic.svg",
-                                lyrics_color,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.toggle_lyrics(cx),
-                            )),
-                    )
-                    .child(self.seek_bar(controls, cx))
-                    .child(
-                        div()
-                            .flex_none()
-                            .w(px(PLAYBACK_SIDE_WIDTH))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_end()
-                            .gap_1()
-                            .child(icon_button(
-                                "queue",
-                                "icons/playlist.svg",
-                                queue_color,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.toggle_right_panel(RightPanel::Queue, cx),
-                            ))
-                            .child(icon_button(
-                                "devices",
-                                "icons/computer.svg",
-                                muted,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.open_devices(cx),
-                            ))
-                            .child(icon_button(
-                                "mute",
-                                mute_icon,
-                                muted,
-                                palette.wash,
-                                cx,
-                                |this, cx| this.toggle_mute(cx),
-                            ))
-                            .child(
-                                div()
-                                    .id("volume-bar")
-                                    .flex_none()
-                                    .w(px(90.0))
-                                    .py_2()
-                                    .cursor_pointer()
-                                    .on_mouse_down(
-                                        gpui::MouseButton::Left,
-                                        cx.listener(
-                                            |this, event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.begin_scrub(
-                                                    Scrub::Volume,
-                                                    event.position.x,
-                                                    cx,
-                                                );
-                                            },
-                                        ),
-                                    )
-                                    .child(
-                                        div()
-                                            .relative()
-                                            .w_full()
-                                            .h(px(6.0))
-                                            .rounded_full()
-                                            .bg(palette.border)
-                                            .child(
-                                                canvas(
-                                                    move |bounds, _window, _cx| {
-                                                        volume_bounds.set(bounds)
-                                                    },
-                                                    |_, _, _, _| {},
-                                                )
-                                                .absolute()
-                                                .size_full(),
-                                            )
-                                            .child(
-                                                div()
-                                                    .h_full()
-                                                    .rounded_full()
-                                                    .bg(fg)
-                                                    .w(gpui::relative(volume_fraction)),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(px(34.0))
-                                    .text_xs()
-                                    .text_color(fg)
-                                    .child(volume_label),
-                            ),
-                    ),
+                    .flex_none()
+                    .w(px(34.0))
+                    .text_xs()
+                    .text_color(fg)
+                    .child(volume_label),
             )
     }
 
