@@ -4,3 +4,4 @@ use super::*;
 
 mod panels;
 mod selection;
+mod themes;
