@@ -6,4 +6,5 @@ mod menus;
 mod navigation;
 mod panels;
 mod selection;
+mod settings;
 mod themes;
