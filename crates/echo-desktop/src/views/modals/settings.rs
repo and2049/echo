@@ -1,5 +1,8 @@
 use super::*;
 
+const ROW_HEIGHT: f32 = 34.0;
+const CONTROL_HEIGHT: f32 = 24.0;
+
 /// The settings sheet.
 ///
 /// Booleans are switches, a choice among several is a dropdown (the appearance mode, three
@@ -10,54 +13,700 @@ pub fn settings_modal(
     window: &mut Window,
     cx: &mut Context<EchoApp>,
 ) -> impl IntoElement {
-    let theme = &app.state.ui.active_theme;
-    let palette = DesktopPalette::resolve(theme);
-    let fg = theme.text.gpui(WINDOW_FG());
-    let muted = theme.text_muted.gpui(WINDOW_FG());
-    let surface = theme.surface.gpui(crate::theme::PANEL_BG());
-    let accent = theme.primary.gpui(WINDOW_FG());
+    let c = Controls::new(app);
+    let Controls {
+        palette,
+        fg,
+        surface,
+        ..
+    } = c;
+    let config = &app.state.ui.library_config;
 
-    let config = app.state.ui.library_config.clone();
-    let path_focused = app.settings_path_focus.is_focused(window);
-    let path_value = app.settings_path_input.clone();
-    // Owns its language so translation never borrows `app` across the listener closures below.
-    let s = {
-        let lang = config.language.clone();
-        move |key: &str| SharedString::from(echo_core::i18n::t(key, &lang))
-    };
+    let mut rows = general_section(&c, config, cx);
+    rows.extend(appearance_section(&c, app, config, cx));
+    rows.extend(audio_section(&c, config, cx));
+    rows.extend(local_section(&c, app, window, cx));
+    rows.extend(updates_section(&c, app, config, cx));
 
-    const ROW_HEIGHT: f32 = 34.0;
-    const CONTROL_HEIGHT: f32 = 24.0;
-    let open_dropdown = app.settings_dropdown;
-
-    // A labelled row with its control on the right. Labels and hints arrive translated. A
-    // disabled row is dimmed: its setting has no effect until another one is turned on.
-    let row =
-        |label: SharedString, hint: Option<SharedString>, enabled: bool, control: AnyElement| {
+    div()
+        .id("settings-backdrop")
+        .absolute()
+        .inset_0()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
+        .flex()
+        .items_center()
+        .justify_center()
+        .occlude()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+            // A click outside first closes an open dropdown, then the sheet.
+            if this.settings_dropdown.take().is_none() {
+                this.settings_open = false;
+            }
+            cx.notify();
+        }))
+        .child(
             div()
+                .id("settings-panel")
+                .w(px(480.0))
+                // Never taller than the window: the list below takes what is left and scrolls.
+                .max_h(px(580.0).min(window.viewport_size().height - px(32.0)))
+                .rounded_lg()
+                .border_1()
+                .border_color(palette.menu_border)
+                .bg(surface)
+                .p_4()
                 .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .gap_4()
-                .min_h(px(ROW_HEIGHT))
-                .py_0p5()
-                .when(!enabled, |el| el.opacity(0.4))
+                .flex_col()
+                .overflow_hidden()
+                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                    if this.settings_dropdown.take().is_some() {
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }))
+                .child(
+                    // The rule is where scrolled rows disappear, so they never run up
+                    // under the title.
+                    div()
+                        .flex_none()
+                        .pb_3()
+                        .border_b_1()
+                        .border_color(palette.menu_border)
+                        .text_base()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(fg)
+                        .child(c.t("desktop.settings.title")),
+                )
                 .child(
                     div()
+                        .id("settings-list")
                         .flex()
                         .flex_col()
-                        .min_w_0()
-                        .child(div().text_sm().text_color(fg).child(label))
-                        .when_some(hint, |el, hint| {
-                            el.child(div().text_xs().text_color(muted).child(hint))
-                        }),
-                )
-                .child(control)
-        };
+                        // Sized by its rows, shrinking (and scrolling) once the panel is full.
+                        .min_h_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&app.settings_scroll)
+                        // One child holding every row: the scroll extent is measured across the list's children and
+                        // skips the first one's top margin, which left the last row short of fully scrolling in.
+                        .child(div().flex_none().flex().flex_col().children(rows)),
+                ),
+        )
+}
 
-    // A section title over a rule, with an optional note that applies to the whole section.
-    let heading = |label: SharedString, note: Option<SharedString>| {
+fn general_section(
+    c: &Controls,
+    config: &echo_core::config::LibraryConfig,
+    cx: &mut Context<EchoApp>,
+) -> Vec<Div> {
+    let language_row = c.row(
+        c.t("desktop.settings.language"),
+        None,
+        true,
+        c.dropdown(
+            "lang",
+            [("English", "en"), ("简体中文", "zh-CN")]
+                .into_iter()
+                .map(|(label, code)| {
+                    (
+                        label.into(),
+                        SettingChange::Command(format!("lang {code}")),
+                        config.language == code,
+                    )
+                })
+                .collect(),
+            true,
+            cx,
+        ),
+    );
+
+    let tray_row = c.row(
+        c.t("desktop.settings.tray"),
+        None,
+        true,
+        c.toggle(
+            "tray",
+            config.close_to_tray,
+            SettingChange::Command(format!("tray {}", on_off(!config.close_to_tray))),
+            cx,
+        ),
+    );
+
+    let sort_row = c.row(
+        c.t("desktop.settings.order"),
+        None,
+        true,
+        c.dropdown(
+            "libsort",
+            {
+                use echo_core::config::SortMode;
+                [
+                    // The manual drag-and-drop order.
+                    ("order_custom", "default", SortMode::Default),
+                    ("order_alpha", "alpha", SortMode::Alphabetical),
+                    ("order_creator", "creator", SortMode::Creator),
+                ]
+                .into_iter()
+                .map(|(key, name, mode)| {
+                    (
+                        c.t(&format!("desktop.settings.{key}")),
+                        SettingChange::Command(format!("sort {name}")),
+                        config.sort_mode == mode,
+                    )
+                })
+                .collect()
+            },
+            true,
+            cx,
+        ),
+    );
+
+    let relative_row = c.row(
+        c.t("desktop.settings.relative"),
+        None,
+        true,
+        c.toggle(
+            "relative",
+            config.relative_line_numbers,
+            SettingChange::Command(format!(
+                "relative {}",
+                on_off(!config.relative_line_numbers)
+            )),
+            cx,
+        ),
+    );
+
+    let mut rows = vec![
+        c.heading(c.t("desktop.settings.general"), None),
+        language_row,
+    ];
+    if !cfg!(target_os = "macos") {
+        rows.push(tray_row);
+    }
+    rows.extend([sort_row, relative_row]);
+    rows
+}
+
+fn appearance_section(
+    c: &Controls,
+    app: &EchoApp,
+    config: &echo_core::config::LibraryConfig,
+    cx: &mut Context<EchoApp>,
+) -> Vec<Div> {
+    let palette = c.palette;
+    let theme_mode = config
+        .theme_mode
+        .unwrap_or(echo_core::config::ThemeMode::Auto);
+    // The theme in use, or under `Auto` the dark and the light one.
+    let theme_label = {
+        use echo_core::config::{Scheme, ThemeMode};
+        let chosen = |scheme| echo_core::theme::selected_name(config, &app.state.ui.themes, scheme);
+        match theme_mode {
+            ThemeMode::Auto => format!("{} / {}", chosen(Scheme::Dark), chosen(Scheme::Light)),
+            ThemeMode::Dark => chosen(Scheme::Dark),
+            ThemeMode::Light => chosen(Scheme::Light),
+        }
+    };
+    let theme_row = c.row(
+        c.t("desktop.theme"),
+        None,
+        true,
+        c.button("settings-theme", theme_label.into(), false)
+            .cursor_pointer()
+            .hover(move |style| style.bg(palette.menu_hover))
+            .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                this.settings_open = false;
+                this.toggle_themes(cx);
+            }))
+            .into_any_element(),
+    );
+
+    let mode_row = c.row(
+        c.t("desktop.settings.mode"),
+        None,
+        true,
+        c.segmented(
+            "mode",
+            echo_core::config::ThemeMode::ALL
+                .into_iter()
+                .map(|mode| {
+                    (
+                        c.t(&format!("desktop.theme_mode.{}", mode.name())),
+                        format!("mode {}", mode.name()),
+                        theme_mode == mode,
+                    )
+                })
+                .collect(),
+            cx,
+        ),
+    );
+
+    let pixelate_row = c.row(
+        c.t("desktop.settings.pixelate"),
+        None,
+        true,
+        c.dropdown(
+            "pixelate",
+            with_current(&[0, 8, 16, 32], config.cover_img_pixels as usize)
+                .into_iter()
+                .map(|n| {
+                    (
+                        if n == 0 {
+                            c.t("ui.off")
+                        } else {
+                            SharedString::from(format!("{n} px"))
+                        },
+                        SettingChange::Command(format!("pixelate {n}")),
+                        config.cover_img_pixels as usize == n,
+                    )
+                })
+                .collect(),
+            true,
+            cx,
+        ),
+    );
+
+    let backdrop_row = c.row(
+        c.t("desktop.settings.backdrop"),
+        None,
+        true,
+        c.dropdown(
+            "backdrop",
+            echo_core::config::BackdropMode::ALL
+                .into_iter()
+                .map(|mode| {
+                    (
+                        c.t(&format!("desktop.settings.backdrops.{}", mode.name())),
+                        SettingChange::Command(format!("backdrop {}", mode.name())),
+                        config.immersive_backdrop == mode,
+                    )
+                })
+                .collect(),
+            true,
+            cx,
+        ),
+    );
+
+    let visualizer_row = c.row(
+        c.t("desktop.settings.visualizer"),
+        None,
+        true,
+        // `:vis` flips the visualizer; it takes no argument.
+        c.toggle(
+            "vis",
+            config.enable_visualizer,
+            SettingChange::Command("vis".into()),
+            cx,
+        ),
+    );
+
+    let bins_row = c.row(
+        c.t("desktop.settings.bins"),
+        None,
+        config.enable_visualizer,
+        c.dropdown(
+            "visbins",
+            with_current(&[7, 9, 16, 24, 32], config.vis_bins)
+                .into_iter()
+                .map(|n| {
+                    (
+                        SharedString::from(n.to_string()),
+                        SettingChange::Command(format!("visbins {n}")),
+                        config.vis_bins == n,
+                    )
+                })
+                .collect(),
+            config.enable_visualizer,
+            cx,
+        ),
+    );
+
+    vec![
+        c.heading(c.t("desktop.settings.appearance"), None),
+        theme_row,
+        mode_row,
+        pixelate_row,
+        backdrop_row,
+        visualizer_row,
+        bins_row,
+    ]
+}
+
+fn audio_section(
+    c: &Controls,
+    config: &echo_core::config::LibraryConfig,
+    cx: &mut Context<EchoApp>,
+) -> Vec<Div> {
+    let Controls { palette, fg, .. } = *c;
+    let bitrate_row = c.row(
+        c.t("desktop.settings.quality"),
+        None,
+        true,
+        c.dropdown(
+            "bitrate",
+            [96u32, 160, 320]
+                .into_iter()
+                .map(|rate| {
+                    (
+                        SharedString::from(format!("{rate} kbps")),
+                        SettingChange::Bitrate(rate),
+                        config.bitrate == rate,
+                    )
+                })
+                .collect(),
+            true,
+            cx,
+        ),
+    );
+
+    let normalisation = config.normalisation;
+    let normalisation_row = c.row(
+        c.t("desktop.settings.normalisation"),
+        None,
+        true,
+        c.toggle(
+            "normalisation",
+            normalisation,
+            SettingChange::Normalisation(!normalisation),
+            cx,
+        ),
+    );
+
+    let pregain = config.normalisation_pregain;
+    let step_button =
+        |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
+            div()
+                .id(id)
+                .size(px(CONTROL_HEIGHT))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.menu_border)
+                .text_xs()
+                .text_color(fg)
+                .when(normalisation, |el| {
+                    el.cursor_pointer()
+                        .hover(move |style| style.bg(palette.menu_hover))
+                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                            this.set_audio_quality(
+                                |config| {
+                                    // Matches librespot's usable range; beyond this the
+                                    // limiter dominates.
+                                    config.normalisation_pregain =
+                                        (config.normalisation_pregain + delta).clamp(-10.0, 10.0);
+                                },
+                                cx,
+                            );
+                        }))
+                })
+                .child(label)
+        };
+    let pregain_row = c.row(
+        c.t("desktop.settings.pregain"),
+        Some(c.t("desktop.settings.pregain_desc")),
+        normalisation,
+        div()
+            .flex_none()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .child(step_button("pregain-down", "−", -0.5, cx))
+            .child(
+                div()
+                    .w(px(56.0))
+                    .text_xs()
+                    .text_color(fg)
+                    .text_center()
+                    .child(SharedString::from(format!("{pregain:+.1} dB"))),
+            )
+            .child(step_button("pregain-up", "+", 0.5, cx))
+            .into_any_element(),
+    );
+
+    vec![
+        c.heading(
+            c.t("desktop.settings.audio"),
+            Some(c.t("desktop.settings.next_launch")),
+        ),
+        bitrate_row,
+        normalisation_row,
+        pregain_row,
+    ]
+}
+
+fn local_section(
+    c: &Controls,
+    app: &EchoApp,
+    window: &Window,
+    cx: &mut Context<EchoApp>,
+) -> Vec<Div> {
+    let Controls {
+        palette,
+        fg,
+        muted,
+        accent,
+        ..
+    } = *c;
+    let path_focused = app.settings_path_focus.is_focused(window);
+    let path_value = app.settings_path_input.clone();
+    let path_unsaved = app.local_folder_unsaved();
+    let local_field = div()
+        .id("settings-localpath")
+        .key_context(crate::SEARCH_CONTEXT)
+        .track_focus(&app.settings_path_focus)
+        .on_key_down(cx.listener(|this: &mut EchoApp, event, window, cx| {
+            this.handle_settings_path_key(event, window, cx)
+        }))
+        .flex_1()
+        .min_w_0()
+        .h(px(CONTROL_HEIGHT))
+        .px_2()
+        .flex()
+        .items_center()
+        .rounded_md()
+        .border_1()
+        .border_color(if path_focused {
+            accent
+        } else {
+            palette.menu_border
+        })
+        .text_xs()
+        .text_color(if path_value.is_empty() { muted } else { fg })
+        .whitespace_nowrap()
+        .overflow_hidden()
+        .cursor_pointer()
+        .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
+            let handle = this.settings_path_focus.clone();
+            window.focus(&handle, cx);
+            cx.notify();
+        }))
+        .child(SharedString::from(if path_focused {
+            crate::text_with_cursor(&path_value, app.settings_path_cursor)
+        } else if path_value.is_empty() {
+            c.t("desktop.settings.folder_empty").to_string()
+        } else {
+            path_value
+        }));
+    let local_row = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap_2()
+        .min_h(px(ROW_HEIGHT))
+        .child(local_field)
+        .child(
+            // With no folder saved, or a different one typed, the button applies the field;
+            // otherwise there is nothing to set and it rescans.
+            c.button(
+                "settings-rescan",
+                c.t(if path_unsaved {
+                    "desktop.settings.set_folder"
+                } else {
+                    "desktop.settings.rescan"
+                }),
+                false,
+            )
+            .cursor_pointer()
+            .hover(move |style| style.bg(palette.menu_hover))
+            .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
+                this.apply_or_rescan_local_folder(window, cx);
+            })),
+        );
+
+    vec![c.heading(c.t("desktop.settings.local"), None), local_row]
+}
+
+// The one control here that is neither a `:` command nor a config write: it runs a network
+// call, so its label and action both come from `app.update_state`.
+fn updates_section(
+    c: &Controls,
+    app: &EchoApp,
+    config: &echo_core::config::LibraryConfig,
+    cx: &mut Context<EchoApp>,
+) -> Vec<Div> {
+    let Controls { palette, muted, .. } = *c;
+    let version_row = c.row(
+        c.t("desktop.settings.updates.version"),
+        None,
+        true,
+        div()
+            .text_xs()
+            .text_color(muted)
+            .child(SharedString::from(if echo_core::update::is_dev_build() {
+                format!(
+                    "{} {}",
+                    echo_core::update::current_version(),
+                    echo_core::i18n::t("desktop.settings.updates.dev", &config.language)
+                )
+            } else {
+                echo_core::update::current_version().to_string()
+            }))
+            .into_any_element(),
+    );
+
+    let translate = |key: &str, value: &str| -> SharedString {
+        SharedString::from(echo_core::i18n::t(key, &config.language).replace("{}", value))
+    };
+    let auto_update_row = c.row(
+        c.t("desktop.settings.updates.auto"),
+        None,
+        true,
+        c.toggle(
+            "autoupdate",
+            config.auto_update,
+            SettingChange::Command(format!("autoupdate {}", on_off(!config.auto_update))),
+            cx,
+        ),
+    );
+    // The hint only appears when there is something to report: an installed update waiting
+    // for a restart, or why the last attempt failed.
+    let (update_label, update_hint, update_active) = match &app.update_state {
+        UpdateState::Idle => (c.t("desktop.settings.updates.check"), None, true),
+        UpdateState::Checking => (c.t("desktop.settings.updates.checking"), None, false),
+        UpdateState::UpToDate => (c.t("desktop.settings.updates.uptodate"), None, true),
+        UpdateState::Available(release) => (
+            translate("desktop.settings.updates.install", release.version()),
+            None,
+            true,
+        ),
+        UpdateState::Downloading(percent) => (
+            translate("desktop.settings.updates.downloading", &percent.to_string()),
+            None,
+            false,
+        ),
+        UpdateState::Ready(version) => (
+            c.t("desktop.settings.updates.restart"),
+            Some(translate("desktop.settings.updates.installed", version)),
+            false,
+        ),
+        UpdateState::Failed(message) => (
+            c.t("desktop.settings.updates.retry"),
+            Some(SharedString::from(message.clone())),
+            true,
+        ),
+        // Nothing in-app can fix this one, so the button leaves for the releases page.
+        UpdateState::Blocked(message) => (
+            c.t("desktop.settings.updates.open_releases"),
+            Some(SharedString::from(message.clone())),
+            true,
+        ),
+    };
+
+    let update_button = c
+        .button("settings-update", update_label, update_active)
+        .when(!update_active, |el| el.text_color(muted))
+        .when(update_active, |el| {
+            el.cursor_pointer()
+                .hover(move |style| style.bg(palette.menu_hover))
+                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
+                    match &this.update_state {
+                        UpdateState::Available(_) => this.install_update(cx),
+                        UpdateState::Blocked(_) => {
+                            let _ = webbrowser::open(&echo_core::update::releases_url());
+                        }
+                        _ => this.check_for_updates(cx),
+                    }
+                }))
+        })
+        .into_any_element();
+
+    let update_row = c.row(
+        c.t("desktop.settings.updates.label"),
+        update_hint,
+        true,
+        update_button,
+    );
+
+    vec![
+        c.heading(c.t("desktop.settings.updates.section"), None),
+        version_row,
+        auto_update_row,
+        update_row,
+    ]
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
+}
+
+/// The offered sizes, plus whatever `:pixelate` / `:visbins` set outside them, so the
+/// button never shows blank.
+fn with_current(offered: &[usize], current: usize) -> Vec<usize> {
+    let mut values = offered.to_vec();
+    if !values.contains(&current) {
+        values.push(current);
+        values.sort_unstable();
+    }
+    values
+}
+
+/// The colours and building blocks every settings row is made of.
+#[derive(Clone, Copy)]
+struct Controls<'a> {
+    palette: DesktopPalette,
+    fg: Hsla,
+    muted: Hsla,
+    surface: Hsla,
+    accent: Hsla,
+    open_dropdown: Option<&'static str>,
+    language: &'a str,
+}
+
+impl<'a> Controls<'a> {
+    fn new(app: &'a EchoApp) -> Self {
+        let theme = &app.state.ui.active_theme;
+        Self {
+            palette: DesktopPalette::resolve(theme),
+            fg: theme.text.gpui(WINDOW_FG()),
+            muted: theme.text_muted.gpui(WINDOW_FG()),
+            surface: theme.surface.gpui(crate::theme::PANEL_BG()),
+            accent: theme.primary.gpui(WINDOW_FG()),
+            open_dropdown: app.settings_dropdown,
+            language: &app.state.ui.library_config.language,
+        }
+    }
+
+    fn t(&self, key: &str) -> SharedString {
+        SharedString::from(echo_core::i18n::t(key, self.language))
+    }
+
+    /// A labelled row with its control on the right. Labels and hints arrive translated. A
+    /// disabled row is dimmed: its setting has no effect until another one is turned on.
+    fn row(
+        &self,
+        label: SharedString,
+        hint: Option<SharedString>,
+        enabled: bool,
+        control: AnyElement,
+    ) -> Div {
+        let Self { fg, muted, .. } = *self;
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .min_h(px(ROW_HEIGHT))
+            .py_0p5()
+            .when(!enabled, |el| el.opacity(0.4))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
+                    .child(div().text_sm().text_color(fg).child(label))
+                    .when_some(hint, |el, hint| {
+                        el.child(div().text_xs().text_color(muted).child(hint))
+                    }),
+            )
+            .child(control)
+    }
+
+    /// A section title over a rule, with an optional note that applies to the whole section.
+    fn heading(&self, label: SharedString, note: Option<SharedString>) -> Div {
+        let Self { palette, muted, .. } = *self;
         div()
             .flex()
             .flex_row()
@@ -79,10 +728,23 @@ pub fn settings_modal(
             .when_some(note, |el, note| {
                 el.child(div().text_xs().text_color(muted).child(note))
             })
-    };
+    }
 
-    // An on/off switch.
-    let toggle = |id: &'static str, on: bool, change: SettingChange, cx: &mut Context<EchoApp>| {
+    /// An on/off switch.
+    fn toggle(
+        &self,
+        id: &'static str,
+        on: bool,
+        change: SettingChange,
+        cx: &mut Context<EchoApp>,
+    ) -> AnyElement {
+        let Self {
+            palette,
+            muted,
+            surface,
+            accent,
+            ..
+        } = *self;
         div()
             .id(id)
             .flex_none()
@@ -106,12 +768,18 @@ pub fn settings_modal(
                     .bg(if on { surface } else { muted }),
             )
             .into_any_element()
-    };
+    }
 
-    // A segmented control: one joined bar, the active segment filled.
-    let segmented = |id: &'static str,
-                     options: Vec<(SharedString, String, bool)>,
-                     cx: &mut Context<EchoApp>| {
+    /// A segmented control: one joined bar, the active segment filled.
+    fn segmented(
+        &self,
+        id: &'static str,
+        options: Vec<(SharedString, String, bool)>,
+        cx: &mut Context<EchoApp>,
+    ) -> AnyElement {
+        let Self {
+            palette, fg, muted, ..
+        } = *self;
         div()
             .id(id)
             .flex_none()
@@ -152,20 +820,31 @@ pub fn settings_modal(
                     }),
             )
             .into_any_element()
-    };
+    }
 
-    // A dropdown: a button showing the current option, and while open a menu of all of them
-    // hanging under it. The menu is drawn deferred so the scrolling list does not clip it.
-    let dropdown = |id: &'static str,
-                    options: Vec<(SharedString, SettingChange, bool)>,
-                    enabled: bool,
-                    cx: &mut Context<EchoApp>| {
+    /// A dropdown: a button showing the current option, and while open a menu of all of them
+    /// hanging under it. The menu is drawn deferred so the scrolling list does not clip it.
+    fn dropdown(
+        &self,
+        id: &'static str,
+        options: Vec<(SharedString, SettingChange, bool)>,
+        enabled: bool,
+        cx: &mut Context<EchoApp>,
+    ) -> AnyElement {
+        let Self {
+            palette,
+            fg,
+            muted,
+            surface,
+            accent,
+            ..
+        } = *self;
         let current = options
             .iter()
             .find(|option| option.2)
             .map(|option| option.0.clone())
             .unwrap_or_default();
-        let is_open = enabled && open_dropdown == Some(id);
+        let is_open = enabled && self.open_dropdown == Some(id);
         let menu = is_open.then(|| {
             let items: Vec<_> = options
                 .into_iter()
@@ -260,10 +939,16 @@ pub fn settings_modal(
             )
             .when_some(menu, |el, menu| el.child(menu))
             .into_any_element()
-    };
+    }
 
-    // A plain push button; the caller adds the click. `strong` accents the one that matters.
-    let button = |id: &'static str, label: SharedString, strong: bool| {
+    /// A plain push button; the caller adds the click. `strong` accents the one that matters.
+    fn button(&self, id: &'static str, label: SharedString, strong: bool) -> Stateful<Div> {
+        let Self {
+            palette,
+            fg,
+            accent,
+            ..
+        } = *self;
         div()
             .id(id)
             .flex_none()
@@ -277,565 +962,7 @@ pub fn settings_modal(
             .text_xs()
             .text_color(if strong { accent } else { fg })
             .child(label)
-    };
-
-    let command = |cmd: String| SettingChange::Command(cmd);
-    let on_off = |on: bool| if on { "on" } else { "off" };
-
-    // --- General ---------------------------------------------------------------------
-    let language_row = row(
-        s("desktop.settings.language"),
-        None,
-        true,
-        dropdown(
-            "lang",
-            [("English", "en"), ("简体中文", "zh-CN")]
-                .into_iter()
-                .map(|(label, code)| {
-                    (
-                        label.into(),
-                        command(format!("lang {code}")),
-                        config.language == code,
-                    )
-                })
-                .collect(),
-            true,
-            cx,
-        ),
-    );
-
-    let tray_row = row(
-        s("desktop.settings.tray"),
-        None,
-        true,
-        toggle(
-            "tray",
-            config.close_to_tray,
-            command(format!("tray {}", on_off(!config.close_to_tray))),
-            cx,
-        ),
-    );
-
-    let sort_row = row(
-        s("desktop.settings.order"),
-        None,
-        true,
-        dropdown(
-            "libsort",
-            {
-                use echo_core::config::SortMode;
-                [
-                    // The manual drag-and-drop order.
-                    ("order_custom", "default", SortMode::Default),
-                    ("order_alpha", "alpha", SortMode::Alphabetical),
-                    ("order_creator", "creator", SortMode::Creator),
-                ]
-                .into_iter()
-                .map(|(key, name, mode)| {
-                    (
-                        s(&format!("desktop.settings.{key}")),
-                        command(format!("sort {name}")),
-                        config.sort_mode == mode,
-                    )
-                })
-                .collect()
-            },
-            true,
-            cx,
-        ),
-    );
-
-    let relative_row = row(
-        s("desktop.settings.relative"),
-        None,
-        true,
-        toggle(
-            "relative",
-            config.relative_line_numbers,
-            command(format!(
-                "relative {}",
-                on_off(!config.relative_line_numbers)
-            )),
-            cx,
-        ),
-    );
-
-    // --- Appearance ------------------------------------------------------------------
-    let theme_mode = config
-        .theme_mode
-        .unwrap_or(echo_core::config::ThemeMode::Auto);
-    // The theme in use, or under `Auto` the dark and the light one.
-    let theme_label = {
-        use echo_core::config::{Scheme, ThemeMode};
-        let chosen =
-            |scheme| echo_core::theme::selected_name(&config, &app.state.ui.themes, scheme);
-        match theme_mode {
-            ThemeMode::Auto => format!("{} / {}", chosen(Scheme::Dark), chosen(Scheme::Light)),
-            ThemeMode::Dark => chosen(Scheme::Dark),
-            ThemeMode::Light => chosen(Scheme::Light),
-        }
-    };
-    let theme_row = row(
-        s("desktop.theme"),
-        None,
-        true,
-        button("settings-theme", theme_label.into(), false)
-            .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_hover))
-            .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                this.settings_open = false;
-                this.toggle_themes(cx);
-            }))
-            .into_any_element(),
-    );
-
-    let mode_row = row(
-        s("desktop.settings.mode"),
-        None,
-        true,
-        segmented(
-            "mode",
-            echo_core::config::ThemeMode::ALL
-                .into_iter()
-                .map(|mode| {
-                    (
-                        s(&format!("desktop.theme_mode.{}", mode.name())),
-                        format!("mode {}", mode.name()),
-                        theme_mode == mode,
-                    )
-                })
-                .collect(),
-            cx,
-        ),
-    );
-
-    // The offered sizes, plus whatever `:pixelate` / `:visbins` set outside them, so the
-    // button never shows blank.
-    let with_current = |offered: &[usize], current: usize| {
-        let mut values = offered.to_vec();
-        if !values.contains(&current) {
-            values.push(current);
-            values.sort_unstable();
-        }
-        values
-    };
-
-    let pixelate_row = row(
-        s("desktop.settings.pixelate"),
-        None,
-        true,
-        dropdown(
-            "pixelate",
-            with_current(&[0, 8, 16, 32], config.cover_img_pixels as usize)
-                .into_iter()
-                .map(|n| {
-                    (
-                        if n == 0 {
-                            s("ui.off")
-                        } else {
-                            SharedString::from(format!("{n} px"))
-                        },
-                        command(format!("pixelate {n}")),
-                        config.cover_img_pixels as usize == n,
-                    )
-                })
-                .collect(),
-            true,
-            cx,
-        ),
-    );
-
-    let backdrop_row = row(
-        s("desktop.settings.backdrop"),
-        None,
-        true,
-        dropdown(
-            "backdrop",
-            echo_core::config::BackdropMode::ALL
-                .into_iter()
-                .map(|mode| {
-                    (
-                        s(&format!("desktop.settings.backdrops.{}", mode.name())),
-                        command(format!("backdrop {}", mode.name())),
-                        config.immersive_backdrop == mode,
-                    )
-                })
-                .collect(),
-            true,
-            cx,
-        ),
-    );
-
-    let visualizer_row = row(
-        s("desktop.settings.visualizer"),
-        None,
-        true,
-        // `:vis` flips the visualizer; it takes no argument.
-        toggle("vis", config.enable_visualizer, command("vis".into()), cx),
-    );
-
-    let bins_row = row(
-        s("desktop.settings.bins"),
-        None,
-        config.enable_visualizer,
-        dropdown(
-            "visbins",
-            with_current(&[7, 9, 16, 24, 32], config.vis_bins)
-                .into_iter()
-                .map(|n| {
-                    (
-                        SharedString::from(n.to_string()),
-                        command(format!("visbins {n}")),
-                        config.vis_bins == n,
-                    )
-                })
-                .collect(),
-            config.enable_visualizer,
-            cx,
-        ),
-    );
-
-    // --- Audio quality ---------------------------------------------------------------
-    let bitrate_row = row(
-        s("desktop.settings.quality"),
-        None,
-        true,
-        dropdown(
-            "bitrate",
-            [96u32, 160, 320]
-                .into_iter()
-                .map(|rate| {
-                    (
-                        SharedString::from(format!("{rate} kbps")),
-                        SettingChange::Bitrate(rate),
-                        config.bitrate == rate,
-                    )
-                })
-                .collect(),
-            true,
-            cx,
-        ),
-    );
-
-    let normalisation = config.normalisation;
-    let normalisation_row = row(
-        s("desktop.settings.normalisation"),
-        None,
-        true,
-        toggle(
-            "normalisation",
-            normalisation,
-            SettingChange::Normalisation(!normalisation),
-            cx,
-        ),
-    );
-
-    let pregain = config.normalisation_pregain;
-    let step_button =
-        |id: &'static str, label: &'static str, delta: f64, cx: &mut Context<EchoApp>| {
-            div()
-                .id(id)
-                .size(px(CONTROL_HEIGHT))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_md()
-                .border_1()
-                .border_color(palette.menu_border)
-                .text_xs()
-                .text_color(fg)
-                .when(normalisation, |el| {
-                    el.cursor_pointer()
-                        .hover(move |style| style.bg(palette.menu_hover))
-                        .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
-                            this.set_audio_quality(
-                                |config| {
-                                    // Matches librespot's usable range; beyond this the
-                                    // limiter dominates.
-                                    config.normalisation_pregain =
-                                        (config.normalisation_pregain + delta).clamp(-10.0, 10.0);
-                                },
-                                cx,
-                            );
-                        }))
-                })
-                .child(label)
-        };
-    let pregain_row = row(
-        s("desktop.settings.pregain"),
-        Some(s("desktop.settings.pregain_desc")),
-        normalisation,
-        div()
-            .flex_none()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap_1()
-            .child(step_button("pregain-down", "−", -0.5, cx))
-            .child(
-                div()
-                    .w(px(56.0))
-                    .text_xs()
-                    .text_color(fg)
-                    .text_center()
-                    .child(SharedString::from(format!("{pregain:+.1} dB"))),
-            )
-            .child(step_button("pregain-up", "+", 0.5, cx))
-            .into_any_element(),
-    );
-
-    // --- Local music -----------------------------------------------------------------
-    let path_unsaved = app.local_folder_unsaved();
-    let local_field = div()
-        .id("settings-localpath")
-        .key_context(crate::SEARCH_CONTEXT)
-        .track_focus(&app.settings_path_focus)
-        .on_key_down(cx.listener(|this: &mut EchoApp, event, window, cx| {
-            this.handle_settings_path_key(event, window, cx)
-        }))
-        .flex_1()
-        .min_w_0()
-        .h(px(CONTROL_HEIGHT))
-        .px_2()
-        .flex()
-        .items_center()
-        .rounded_md()
-        .border_1()
-        .border_color(if path_focused {
-            accent
-        } else {
-            palette.menu_border
-        })
-        .text_xs()
-        .text_color(if path_value.is_empty() { muted } else { fg })
-        .whitespace_nowrap()
-        .overflow_hidden()
-        .cursor_pointer()
-        .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
-            let handle = this.settings_path_focus.clone();
-            window.focus(&handle, cx);
-            cx.notify();
-        }))
-        .child(SharedString::from(if path_focused {
-            crate::text_with_cursor(&path_value, app.settings_path_cursor)
-        } else if path_value.is_empty() {
-            s("desktop.settings.folder_empty").to_string()
-        } else {
-            path_value
-        }));
-    let local_row = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap_2()
-        .min_h(px(ROW_HEIGHT))
-        .child(local_field)
-        .child(
-            // With no folder saved, or a different one typed, the button applies the field;
-            // otherwise there is nothing to set and it rescans.
-            button(
-                "settings-rescan",
-                s(if path_unsaved {
-                    "desktop.settings.set_folder"
-                } else {
-                    "desktop.settings.rescan"
-                }),
-                false,
-            )
-            .cursor_pointer()
-            .hover(move |style| style.bg(palette.menu_hover))
-            .on_click(cx.listener(|this: &mut EchoApp, _event, window, cx| {
-                this.apply_or_rescan_local_folder(window, cx);
-            })),
-        );
-
-    // --- Updates ---------------------------------------------------------------------
-    // The one control here that is neither a `:` command nor a config write: it runs a network
-    // call, so its label and action both come from `app.update_state`.
-    let version_row = row(
-        s("desktop.settings.updates.version"),
-        None,
-        true,
-        div()
-            .text_xs()
-            .text_color(muted)
-            .child(SharedString::from(if echo_core::update::is_dev_build() {
-                format!(
-                    "{} {}",
-                    echo_core::update::current_version(),
-                    echo_core::i18n::t("desktop.settings.updates.dev", &config.language)
-                )
-            } else {
-                echo_core::update::current_version().to_string()
-            }))
-            .into_any_element(),
-    );
-
-    let translate = |key: &str, value: &str| -> SharedString {
-        SharedString::from(echo_core::i18n::t(key, &config.language).replace("{}", value))
-    };
-    let auto_update_row = row(
-        s("desktop.settings.updates.auto"),
-        None,
-        true,
-        toggle(
-            "autoupdate",
-            config.auto_update,
-            command(format!("autoupdate {}", on_off(!config.auto_update))),
-            cx,
-        ),
-    );
-    // The hint only appears when there is something to report: an installed update waiting
-    // for a restart, or why the last attempt failed.
-    let (update_label, update_hint, update_active) = match &app.update_state {
-        UpdateState::Idle => (s("desktop.settings.updates.check"), None, true),
-        UpdateState::Checking => (s("desktop.settings.updates.checking"), None, false),
-        UpdateState::UpToDate => (s("desktop.settings.updates.uptodate"), None, true),
-        UpdateState::Available(release) => (
-            translate("desktop.settings.updates.install", release.version()),
-            None,
-            true,
-        ),
-        UpdateState::Downloading(percent) => (
-            translate("desktop.settings.updates.downloading", &percent.to_string()),
-            None,
-            false,
-        ),
-        UpdateState::Ready(version) => (
-            s("desktop.settings.updates.restart"),
-            Some(translate("desktop.settings.updates.installed", version)),
-            false,
-        ),
-        UpdateState::Failed(message) => (
-            s("desktop.settings.updates.retry"),
-            Some(SharedString::from(message.clone())),
-            true,
-        ),
-        // Nothing in-app can fix this one, so the button leaves for the releases page.
-        UpdateState::Blocked(message) => (
-            s("desktop.settings.updates.open_releases"),
-            Some(SharedString::from(message.clone())),
-            true,
-        ),
-    };
-
-    let update_button = button("settings-update", update_label, update_active)
-        .when(!update_active, |el| el.text_color(muted))
-        .when(update_active, |el| {
-            el.cursor_pointer()
-                .hover(move |style| style.bg(palette.menu_hover))
-                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                    match &this.update_state {
-                        UpdateState::Available(_) => this.install_update(cx),
-                        UpdateState::Blocked(_) => {
-                            let _ = webbrowser::open(&echo_core::update::releases_url());
-                        }
-                        _ => this.check_for_updates(cx),
-                    }
-                }))
-        })
-        .into_any_element();
-
-    let update_row = row(
-        s("desktop.settings.updates.label"),
-        update_hint,
-        true,
-        update_button,
-    );
-
-    div()
-        .id("settings-backdrop")
-        .absolute()
-        .inset_0()
-        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55))
-        .flex()
-        .items_center()
-        .justify_center()
-        .occlude()
-        .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-            // A click outside first closes an open dropdown, then the sheet.
-            if this.settings_dropdown.take().is_none() {
-                this.settings_open = false;
-            }
-            cx.notify();
-        }))
-        .child(
-            div()
-                .id("settings-panel")
-                .w(px(480.0))
-                // Never taller than the window: the list below takes what is left and scrolls.
-                .max_h(px(580.0).min(window.viewport_size().height - px(32.0)))
-                .rounded_lg()
-                .border_1()
-                .border_color(palette.menu_border)
-                .bg(surface)
-                .p_4()
-                .flex()
-                .flex_col()
-                .overflow_hidden()
-                .on_click(cx.listener(|this: &mut EchoApp, _event, _window, cx| {
-                    if this.settings_dropdown.take().is_some() {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }))
-                .child(
-                    // The rule is where scrolled rows disappear, so they never run up
-                    // under the title.
-                    div()
-                        .flex_none()
-                        .pb_3()
-                        .border_b_1()
-                        .border_color(palette.menu_border)
-                        .text_base()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(fg)
-                        .child(s("desktop.settings.title")),
-                )
-                .child(
-                    div()
-                        .id("settings-list")
-                        .flex()
-                        .flex_col()
-                        // Sized by its rows, shrinking (and scrolling) once the panel is full.
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&app.settings_scroll)
-                        // One child holding every row: the scroll extent is measured across the list's children and
-                        // skips the first one's top margin, which left the last row short of fully scrolling in.
-                        .child(
-                            div()
-                                .flex_none()
-                                .flex()
-                                .flex_col()
-                                .child(heading(s("desktop.settings.general"), None))
-                                .child(language_row)
-                                .when(!cfg!(target_os = "macos"), |el| el.child(tray_row))
-                                .child(sort_row)
-                                .child(relative_row)
-                                .child(heading(s("desktop.settings.appearance"), None))
-                                .child(theme_row)
-                                .child(mode_row)
-                                .child(pixelate_row)
-                                .child(backdrop_row)
-                                .child(visualizer_row)
-                                .child(bins_row)
-                                .child(heading(
-                                    s("desktop.settings.audio"),
-                                    Some(s("desktop.settings.next_launch")),
-                                ))
-                                .child(bitrate_row)
-                                .child(normalisation_row)
-                                .child(pregain_row)
-                                .child(heading(s("desktop.settings.local"), None))
-                                .child(local_row)
-                                .child(heading(s("desktop.settings.updates.section"), None))
-                                .child(version_row)
-                                .child(auto_update_row)
-                                .child(update_row),
-                        ),
-                ),
-        )
+    }
 }
 
 /// What a settings control does when used: nearly always a `:` command, so the sheet and the
