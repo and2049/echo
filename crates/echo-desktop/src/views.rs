@@ -1,8 +1,8 @@
-//! Library sidebar and track list — the first real views of the desktop app.
+//! Everything the window draws, one submodule per screen area, plus the row, thumbnail and
+//! label helpers they share.
 //!
-//! Both are thin projections of [`AppState`]: rows come straight from `library_view` /
-//! `saved_albums` / `tracks`, and keyboard or pointer activation goes through
-//! [`echo_core::intent`].
+//! Views are thin projections of [`echo_core::app::AppState`]: rows come straight from the
+//! state, and keyboard or pointer activation goes through [`echo_core::intent`].
 //!
 //! Thumbnails ride the core's [`echo_core::thumbnails`] cache. Rendering a row requests its
 //! cover; `drain_pending` (called after each row batch) spawns the fetches, and the resulting
