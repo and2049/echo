@@ -394,7 +394,7 @@ impl EchoApp {
             mut state,
             config: _,
             app_tx,
-            mut app_rx,
+            app_rx,
             worker_tx,
         } = boot;
         if state.ui.mode == AppMode::Normal {
@@ -403,79 +403,8 @@ impl EchoApp {
             }
         }
 
-        // Bridge: worker events land here and become repaints. tokio's mpsc futures don't need
-        // the tokio reactor, so awaiting on GPUI's foreground executor is fine.
-        cx.spawn(async move |this, cx| {
-            while let Some(event) = app_rx.recv().await {
-                let applied = this.update(cx, |app: &mut EchoApp, cx| {
-                    let signed_in = matches!(
-                        &event,
-                        echo_core::events::WorkerEvent::AuthenticationComplete
-                    );
-                    // Arrives ten times a second during playback and only moves the position.
-                    let position_only = matches!(&event, echo_core::events::WorkerEvent::Tick);
-                    apply_worker_event(event, &mut app.state, &app.app_tx, &app.worker_tx);
-                    if signed_in {
-                        app.open_home(cx);
-                    }
-                    // A tick that reaches the end of the track stops playback, which every
-                    // pane shows.
-                    if position_only && app.state.playback.is_playing {
-                        app.notify_playback_position(cx);
-                    } else {
-                        cx.notify();
-                    }
-                });
-                if applied.is_err() {
-                    break; // entity dropped — app is shutting down
-                }
-            }
-        })
-        .detach();
-
-        // Progress tick: elapsed time is interpolated at render time, so while playing the bar
-        // needs a repaint even when no worker event arrives. The visualizer needs a much faster
-        // cadence, so the interval tightens while it is live; the immersive backdrop's drift
-        // sets its own, slower one.
-        cx.spawn(async move |this, cx| {
-            loop {
-                let interval = this.update(cx, |app: &mut EchoApp, cx| {
-                    app.maybe_auto_update(cx);
-                    let animating = app.immersive && !cx.reduce_motion();
-                    if animating {
-                        cx.notify();
-                    } else if app.state.playback.is_playing {
-                        app.notify_playback_position(cx);
-                    }
-                    // Status messages carry an expiry; the periodic tick retires them.
-                    if app
-                        .state
-                        .ui
-                        .status_message_expiry
-                        .is_some_and(|expiry| expiry <= std::time::Instant::now())
-                    {
-                        app.state.ui.status_message = None;
-                        app.state.ui.status_message_expiry = None;
-                        cx.notify();
-                    }
-                    let visualizing = app.state.playback.is_playing
-                        && app.state.ui.library_config.enable_visualizer
-                        && app.state.playback.audio_visualization.is_some();
-                    if visualizing {
-                        Duration::from_millis(66)
-                    } else if animating {
-                        backdrop::FRAME
-                    } else {
-                        Duration::from_millis(500)
-                    }
-                });
-                let Ok(interval) = interval else {
-                    break; // entity dropped — app is shutting down
-                };
-                cx.background_executor().timer(interval).await;
-            }
-        })
-        .detach();
+        Self::spawn_worker_bridge(app_rx, cx);
+        Self::spawn_periodic_tick(cx);
 
         let focus_handle = cx.focus_handle();
 
@@ -582,6 +511,93 @@ impl EchoApp {
             mono_font: resolve_mono_font(cx),
             focus_handle,
             tokio: tokio::runtime::Handle::current(),
+        }
+    }
+
+    /// Bridge: worker events land here and become repaints. tokio's mpsc futures don't need
+    /// the tokio reactor, so awaiting on GPUI's foreground executor is fine.
+    fn spawn_worker_bridge(
+        mut app_rx: tokio::sync::mpsc::Receiver<echo_core::events::WorkerEvent>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = app_rx.recv().await {
+                let applied = this.update(cx, |app: &mut EchoApp, cx| {
+                    app.on_worker_event(event, cx);
+                });
+                if applied.is_err() {
+                    break; // entity dropped — app is shutting down
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn on_worker_event(&mut self, event: echo_core::events::WorkerEvent, cx: &mut Context<Self>) {
+        let signed_in = matches!(
+            &event,
+            echo_core::events::WorkerEvent::AuthenticationComplete
+        );
+        // Arrives ten times a second during playback and only moves the position.
+        let position_only = matches!(&event, echo_core::events::WorkerEvent::Tick);
+        apply_worker_event(event, &mut self.state, &self.app_tx, &self.worker_tx);
+        if signed_in {
+            self.open_home(cx);
+        }
+        // A tick that reaches the end of the track stops playback, which every
+        // pane shows.
+        if position_only && self.state.playback.is_playing {
+            self.notify_playback_position(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Progress tick: elapsed time is interpolated at render time, so while playing the bar
+    /// needs a repaint even when no worker event arrives. The visualizer needs a much faster
+    /// cadence, so the interval tightens while it is live; the immersive backdrop's drift
+    /// sets its own, slower one.
+    fn spawn_periodic_tick(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            loop {
+                let interval = this.update(cx, |app: &mut EchoApp, cx| app.periodic_tick(cx));
+                let Ok(interval) = interval else {
+                    break; // entity dropped — app is shutting down
+                };
+                cx.background_executor().timer(interval).await;
+            }
+        })
+        .detach();
+    }
+
+    fn periodic_tick(&mut self, cx: &mut Context<Self>) -> Duration {
+        self.maybe_auto_update(cx);
+        let animating = self.immersive && !cx.reduce_motion();
+        if animating {
+            cx.notify();
+        } else if self.state.playback.is_playing {
+            self.notify_playback_position(cx);
+        }
+        // Status messages carry an expiry; the periodic tick retires them.
+        if self
+            .state
+            .ui
+            .status_message_expiry
+            .is_some_and(|expiry| expiry <= std::time::Instant::now())
+        {
+            self.state.ui.status_message = None;
+            self.state.ui.status_message_expiry = None;
+            cx.notify();
+        }
+        let visualizing = self.state.playback.is_playing
+            && self.state.ui.library_config.enable_visualizer
+            && self.state.playback.audio_visualization.is_some();
+        if visualizing {
+            Duration::from_millis(66)
+        } else if animating {
+            backdrop::FRAME
+        } else {
+            Duration::from_millis(500)
         }
     }
 
