@@ -2208,18 +2208,12 @@ fn track_index_cell(
 ) -> impl IntoElement {
     let number = row_number(&app.state, ix, selected);
     let animate = playing && app.state.playback.is_playing && !cx.reduce_motion();
-    let bars = if animate {
-        div()
-            .size(px(18.0))
-            .with_animation(
-                ("playing-bars", ix),
-                Animation::new(std::time::Duration::from_millis(900)).repeat(),
-                move |el, phase| el.child(playing_bars(phase, accent)),
-            )
-            .into_any_element()
+    let phase = if animate {
+        app.animate_playing_bars(cx)
     } else {
-        playing_bars(0.25, accent).into_any_element()
+        0.25
     };
+    let bars = playing_bars(phase, accent).into_any_element();
     div()
         .id(("track-index", ix))
         .relative()

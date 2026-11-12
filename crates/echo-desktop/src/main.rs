@@ -233,6 +233,7 @@ pub(crate) struct EchoApp {
     /// from a list edge. The ticking task ends itself when this clears or the drag ends.
     pub(crate) drag_scroll: Option<(DragList, f32)>,
     pub(crate) drag_scroll_ticking: bool,
+    playing_bars: Cell<PlayingBars>,
     pub(crate) playlist_modal_scroll: ScrollHandle,
     pub(crate) device_modal_scroll: ScrollHandle,
     pub(crate) theme_modal_scroll: ScrollHandle,
@@ -333,6 +334,25 @@ fn mac_menus() -> Vec<gpui::Menu> {
 fn is_paste_chord(modifiers: &gpui::Modifiers) -> bool {
     modifiers.secondary() || modifiers.control
 }
+
+/// The animation of the playing row's bars. A render that draws them moves this to `Drawn`
+/// and each tick of the animation's task moves it one step back, so the task ends itself one
+/// tick after the row leaves the screen.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlayingBars {
+    /// Not on screen; no task is running.
+    Hidden,
+    /// Drawn since the last tick.
+    Drawn,
+    /// Not drawn since the last tick; the next one ends the task.
+    Stale,
+}
+
+/// One bounce of the playing row's bars.
+const PLAYING_BARS_LOOP: Duration = Duration::from_millis(900);
+/// How often the bars repaint. Every frame re-renders the whole window, so this stays well
+/// under the display's refresh rate.
+const PLAYING_BARS_FRAME: Duration = Duration::from_millis(33);
 
 /// The lists a drag can scroll by hovering near their edges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -594,6 +614,7 @@ impl EchoApp {
             right_panel,
             drag_scroll: None,
             drag_scroll_ticking: false,
+            playing_bars: Cell::new(PlayingBars::Hidden),
             playlist_modal_scroll: ScrollHandle::new(),
             device_modal_scroll: ScrollHandle::new(),
             theme_modal_scroll: ScrollHandle::new(),
@@ -1700,6 +1721,36 @@ impl EchoApp {
     /// Whether a range action covers more than the focused row: a visual range or picked rows.
     pub(crate) fn multi_selected(&self) -> bool {
         echo_core::intent::has_multi_selection(&self.state)
+    }
+
+    /// The phase, in `0..1`, to draw the playing row's bars at. Calling this from a render
+    /// keeps the window repainting every [`PLAYING_BARS_FRAME`] for as long as renders keep
+    /// calling it.
+    pub(crate) fn animate_playing_bars(&self, cx: &mut Context<Self>) -> f32 {
+        if self.playing_bars.replace(PlayingBars::Drawn) == PlayingBars::Hidden {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(PLAYING_BARS_FRAME).await;
+                    let keep_going = this.update(cx, |app, cx| match app.playing_bars.get() {
+                        PlayingBars::Drawn => {
+                            app.playing_bars.set(PlayingBars::Stale);
+                            cx.notify();
+                            true
+                        }
+                        PlayingBars::Stale | PlayingBars::Hidden => {
+                            app.playing_bars.set(PlayingBars::Hidden);
+                            false
+                        }
+                    });
+                    if !matches!(keep_going, Ok(true)) {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
+        let elapsed = self.started_at.elapsed().as_secs_f32();
+        (elapsed / PLAYING_BARS_LOOP.as_secs_f32()).fract()
     }
 
     /// Called on every drag move over a list: within [`DRAG_EDGE`] of its top or bottom edge
