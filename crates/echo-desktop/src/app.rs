@@ -2,6 +2,7 @@
 
 use super::*;
 
+mod menus;
 mod panels;
 mod selection;
 mod themes;
