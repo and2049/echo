@@ -744,16 +744,7 @@ pub(crate) fn sort_arg(sort: echo_core::app::TrackSort) -> &'static str {
 }
 
 fn main() {
-    // Neither launch path has a stderr anyone reads — the Linux .desktop entry sets
-    // Terminal=false and the Windows build is a windows_subsystem app — so a panic before the
-    // window opens is indistinguishable from the icon doing nothing at all. First thing in
-    // main, so it covers the runtime and bootstrap below as well as the UI.
-    std::panic::set_hook(Box::new(|info| {
-        let path = echo_core::config::debug_log_path("echo-desktop-panic.log");
-        let backtrace = std::backtrace::Backtrace::force_capture();
-        let _ = std::fs::write(&path, format!("{info}\n\n{backtrace}\n"));
-        eprintln!("{info}");
-    }));
+    install_panic_log();
 
     // The worker lives on this runtime; entering it makes bootstrap::init()'s tokio::spawn work.
     // It must outlive the UI, which `run()` blocks for.
@@ -787,120 +778,9 @@ fn main() {
         // (Start Menu, desktop shortcut, raw exe) groups onto the same pinned button.
         cx.set_app_identity("com.echo.app", "echo");
         cx.on_action(|_: &Quit, cx| cx.quit());
-        // The keymap is ctrl-based everywhere. These are the chords a Mac user reaches for
-        // without thinking, and they are what the menu bar below shows as its accelerators —
-        // gpui reads them back out of the keymap when it builds the menu.
-        if cfg!(target_os = "macos") {
-            cx.bind_keys([
-                KeyBinding::new("cmd-q", Quit, None),
-                KeyBinding::new("cmd-h", Hide, None),
-                KeyBinding::new("cmd-m", MinimizeWindow, None),
-            ]);
-            cx.on_action(|_: &Hide, cx| cx.hide());
-            cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
-            cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
-            cx.set_menus(mac_menus());
-        }
-        cx.bind_keys([
-            KeyBinding::new("ctrl-q", Quit, None),
-            KeyBinding::new(
-                if cfg!(target_os = "macos") {
-                    "ctrl-shift-h"
-                } else {
-                    "ctrl-h"
-                },
-                OpenHome,
-                None,
-            ),
-            // Everything else is scoped to the lists so plain letters can type into the
-            // search box (whose context adds `search`, defeating the `!search` predicate).
-            KeyBinding::new("space", TogglePlayback, LIST_KEYS),
-            KeyBinding::new("up", MoveUp, LIST_KEYS),
-            KeyBinding::new("k", MoveUp, LIST_KEYS),
-            KeyBinding::new("down", MoveDown, LIST_KEYS),
-            KeyBinding::new("j", MoveDown, LIST_KEYS),
-            KeyBinding::new("pageup", PageUp, LIST_KEYS),
-            KeyBinding::new("pagedown", PageDown, LIST_KEYS),
-            KeyBinding::new("home", SelectFirst, LIST_KEYS),
-            KeyBinding::new("end", SelectLast, LIST_KEYS),
-            KeyBinding::new("enter", Activate, LIST_KEYS),
-            // `z` is an Enter alias.
-            KeyBinding::new("z", Activate, LIST_KEYS),
-            // `y` answers confirm prompts; Enter reaches the same handler.
-            KeyBinding::new("y", ConfirmPrompt, LIST_KEYS),
-            KeyBinding::new("left", FocusLibrary, LIST_KEYS),
-            KeyBinding::new("right", FocusTracks, LIST_KEYS),
-            // `l` likes the focused track (or acts as Enter on library rows);
-            // `right` keeps pane focus for arrow navigation.
-            KeyBinding::new("l", ToggleLike, LIST_KEYS),
-            // Vim-style navigation motions.
-            KeyBinding::new("g g", SelectFirst, LIST_KEYS),
-            KeyBinding::new("shift-g", SelectLast, LIST_KEYS),
-            KeyBinding::new("g c", JumpToCurrent, LIST_KEYS),
-            KeyBinding::new("ctrl-u", HalfPageUp, LIST_KEYS),
-            KeyBinding::new("ctrl-d", HalfPageDown, LIST_KEYS),
-            KeyBinding::new("ctrl-b", PageUp, LIST_KEYS),
-            KeyBinding::new("ctrl-f", PageDown, LIST_KEYS),
-            // `h` is "back", not "focus sidebar" — the left arrow keeps that role.
-            KeyBinding::new("h", Dismiss, LIST_KEYS),
-            // Backspace hops focus back to the sidebar; `h`/escape keep going through history.
-            KeyBinding::new("backspace", BackOrFocusLibrary, LIST_KEYS),
-            KeyBinding::new("escape", Dismiss, LIST_KEYS),
-            KeyBinding::new("tab", CycleTab, LIST_KEYS),
-            // Playback transport.
-            KeyBinding::new("ctrl-right", NextTrack, LIST_KEYS),
-            KeyBinding::new("ctrl-left", PreviousTrack, LIST_KEYS),
-            KeyBinding::new("]", NextTrack, LIST_KEYS),
-            KeyBinding::new("[", PreviousTrack, LIST_KEYS),
-            KeyBinding::new("s", ToggleShuffle, LIST_KEYS),
-            KeyBinding::new("r", CycleRepeat, LIST_KEYS),
-            KeyBinding::new("shift-m", ToggleMute, LIST_KEYS),
-            KeyBinding::new("shift-right", SeekForward, LIST_KEYS),
-            KeyBinding::new("shift-left", SeekBackward, LIST_KEYS),
-            KeyBinding::new(".", SeekForward, LIST_KEYS),
-            KeyBinding::new(",", SeekBackward, LIST_KEYS),
-            KeyBinding::new("0", SeekStart, LIST_KEYS),
-            KeyBinding::new("=", VolumeUp, LIST_KEYS),
-            KeyBinding::new("-", VolumeDown, LIST_KEYS),
-            KeyBinding::new("shift-=", VolumeUpBig, LIST_KEYS),
-            KeyBinding::new("shift--", VolumeDownBig, LIST_KEYS),
-            // Views, prompts and toggles.
-            KeyBinding::new("q", AddToQueue, LIST_KEYS),
-            KeyBinding::new("a", AddToPlaylist, LIST_KEYS),
-            KeyBinding::new("shift-a", OpenActionMenu, LIST_KEYS),
-            // `dd`: the first press arms, the second stages the confirm prompt.
-            KeyBinding::new("d", MarkDelete, LIST_KEYS),
-            KeyBinding::new("shift-q", ToggleQueue, LIST_KEYS),
-            KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
-            KeyBinding::new("shift-r", Refresh, LIST_KEYS),
-            KeyBinding::new("m", TogglePin, LIST_KEYS),
-            KeyBinding::new(":", OpenCommand, LIST_KEYS),
-            KeyBinding::new("f", CommandSearch, LIST_KEYS),
-            KeyBinding::new("c", NewPlaylistPrompt, LIST_KEYS),
-            KeyBinding::new("e", RenamePrompt, LIST_KEYS),
-            // `/` filters the loaded track list; the global search box gets ctrl-k (and stays
-            // clickable).
-            KeyBinding::new("/", OpenFilter, LIST_KEYS),
-            KeyBinding::new("n", NextMatch, LIST_KEYS),
-            KeyBinding::new("shift-n", PrevMatch, LIST_KEYS),
-            KeyBinding::new("ctrl-k", FocusSearch, LIST_KEYS),
-            KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
-            KeyBinding::new("ctrl-shift-l", ToggleInlineLyrics, LIST_KEYS),
-            KeyBinding::new("t", ToggleThemes, LIST_KEYS),
-            KeyBinding::new("shift-f", ToggleImmersive, LIST_KEYS),
-            // The platform-conventional preferences shortcut; global so it also works while
-            // the search box has focus.
-            KeyBinding::new("ctrl-,", ToggleSettings, None),
-            // Global like ctrl-,: chords type nothing, so they're safe while inputs focus.
-            KeyBinding::new("ctrl-\\", ToggleSidebar, None),
-            KeyBinding::new("alt-left", HistoryBack, None),
-            KeyBinding::new("alt-right", HistoryForward, None),
-            KeyBinding::new("?", ToggleHelp, LIST_KEYS),
-            KeyBinding::new("v", EnterVisual, LIST_KEYS),
-            KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),
-            KeyBinding::new("shift-j", MoveTrackDown, LIST_KEYS),
-        ]);
-        let (tray_tx, mut tray_rx) = tokio::sync::mpsc::unbounded_channel();
+        bind_platform_keys(cx);
+        bind_keys(cx);
+        let (tray_tx, tray_rx) = tokio::sync::mpsc::unbounded_channel();
         let instance_task = instance.map(|listener| listener.serve(tray_tx.clone()));
         let app = cx.new(|cx| EchoApp::new(boot, cx));
         cx.set_global(Shell {
@@ -909,18 +789,157 @@ fn main() {
             tray_tx,
             tray: None,
         });
-        cx.spawn(async move |cx| {
-            while let Some(event) = tray_rx.recv().await {
-                cx.update(|cx| match event {
-                    tray::TrayEvent::Show => open_main_window(cx),
-                    tray::TrayEvent::Quit => cx.quit(),
-                });
-            }
-        })
-        .detach();
+        spawn_tray_listener(tray_rx, cx);
         open_main_window(cx);
         cx.activate(true);
     });
+}
+
+/// Neither launch path has a stderr anyone reads — the Linux .desktop entry sets
+/// Terminal=false and the Windows build is a windows_subsystem app — so a panic before the
+/// window opens is indistinguishable from the icon doing nothing at all. First thing in
+/// main, so it covers the runtime and bootstrap below as well as the UI.
+fn install_panic_log() {
+    std::panic::set_hook(Box::new(|info| {
+        let path = echo_core::config::debug_log_path("echo-desktop-panic.log");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let _ = std::fs::write(&path, format!("{info}\n\n{backtrace}\n"));
+        eprintln!("{info}");
+    }));
+}
+
+/// The keymap is ctrl-based everywhere. These are the chords a Mac user reaches for
+/// without thinking, and they are what the menu bar below shows as its accelerators —
+/// gpui reads them back out of the keymap when it builds the menu.
+fn bind_platform_keys(cx: &mut App) {
+    if cfg!(target_os = "macos") {
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-h", Hide, None),
+            KeyBinding::new("cmd-m", MinimizeWindow, None),
+        ]);
+        cx.on_action(|_: &Hide, cx| cx.hide());
+        cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+        cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+        cx.set_menus(mac_menus());
+    }
+}
+
+fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("ctrl-q", Quit, None),
+        KeyBinding::new(
+            if cfg!(target_os = "macos") {
+                "ctrl-shift-h"
+            } else {
+                "ctrl-h"
+            },
+            OpenHome,
+            None,
+        ),
+        // Everything else is scoped to the lists so plain letters can type into the
+        // search box (whose context adds `search`, defeating the `!search` predicate).
+        KeyBinding::new("space", TogglePlayback, LIST_KEYS),
+        KeyBinding::new("up", MoveUp, LIST_KEYS),
+        KeyBinding::new("k", MoveUp, LIST_KEYS),
+        KeyBinding::new("down", MoveDown, LIST_KEYS),
+        KeyBinding::new("j", MoveDown, LIST_KEYS),
+        KeyBinding::new("pageup", PageUp, LIST_KEYS),
+        KeyBinding::new("pagedown", PageDown, LIST_KEYS),
+        KeyBinding::new("home", SelectFirst, LIST_KEYS),
+        KeyBinding::new("end", SelectLast, LIST_KEYS),
+        KeyBinding::new("enter", Activate, LIST_KEYS),
+        // `z` is an Enter alias.
+        KeyBinding::new("z", Activate, LIST_KEYS),
+        // `y` answers confirm prompts; Enter reaches the same handler.
+        KeyBinding::new("y", ConfirmPrompt, LIST_KEYS),
+        KeyBinding::new("left", FocusLibrary, LIST_KEYS),
+        KeyBinding::new("right", FocusTracks, LIST_KEYS),
+        // `l` likes the focused track (or acts as Enter on library rows);
+        // `right` keeps pane focus for arrow navigation.
+        KeyBinding::new("l", ToggleLike, LIST_KEYS),
+        // Vim-style navigation motions.
+        KeyBinding::new("g g", SelectFirst, LIST_KEYS),
+        KeyBinding::new("shift-g", SelectLast, LIST_KEYS),
+        KeyBinding::new("g c", JumpToCurrent, LIST_KEYS),
+        KeyBinding::new("ctrl-u", HalfPageUp, LIST_KEYS),
+        KeyBinding::new("ctrl-d", HalfPageDown, LIST_KEYS),
+        KeyBinding::new("ctrl-b", PageUp, LIST_KEYS),
+        KeyBinding::new("ctrl-f", PageDown, LIST_KEYS),
+        // `h` is "back", not "focus sidebar" — the left arrow keeps that role.
+        KeyBinding::new("h", Dismiss, LIST_KEYS),
+        // Backspace hops focus back to the sidebar; `h`/escape keep going through history.
+        KeyBinding::new("backspace", BackOrFocusLibrary, LIST_KEYS),
+        KeyBinding::new("escape", Dismiss, LIST_KEYS),
+        KeyBinding::new("tab", CycleTab, LIST_KEYS),
+        // Playback transport.
+        KeyBinding::new("ctrl-right", NextTrack, LIST_KEYS),
+        KeyBinding::new("ctrl-left", PreviousTrack, LIST_KEYS),
+        KeyBinding::new("]", NextTrack, LIST_KEYS),
+        KeyBinding::new("[", PreviousTrack, LIST_KEYS),
+        KeyBinding::new("s", ToggleShuffle, LIST_KEYS),
+        KeyBinding::new("r", CycleRepeat, LIST_KEYS),
+        KeyBinding::new("shift-m", ToggleMute, LIST_KEYS),
+        KeyBinding::new("shift-right", SeekForward, LIST_KEYS),
+        KeyBinding::new("shift-left", SeekBackward, LIST_KEYS),
+        KeyBinding::new(".", SeekForward, LIST_KEYS),
+        KeyBinding::new(",", SeekBackward, LIST_KEYS),
+        KeyBinding::new("0", SeekStart, LIST_KEYS),
+        KeyBinding::new("=", VolumeUp, LIST_KEYS),
+        KeyBinding::new("-", VolumeDown, LIST_KEYS),
+        KeyBinding::new("shift-=", VolumeUpBig, LIST_KEYS),
+        KeyBinding::new("shift--", VolumeDownBig, LIST_KEYS),
+        // Views, prompts and toggles.
+        KeyBinding::new("q", AddToQueue, LIST_KEYS),
+        KeyBinding::new("a", AddToPlaylist, LIST_KEYS),
+        KeyBinding::new("shift-a", OpenActionMenu, LIST_KEYS),
+        // `dd`: the first press arms, the second stages the confirm prompt.
+        KeyBinding::new("d", MarkDelete, LIST_KEYS),
+        KeyBinding::new("shift-q", ToggleQueue, LIST_KEYS),
+        KeyBinding::new("shift-d", OpenDevices, LIST_KEYS),
+        KeyBinding::new("shift-r", Refresh, LIST_KEYS),
+        KeyBinding::new("m", TogglePin, LIST_KEYS),
+        KeyBinding::new(":", OpenCommand, LIST_KEYS),
+        KeyBinding::new("f", CommandSearch, LIST_KEYS),
+        KeyBinding::new("c", NewPlaylistPrompt, LIST_KEYS),
+        KeyBinding::new("e", RenamePrompt, LIST_KEYS),
+        // `/` filters the loaded track list; the global search box gets ctrl-k (and stays
+        // clickable).
+        KeyBinding::new("/", OpenFilter, LIST_KEYS),
+        KeyBinding::new("n", NextMatch, LIST_KEYS),
+        KeyBinding::new("shift-n", PrevMatch, LIST_KEYS),
+        KeyBinding::new("ctrl-k", FocusSearch, LIST_KEYS),
+        KeyBinding::new("shift-l", ToggleLyrics, LIST_KEYS),
+        KeyBinding::new("ctrl-shift-l", ToggleInlineLyrics, LIST_KEYS),
+        KeyBinding::new("t", ToggleThemes, LIST_KEYS),
+        KeyBinding::new("shift-f", ToggleImmersive, LIST_KEYS),
+        // The platform-conventional preferences shortcut; global so it also works while
+        // the search box has focus.
+        KeyBinding::new("ctrl-,", ToggleSettings, None),
+        // Global like ctrl-,: chords type nothing, so they're safe while inputs focus.
+        KeyBinding::new("ctrl-\\", ToggleSidebar, None),
+        KeyBinding::new("alt-left", HistoryBack, None),
+        KeyBinding::new("alt-right", HistoryForward, None),
+        KeyBinding::new("?", ToggleHelp, LIST_KEYS),
+        KeyBinding::new("v", EnterVisual, LIST_KEYS),
+        KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),
+        KeyBinding::new("shift-j", MoveTrackDown, LIST_KEYS),
+    ]);
+}
+
+fn spawn_tray_listener(
+    mut tray_rx: tokio::sync::mpsc::UnboundedReceiver<tray::TrayEvent>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        while let Some(event) = tray_rx.recv().await {
+            cx.update(|cx| match event {
+                tray::TrayEvent::Show => open_main_window(cx),
+                tray::TrayEvent::Quit => cx.quit(),
+            });
+        }
+    })
+    .detach();
 }
 
 /// Opens the one main window around the entity `Shell` keeps, at the rectangle saved on the
