@@ -508,3 +508,356 @@ pub fn all_results(
     echo_core::thumbnails::drain_pending(&mut app.state, &app.worker_tx);
     content.into_any_element()
 }
+
+pub(super) fn search_results(
+    app: &mut EchoApp,
+    window: &mut Window,
+    cx: &mut Context<EchoApp>,
+) -> impl IntoElement {
+    let theme = &app.state.ui.active_theme;
+    let outer_palette = DesktopPalette::resolve(theme);
+    let fg = theme.text.gpui(WINDOW_FG());
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+
+    let tab = app.state.ui.active_search_tab;
+    let query = app.state.ui.search_context_query.clone();
+    let results = &app.state.data.search_results;
+    let (n_tracks, n_albums, n_artists, n_playlists) = (
+        results.tracks.len(),
+        results.albums.len(),
+        results.artists.len(),
+        results.playlists.len(),
+    );
+    let count = match tab {
+        SearchTab::All => echo_core::search::all_tab_rows(results, &query).len(),
+        SearchTab::Tracks => n_tracks,
+        SearchTab::Albums => n_albums,
+        SearchTab::Artists => n_artists,
+        SearchTab::Playlists => n_playlists,
+    };
+
+    let tab_button = |id: &'static str, label: String, target: SearchTab, active: bool| {
+        div()
+            .id(id)
+            .px_2()
+            .py_1()
+            .rounded_full()
+            .bg(outer_palette.wash)
+            .text_sm()
+            .text_color(if active { accent } else { muted })
+            .hover(move |style| style.bg(outer_palette.row_hover))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this: &mut EchoApp, _event, _window, cx| {
+                this.state.ui.active_search_tab = target;
+                this.state.ui.selected_search_index = 0;
+                cx.notify();
+            }))
+            .child(SharedString::from(label))
+    };
+
+    div()
+        .flex_grow(1.0)
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .child(
+            div()
+                .flex_none()
+                .px_4()
+                .py_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_lg()
+                        .text_color(fg)
+                        .child(SharedString::from(format!(
+                            "{}{query}",
+                            tr(&app.state, "prompts.search")
+                        ))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .gap_1()
+                        .flex_wrap()
+                        .child(tab_button(
+                            "search-all",
+                            tr(&app.state, "desktop.search_all").to_string(),
+                            SearchTab::All,
+                            tab == SearchTab::All,
+                        ))
+                        .child(tab_button(
+                            "search-tracks",
+                            tr(&app.state, "desktop.search_songs").to_string(),
+                            SearchTab::Tracks,
+                            tab == SearchTab::Tracks,
+                        ))
+                        .child(tab_button(
+                            "search-albums",
+                            tr(&app.state, "ui.albums").to_string(),
+                            SearchTab::Albums,
+                            tab == SearchTab::Albums,
+                        ))
+                        .child(tab_button(
+                            "search-artists",
+                            tr(&app.state, "ui.artists").to_string(),
+                            SearchTab::Artists,
+                            tab == SearchTab::Artists,
+                        ))
+                        .child(tab_button(
+                            "search-playlists",
+                            tr(&app.state, "ui.playlists").to_string(),
+                            SearchTab::Playlists,
+                            tab == SearchTab::Playlists,
+                        )),
+                ),
+        )
+        .child(if count == 0 {
+            search::empty_results(app)
+        } else if tab == SearchTab::All {
+            search::all_results(app, window, cx)
+        } else {
+            uniform_list(
+                "search-rows",
+                count,
+                cx.processor(
+                    move |this: &mut EchoApp, range: std::ops::Range<usize>, _window, cx| {
+                        let theme = &this.state.ui.active_theme;
+                        let fg = theme.text.gpui(WINDOW_FG());
+                        let muted = theme.text_muted.gpui(WINDOW_FG());
+                        let palette = DesktopPalette::resolve(theme);
+                        let selected_bg = palette.row_selected;
+                        let tab = this.state.ui.active_search_tab;
+                        let selected = this.state.ui.selected_search_index;
+                        let visual = visual_range_in(&this.state, ActiveView::SearchResults);
+
+                        let rows: Vec<AnyElement> = range
+                            .map(|ix| {
+                                pill_row(
+                                    ix,
+                                    LIST_PILL,
+                                    row_selected(ix, selected, visual),
+                                    selected_bg,
+                                    palette.row_hover,
+                                    |row| {
+                                        let row = row.gap_3().on_click(cx.listener(
+                                            move |this: &mut EchoApp,
+                                                  event: &gpui::ClickEvent,
+                                                  _window,
+                                                  cx| {
+                                                this.state.ui.selected_search_index = ix;
+                                                if (tab != SearchTab::Tracks
+                                                    || event.click_count() >= 2)
+                                                    && let Some(event) =
+                                                        echo_core::intent::activate_search_result(
+                                                            &mut this.state,
+                                                            ix,
+                                                        )
+                                                {
+                                                    this.dispatch(event);
+                                                }
+                                                cx.notify();
+                                            },
+                                        ));
+
+                                        match tab {
+                                            SearchTab::All => row,
+                                            SearchTab::Tracks => {
+                                                let track = this.state.data.search_results.tracks
+                                                    [ix]
+                                                    .clone();
+                                                let is_liked = this
+                                                    .state
+                                                    .data
+                                                    .liked_tracks
+                                                    .contains(&track.id);
+                                                let secondary = this
+                                                    .state
+                                                    .ui
+                                                    .active_theme
+                                                    .secondary
+                                                    .gpui(WINDOW_FG());
+                                                row.on_mouse_down(
+                                                    MouseButton::Right,
+                                                    cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
+                                                        this.state.ui.selected_search_index = ix;
+                                                        this.context_menu = None;
+                                                        if let Some(ctx) = this.action_target() {
+                                                            this.track_menu = Some(crate::TrackMenuState {
+                                                                ctx,
+                                                                position: Some(event.position),
+                                                                selected: 0,
+                                                                submenu: None,
+                                                            });
+                                                        }
+                                                        cx.notify();
+                                                    }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_grow(2.0)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(fg)
+                                                        .child(SharedString::from(track.name)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_grow(1.5)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(track.artist)),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_grow(1.5)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(track.album)),
+                                                )
+                                                .child(liked_cell(
+                                                    "search",
+                                                    ix,
+                                                    track.id.clone(),
+                                                    is_liked,
+                                                    secondary,
+                                                    palette,
+                                                    cx,
+                                                ))
+                                                .child(
+                                                    div()
+                                                        .flex_none()
+                                                        .w(px(48.0))
+                                                        .text_color(muted)
+                                                        .child(SharedString::from(format_time(
+                                                            track.duration_ms,
+                                                        ))),
+                                                )
+                                            }
+                                            SearchTab::Albums => {
+                                                let album = this.state.data.search_results.albums
+                                                    [ix]
+                                                    .clone();
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    album.image_url.as_deref(),
+                                                    26.0,
+                                                    false,
+                                                    muted,
+                                                );
+                                                row.child(thumb)
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(2.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(fg)
+                                                            .child(SharedString::from(album.name)),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(1.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(muted)
+                                                            .child(SharedString::from(
+                                                                album.artist,
+                                                            )),
+                                                    )
+                                            }
+                                            SearchTab::Artists => {
+                                                let artist = this.state.data.search_results.artists
+                                                    [ix]
+                                                    .clone();
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    artist.image_url.as_deref(),
+                                                    26.0,
+                                                    true,
+                                                    muted,
+                                                );
+                                                row.child(thumb).child(
+                                                    div()
+                                                        .flex_grow(1.0)
+                                                        .flex_basis(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .whitespace_nowrap()
+                                                        .text_color(fg)
+                                                        .child(SharedString::from(artist.name)),
+                                                )
+                                            }
+                                            SearchTab::Playlists => {
+                                                let playlist =
+                                                    this.state.data.search_results.playlists[ix]
+                                                        .clone();
+                                                let thumb_url = playlist
+                                                    .thumb_url
+                                                    .clone()
+                                                    .or_else(|| playlist.image_url.clone());
+                                                let thumb = thumb_element(
+                                                    this,
+                                                    thumb_url.as_deref(),
+                                                    26.0,
+                                                    false,
+                                                    muted,
+                                                );
+                                                row.child(thumb)
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(2.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(fg)
+                                                            .child(SharedString::from(
+                                                                playlist.name,
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .flex_grow(1.0)
+                                                            .flex_basis(px(0.0))
+                                                            .overflow_hidden()
+                                                            .text_ellipsis()
+                                                            .whitespace_nowrap()
+                                                            .text_color(muted)
+                                                            .child(SharedString::from(
+                                                                playlist.owner,
+                                                            )),
+                                                    )
+                                            }
+                                        }
+                                    },
+                                )
+                                .into_any_element()
+                            })
+                            .collect();
+
+                        echo_core::thumbnails::drain_pending(&mut this.state, &this.worker_tx);
+                        rows
+                    },
+                ),
+            )
+            .track_scroll(&app.search_scroll)
+            .flex_grow(1.0)
+            .into_any_element()
+        })
+}
