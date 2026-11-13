@@ -182,6 +182,17 @@ impl EchoApp {
         .max(0.0)
     }
 
+    /// Which pane edge, if any, is being dragged.
+    pub(crate) fn resizing_edge(&self) -> Option<views::ResizeEdge> {
+        self.panel_resizing.map(|resize| {
+            if resize.right {
+                views::ResizeEdge::RightPanel
+            } else {
+                views::ResizeEdge::Sidebar
+            }
+        })
+    }
+
     pub(crate) fn begin_sidebar_resize(&mut self, x: Pixels, cx: &mut Context<Self>) {
         self.panel_resizing = Some(PanelResize {
             start_x: x,

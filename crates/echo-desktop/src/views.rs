@@ -819,14 +819,8 @@ pub fn right_panel(
         )
         .child(body)
         .child(
-            div()
-                .absolute()
+            resize_handle(app, ResizeEdge::RightPanel)
                 .left_0()
-                .top_0()
-                .bottom_0()
-                .w(px(5.0))
-                .cursor_col_resize()
-                .hover(move |style| style.bg(palette.drag_target))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, window, cx| {
@@ -836,6 +830,47 @@ pub fn right_panel(
                 ),
         )
         .into_any_element()
+}
+
+/// A pane edge that can be dragged to resize the pane.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResizeEdge {
+    Sidebar,
+    RightPanel,
+}
+
+/// The invisible strip along a pane edge that resizes it. It never fills: the sidebar and the
+/// main area's rounded corner read as one arch, which a full-height highlight would cut through.
+/// Instead a short grip line appears at mid-height on hover and stays, accented, while the
+/// edge is being dragged. It sits inside the pane so it is drawn by that pane's own region.
+fn resize_handle(app: &EchoApp, edge: ResizeEdge) -> Div {
+    let theme = &app.state.ui.active_theme;
+    let muted = theme.text_muted.gpui(WINDOW_FG());
+    let accent = theme.primary.gpui(WINDOW_FG());
+    let dragging = app.resizing_edge() == Some(edge);
+    let group = match edge {
+        ResizeEdge::Sidebar => "sidebar-resize",
+        ResizeEdge::RightPanel => "right-panel-resize",
+    };
+    div()
+        .group(group)
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(px(9.0))
+        .cursor_col_resize()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .w(px(2.0))
+                .h(px(36.0))
+                .rounded_full()
+                .bg(if dragging { accent } else { muted })
+                .opacity(if dragging { 1.0 } else { 0.0 })
+                .group_hover(group, |style| style.opacity(1.0)),
+        )
 }
 
 /// The main-area empty state: the ECHO wordmark with a vertical secondary→primary gradient, or

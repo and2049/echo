@@ -17,7 +17,6 @@ fn is_fixed_library_row(id: &str) -> bool {
 }
 
 pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement {
-    let palette = DesktopPalette::resolve(&app.state.ui.active_theme);
     let tab = app.state.ui.active_library_tab;
     let count = match tab {
         LibraryTab::Albums => app.state.data.saved_albums.len(),
@@ -78,14 +77,8 @@ pub fn sidebar(app: &mut EchoApp, cx: &mut Context<EchoApp>) -> impl IntoElement
             .flex_grow(1.0),
         )
         .child(
-            div()
-                .absolute()
+            resize_handle(app, ResizeEdge::Sidebar)
                 .right_0()
-                .top_0()
-                .bottom_0()
-                .w(px(5.0))
-                .cursor_col_resize()
-                .hover(move |style| style.bg(palette.drag_target))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this: &mut EchoApp, event: &MouseDownEvent, _window, cx| {
