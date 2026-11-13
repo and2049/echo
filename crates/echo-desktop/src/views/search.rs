@@ -41,7 +41,7 @@ pub fn empty_results(app: &EchoApp) -> AnyElement {
 pub fn recent_searches(app: &EchoApp, cx: &mut Context<EchoApp>) -> Option<AnyElement> {
     let matches = echo_core::search::matching_recent_searches(
         &app.state.ui.library_config.recent_searches,
-        &app.search_input,
+        app.search_field.read(cx).text(),
     );
     if matches.is_empty() {
         return None;

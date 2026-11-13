@@ -19,6 +19,7 @@ mod playback_bar;
 mod playlist_ui;
 mod regions;
 mod single_instance;
+mod text_field;
 mod text_input;
 mod theme;
 mod tray;
@@ -207,8 +208,11 @@ pub(crate) struct EchoApp {
     pub(crate) app_tx: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     pub(crate) worker_tx: tokio::sync::mpsc::Sender<echo_core::events::WorkerEvent>,
     pub(crate) images: images::ImageCache,
-    pub(crate) search_input: String,
-    pub(crate) search_cursor: usize,
+    pub(crate) search_field: Entity<text_field::TextField>,
+    /// A query to show in the search box, set where no context is at hand to update the field
+    /// (a search started from history or the command bar) and applied on the next render.
+    pub(crate) pending_search_text: Option<String>,
+    _search_field_changed: gpui::Subscription,
     pub(crate) search_focus: FocusHandle,
     command_focus: FocusHandle,
     pub(crate) setup_id_focus: FocusHandle,
@@ -427,14 +431,21 @@ impl EchoApp {
             let _ = app_tx.send(AppEvent::FetchQueue);
         }
 
+        let search_focus = cx.focus_handle();
+        let search_field = cx.new(|_| {
+            text_field::TextField::new(search_focus.clone(), text_field::InputFilter::DropNewlines)
+        });
+        let search_field_changed = cx.subscribe(&search_field, |_, _, _, cx| cx.notify());
+
         Self {
             state,
             app_tx,
             worker_tx,
             images: images::ImageCache::default(),
-            search_input: String::new(),
-            search_cursor: 0,
-            search_focus: cx.focus_handle(),
+            search_field,
+            pending_search_text: None,
+            _search_field_changed: search_field_changed,
+            search_focus,
             command_focus: cx.focus_handle(),
             setup_id_focus: cx.focus_handle(),
             setup_secret_focus: cx.focus_handle(),
@@ -698,8 +709,7 @@ impl EchoApp {
         if let AppEvent::GlobalSearch(query) = &event {
             self.state.ui.active_search_tab = SearchTab::All;
             self.state.ui.selected_search_index = 0;
-            self.search_input = query.clone();
-            self.search_cursor = query.len();
+            self.pending_search_text = Some(query.clone());
             self.search_all_scroll
                 .set_offset(gpui::point(px(0.0), px(0.0)));
         }
@@ -925,6 +935,7 @@ fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-k", MoveTrackUp, LIST_KEYS),
         KeyBinding::new("shift-j", MoveTrackDown, LIST_KEYS),
     ]);
+    text_field::bind_keys(cx);
 }
 
 fn spawn_tray_listener(

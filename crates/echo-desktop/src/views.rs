@@ -347,8 +347,8 @@ fn rounded_content_frame(body: AnyElement, background: Hsla, border: Hsla) -> im
         )
 }
 
-/// The global search box. A minimal hand-rolled input: gpui ships no text field, and query
-/// entry needs no more than append/backspace/submit.
+/// The global search box: a [`crate::text_field::TextField`] with Enter to search and Escape
+/// to clear, then leave.
 fn search_bar(
     app: &mut EchoApp,
     window: &mut Window,
@@ -360,7 +360,20 @@ fn search_bar(
     let muted = theme.text_muted.gpui(WINDOW_FG());
     let accent = theme.primary.gpui(WINDOW_FG());
     let focused = app.search_focus.is_focused(window);
-    let query = app.search_input.clone();
+    let pending = app.pending_search_text.take();
+    let placeholder = tr(&app.state, "desktop.search_placeholder");
+    let colors = crate::text_field::TextFieldColors {
+        placeholder: muted,
+        caret: fg,
+        selection: accent.opacity(0.3),
+    };
+    let query = app.search_field.update(cx, |field, _| {
+        if let Some(text) = pending {
+            field.set_text(&text);
+        }
+        field.configure(placeholder, colors);
+        field.text().to_string()
+    });
     let collapsed = app.sidebar_collapsed;
     let nav_cluster = collapsed.then(|| nav_button_cluster(app, cx).into_any_element());
     let recent = focused.then(|| search::recent_searches(app, cx)).flatten();
@@ -388,7 +401,6 @@ fn search_bar(
             div()
                 .id("search-box")
                 .key_context(crate::SEARCH_CONTEXT)
-                .track_focus(&app.search_focus)
                 .relative()
                 .children(recent)
                 .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
@@ -417,29 +429,14 @@ fn search_bar(
                         .h(px(14.0))
                         .text_color(muted),
                 )
-                .child(if query.is_empty() {
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(tr(&app.state, "desktop.search_placeholder"))
-                        .into_any_element()
-                } else {
+                .child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .text_sm()
                         .text_color(fg)
-                        .whitespace_nowrap()
-                        .overflow_hidden()
-                        .child(SharedString::from(if focused {
-                            crate::text_with_cursor(&query, app.search_cursor)
-                        } else {
-                            query.clone()
-                        }))
-                        .into_any_element()
-                })
+                        .child(app.search_field.clone()),
+                )
                 .when(!query.is_empty(), |el| {
                     el.child(
                         div()
@@ -449,8 +446,7 @@ fn search_bar(
                             .rounded_full()
                             .hover(move |s| s.bg(palette.wash))
                             .on_click(cx.listener(|this: &mut EchoApp, _, window, cx| {
-                                this.search_input.clear();
-                                this.search_cursor = 0;
+                                this.search_field.update(cx, |field, _| field.set_text(""));
                                 window.focus(&this.search_focus, cx);
                                 cx.stop_propagation();
                                 cx.notify();

@@ -291,42 +291,31 @@ impl EchoApp {
         cx.notify();
     }
 
-    /// Enter/escape and typing for the search box, which owns key handling while focused.
+    /// Enter and Escape for the search box; editing is the field's own.
     pub(crate) fn handle_search_key(
         &mut self,
         event: &gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let field = self.search_field.read(cx);
+        if field.is_composing() {
+            return;
+        }
+        let empty = field.text().is_empty();
         match event.keystroke.key.as_str() {
             "enter" => {
-                let query = self.search_input.clone();
+                let query = field.text().to_string();
                 if let Some(event) = echo_core::intent::global_search(&mut self.state, &query) {
                     self.dispatch(event);
                 }
                 window.focus(&self.focus_handle, cx);
             }
-            "escape" => {
-                if self.search_input.is_empty() {
-                    window.focus(&self.focus_handle, cx);
-                } else {
-                    self.search_input.clear();
-                    self.search_cursor = 0;
-                }
-            }
-            // Spaces are kept — unlike the credential fields, a query is words — but newlines
-            // are dropped so a copied line does not smuggle one into the search term.
-            "v" if is_paste_chord(&event.keystroke.modifiers) => {
-                if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                    let filtered: String =
-                        text.chars().filter(|c| *c != '\r' && *c != '\n').collect();
-                    insert_at_cursor(&mut self.search_input, &mut self.search_cursor, &filtered);
-                }
-            }
-            _ => {
-                apply_text_edit(&mut self.search_input, &mut self.search_cursor, event);
-            }
+            "escape" if empty => window.focus(&self.focus_handle, cx),
+            "escape" => self.search_field.update(cx, |field, _| field.set_text("")),
+            _ => return,
         }
+        cx.stop_propagation();
         cx.notify();
     }
 }
