@@ -27,6 +27,7 @@ mod playlist_edit;
 mod queue;
 mod search;
 mod setup;
+mod shelf;
 mod sidebar;
 mod track_list;
 use artist::*;
@@ -46,6 +47,7 @@ pub(crate) use modals::*;
 pub use playlist_edit::{playlist_edit_modal, playlist_page_menu};
 use queue::*;
 use setup::*;
+use shelf::*;
 pub(crate) use sidebar::*;
 pub(crate) use track_list::*;
 

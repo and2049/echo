@@ -397,6 +397,9 @@ pub fn all_results(
         &app.state.ui.search_context_query,
     );
     app.search_all_positions = vec![(0, None); rows.len()];
+    let theme = &app.state.ui.active_theme;
+    let palette = DesktopPalette::resolve(theme);
+    let accent = theme.primary.gpui(WINDOW_FG());
     let narrow = app.main_content_width(window) < 620.0;
     let mut top_band = div().flex().gap_4().when(narrow, |el| el.flex_col());
     if let Some(row) = rows.first()
@@ -438,6 +441,9 @@ pub fn all_results(
         .flex_col()
         .gap_6()
         .overflow_y_scroll()
+        // A sideways swipe over a shelf scrolls the shelf; without this the page would take
+        // the horizontal motion as vertical too.
+        .restrict_scroll_to_axis()
         .track_scroll(&app.search_all_scroll)
         .child(top_band.flex_none().px_4());
     let mut section = 1;
@@ -456,14 +462,7 @@ pub fn all_results(
             continue;
         }
         let scroll = app.search_section_scrolls.entry(tab).or_default().clone();
-        let mut card_row = div()
-            .id("cards")
-            .flex()
-            .gap_3()
-            // Keep spacing inside the scrolling viewport so artwork clips at the page edge.
-            .px_4()
-            .overflow_x_scroll()
-            .track_scroll(&scroll);
+        let mut card_row = super::shelf_row("cards", &scroll, cx);
         for (flat, row) in cards {
             app.search_all_positions[flat] = (section, Some((tab, row.index)));
             let Some(item) = search_row_item(&app.state.data.search_results, row) else {
@@ -501,7 +500,8 @@ pub fn all_results(
                 .flex_col()
                 .gap_3()
                 .child(div().px_4().child(section_title(app, key, tab, cx)))
-                .child(card_row),
+                .child(card_row)
+                .child(super::shelf_scrollbar(scroll, palette, accent, cx)),
         );
         section += 1;
     }

@@ -182,59 +182,6 @@ pub(super) fn home_card(
     }
 }
 
-/// Horizontal scrollbar under a Home shelf, colored like the seek bar: `border` track,
-/// `accent` thumb.
-fn home_scrollbar(
-    scroll: gpui::ScrollHandle,
-    palette: DesktopPalette,
-    accent: Hsla,
-    cx: &mut Context<EchoApp>,
-) -> impl IntoElement {
-    let paint_scroll = scroll.clone();
-    div()
-        .id("home-scrollbar")
-        .h(px(12.0))
-        .w_full()
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this: &mut EchoApp, event: &MouseDownEvent, _, cx| {
-                this.begin_shelf_scrub(scroll.clone(), event.position.x);
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
-        .child(
-            canvas(
-                |_, _, _| (),
-                move |bounds, _, window, _| {
-                    let max = f32::from(paint_scroll.max_offset().x);
-                    if max <= 0.0 {
-                        return;
-                    }
-                    let width = f32::from(bounds.size.width);
-                    let thumb = (width * width / (width + max)).max(24.0).min(width);
-                    let left = -f32::from(paint_scroll.offset().x) / max * (width - thumb);
-                    window.paint_quad(gpui::fill(
-                        gpui::Bounds::new(
-                            bounds.origin + gpui::point(px(0.0), px(4.0)),
-                            gpui::size(bounds.size.width, px(4.0)),
-                        ),
-                        palette.border,
-                    ));
-                    window.paint_quad(gpui::fill(
-                        gpui::Bounds::new(
-                            bounds.origin + gpui::point(px(left), px(4.0)),
-                            gpui::size(px(thumb), px(4.0)),
-                        ),
-                        accent,
-                    ));
-                },
-            )
-            .size_full(),
-        )
-}
-
 pub(super) fn home_view(
     app: &mut EchoApp,
     window: &mut Window,
@@ -264,6 +211,9 @@ pub(super) fn home_view(
         .min_h_0()
         .w_full()
         .overflow_y_scroll()
+        // A sideways swipe over a shelf scrolls the shelf; without this the page would take
+        // the horizontal motion as vertical too.
+        .restrict_scroll_to_axis()
         .track_scroll(&app.home_scroll)
         // Shelves clip at the main area's edge; only non-scrolling content is inset.
         .py_4()
@@ -348,31 +298,11 @@ pub(super) fn home_view(
             .entry(shelf.kind)
             .or_default()
             .clone();
-        let wheel_scroll = scroll.clone();
-        let mut row = div()
-            .id(SharedString::from(format!("home-shelf-{:?}", shelf.kind)))
-            .flex()
-            .gap_3()
-            // Scroll the end spacing with the cards instead of clipping before the gutter.
-            .px_4()
-            .overflow_x_scroll()
-            .restrict_scroll_to_axis()
-            .track_scroll(&scroll)
-            .on_scroll_wheel(cx.listener(
-                move |_: &mut EchoApp, event: &gpui::ScrollWheelEvent, window, cx| {
-                    if event.modifiers.shift {
-                        let delta = event.delta.pixel_delta(window.line_height());
-                        let x = wheel_scroll.offset().x
-                            + if delta.x != px(0.0) { delta.x } else { delta.y };
-                        wheel_scroll.set_offset(gpui::point(
-                            x.clamp(-wheel_scroll.max_offset().x, px(0.0)),
-                            px(0.0),
-                        ));
-                        cx.stop_propagation();
-                        cx.notify();
-                    }
-                },
-            ));
+        let mut row = shelf_row(
+            SharedString::from(format!("home-shelf-{:?}", shelf.kind)),
+            &scroll,
+            cx,
+        );
         for item in shelf.items {
             row = row.child(home_card(app, item, index, false, None, cx));
             index += 1;
@@ -394,7 +324,7 @@ pub(super) fn home_view(
                         .child(tr(&app.state, shelf.kind.title_key())),
                 )
                 .child(row)
-                .child(home_scrollbar(scroll, palette, accent, cx)),
+                .child(shelf_scrollbar(scroll, palette, accent, cx)),
         );
     }
     echo_core::thumbnails::drain_pending(&mut app.state, &app.worker_tx);
